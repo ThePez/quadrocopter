@@ -10,6 +10,7 @@
 
 #include "nrf24l01plus.h"
 
+#include "driver/gpio.h"
 #include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -17,10 +18,10 @@
 #include <stdio.h>
 #include <string.h>
 
-#define DEFAULT_RF_CHANNEL 40                            // Default radio channel
-uint8_t default_addr[] = {0x12, 0x34, 0x56, 0x78, 0x90}; // Default address with MSB first
+#define DEFAULT_RF_CHANNEL 40                                   // Default radio channel
+static uint8_t default_addr[] = {0x12, 0x34, 0x56, 0x78, 0x90}; // Default address with MSB first
 
-spi_device_handle_t radio_spi_handle;
+static spi_device_handle_t radio_spi_handle;
 
 /* nrf24l01plus_spi_init()
  * -----------------------
@@ -28,10 +29,14 @@ spi_device_handle_t radio_spi_handle;
  */
 void nrf24l01plus_spi_init(spi_host_device_t spi_bus) {
     // Setup the SPI for the radio module
-    spi_device_interface_config_t device_config = {.clock_speed_hz = 1000000, // 1 MHz
-                                                   .mode = 0,
-                                                   .spics_io_num = NRF24L01PLUS_CS_PIN, // CS pin for device
-                                                   .queue_size = 1};
+
+    spi_device_interface_config_t device_config = {
+        .clock_speed_hz = 1000000,           // 1 MHz Clock speed
+        .spics_io_num = NRF24L01PLUS_CS_PIN, // Chip Select pin for device
+        .queue_size = 1,                     // Number of pending transactions allowed
+        .mode = 0 /* SPI mode, representing a pair of (CPOL, CPHA). CPOL = 0 (clock idles low)
+                    CPHA = 0 (data is sampled on the rising edge, changed on the falling edge) */
+    };
 
     ESP_ERROR_CHECK(spi_bus_add_device(spi_bus, &device_config, &radio_spi_handle));
 }
