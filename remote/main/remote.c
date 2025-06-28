@@ -4,6 +4,6 @@
 
 void app_main(void)
 {
-    radio_send("Hello world\r\n");
+    nrf24l01plus_init(SPI2_HOST);
 }
 
