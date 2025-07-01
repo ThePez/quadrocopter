@@ -3,7 +3,7 @@
  * File: nrf24l01plus.c
  * Author: Jack Cairns
  * Date: 27-06-2025
- * Brief: Driver for the NRF24L01plus module. Contains various functions 
+ * Brief: Driver for the NRF24L01plus module. Contains various functions
  * REFERENCE: NRF24L01plus data sheet for timings, register addresses & values
  ******************************************************************************
  */
@@ -89,7 +89,7 @@ void nrf24l01plus_write_register(uint8_t reg_addr, uint8_t val) {
     uint8_t tx_buffer[2] = {NRF24L01PLUS_WRITE_REG | reg_addr, val};
     spi_transaction_t transaction = {
         .length = 16,            // Transaction length in bits
-        .tx_buffer = &tx_buffer, // Pointer to transmit buffer
+        .tx_buffer = tx_buffer, // Pointer to transmit buffer
         .rx_buffer = NULL,       // Pointer to receive buffer
     };
 
@@ -111,9 +111,9 @@ uint8_t nrf24l01plus_read_register(uint8_t reg_addr) {
     uint8_t tx_buffer[2] = {reg_addr, 0xFF};
     uint8_t rx_buffer[2];
     spi_transaction_t transaction = {
-        .length = 16,            // Transaction length in bits
-        .tx_buffer = &tx_buffer, // Pointer to transmit buffer
-        .rx_buffer = rx_buffer,  // Pointer to receive buffer
+        .length = 16,           // Transaction length in bits
+        .tx_buffer = tx_buffer, // Pointer to transmit buffer
+        .rx_buffer = rx_buffer, // Pointer to receive buffer
     };
 
     ESP_ERROR_CHECK(spi_device_transmit(radio_spi_handle, &transaction));
@@ -138,7 +138,7 @@ void nrf24l01plus_write_buffer(uint8_t reg_addr, uint8_t* buffer, int buffer_len
 
     spi_transaction_t transaction = {
         .length = (buffer_len + 1) * 8, // Transaction length in bits
-        .tx_buffer = &tx_buffer,        // Pointer to transmit buffer
+        .tx_buffer = tx_buffer,        // Pointer to transmit buffer
         .rx_buffer = NULL,              // Pointer to receive buffer
     };
 
