@@ -15,8 +15,8 @@
 
 #include "driver/spi_master.h"
 
-#define NRF24L01PLUS_CS_PIN 5
-#define NRF24L01PLUS_CE_PIN 6
+#define NRF24L01PLUS_CS_PIN 26
+#define NRF24L01PLUS_CE_PIN 27
 
 #define NRF24L01PLUS_TX_ADR_WIDTH 5    // 5 unsigned chars TX(RX) address width
 #define NRF24L01PLUS_TX_PLOAD_WIDTH 32 // 32 unsigned chars TX payload
@@ -93,8 +93,8 @@ void nrf24l01plus_write_buffer(uint8_t reg_addr, uint8_t* buffer, int buffer_len
 void nrf24l01plus_read_buffer(uint8_t reg_addr, uint8_t* buffer, int buffer_len);
 int nrf24l01plus_recieve_packet(uint8_t* rx_buf);
 void nrf24l01plus_send_packet(uint8_t* tx_buf);
-void nrf24l01plus_ce(void);
-void nrf24l01plus_cepin(void);
+void nrf24l01plus_recieve_mode(void);
+void nrf24l01plus_send_mode(void);
 int nrf24l01plus_txFifoEmpty(void);
 int nrf24l01plus_rxFifoEmpty(void);
 
