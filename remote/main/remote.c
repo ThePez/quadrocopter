@@ -135,12 +135,12 @@ void print_task_stats(void) {
     vPortFree(taskListBuffer);
 }
 
-void encode_radio_transmition(uint8_t* input, uint8_t* output) {
+// void encode_radio_transmition(uint8_t* input, uint8_t* output) {
 
-    uint16_t message[16];
-    for (int i = 0; i < NRF24L01PLUS_TX_PLOAD_WIDTH / 2; i++) {
-        message[i] = hamming_byte_encode(input[i]);
-    }
+//     uint16_t message[16];
+//     for (int i = 0; i < NRF24L01PLUS_TX_PLOAD_WIDTH / 2; i++) {
+//         message[i] = hamming_byte_encode(input[i]);
+//     }
 
-    output = 
-}
+//     // output = 
+// }
