@@ -89,9 +89,8 @@ void lis3dh_init(spi_host_device_t spi_bus);
 void lisPowerDown(void);
 uint8_t lisReadRegister(uint8_t addr);
 void lisWriteRegister(uint8_t addr, uint8_t data);
-void readAxisData(int16_t* x, int16_t* y, int16_t* z);
+void lisReadAxisData(int16_t* x, int16_t* y, int16_t* z);
 double getPitchAngle(void);
 double getRollAngle(void);
-uint8_t checkOrientation(int* direction);
 
 #endif

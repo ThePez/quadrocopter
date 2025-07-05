@@ -89,9 +89,9 @@ void gyro_init(spi_host_device_t spi_bus);
 void gyroPowerDown(void);
 uint8_t gyroReadRegister(uint8_t addr);
 void gyroWriteRegister(uint8_t addr, uint8_t data);
-void readAxisData(int16_t* x, int16_t* y, int16_t* z);
-double getPitchAngle(void);
-double getRollAngle(void);
+void gyroReadAxisData(int16_t* x, int16_t* y, int16_t* z);
+// double getPitchAngle(void);
+// double getRollAngle(void);
 
 
 #endif

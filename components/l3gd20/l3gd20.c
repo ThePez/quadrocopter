@@ -123,11 +123,11 @@ void gyroWriteRegister(uint8_t reg_addr, uint8_t data) {
     ESP_ERROR_CHECK(spi_device_transmit(gyro_spi_handle, &transaction));
 }
 
-/* readAxisData()
+/* gyroReadAxisData()
  * --------------
  * Function to read the raw data for all 3 axis from the GYRO
  */
-void readAxisData(int16_t* x, int16_t* y, int16_t* z) {
+void gyroReadAxisData(int16_t* x, int16_t* y, int16_t* z) {
 
     uint8_t tx_buffer[7] = {GYRO_OUT_X_L | GYRO_SPI_MULTI_READ};
     uint8_t rx_buffer[7];
@@ -144,28 +144,28 @@ void readAxisData(int16_t* x, int16_t* y, int16_t* z) {
     *z = (int16_t) (rx_buffer[6] << 8 | rx_buffer[5]);
 }
 
-/* getPitchAngle()
- * ---------------
- * Function will return the calculated pitch angle.
- */
-double getPitchAngle(void) {
-    int16_t x, y, z;
-    readAxisData(&x, &y, &z);
-    float accX = x / SENSITIVITY;
-    float accY = y / SENSITIVITY;
-    float accZ = z / SENSITIVITY;
-    return atan2(accY, sqrt(accX * accX + accZ * accZ)) * (180.0 / M_PI);
-}
+// /* getPitchAngle()
+//  * ---------------
+//  * Function will return the calculated pitch angle.
+//  */
+// double getPitchAngle(void) {
+//     int16_t x, y, z;
+//     gyroReadAxisData(&x, &y, &z);
+//     float accX = x / SENSITIVITY;
+//     float accY = y / SENSITIVITY;
+//     float accZ = z / SENSITIVITY;
+//     return atan2(accY, sqrt(accX * accX + accZ * accZ)) * (180.0 / M_PI);
+// }
 
-/* getRollAngle()
- * --------------
- * Function will return the calculated roll angle.
- */
-double getRollAngle(void) {
-    int16_t x, y, z;
-    readAxisData(&x, &y, &z);
-    float accX = x / SENSITIVITY;
-    float accY = y / SENSITIVITY;
-    float accZ = z / SENSITIVITY;
-    return atan2(-accX, sqrt(accY * accY + accZ * accZ)) * (180.0 / M_PI);
-}
+// /* getRollAngle()
+//  * --------------
+//  * Function will return the calculated roll angle.
+//  */
+// double getRollAngle(void) {
+//     int16_t x, y, z;
+//     gyroReadAxisData(&x, &y, &z);
+//     float accX = x / SENSITIVITY;
+//     float accY = y / SENSITIVITY;
+//     float accZ = z / SENSITIVITY;
+//     return atan2(-accX, sqrt(accY * accY + accZ * accZ)) * (180.0 / M_PI);
+// }

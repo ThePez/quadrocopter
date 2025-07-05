@@ -123,11 +123,11 @@ void lisWriteRegister(uint8_t reg_addr, uint8_t data) {
     ESP_ERROR_CHECK(spi_device_transmit(lis3dh_spi_handle, &transaction));
 }
 
-/* readAxisData()
+/* lisReadAxisData()
  * --------------
  * Function to read the raw data for all 3 axis from the LIS3DH
  */
-void readAxisData(int16_t* x, int16_t* y, int16_t* z) {
+void lisReadAxisData(int16_t* x, int16_t* y, int16_t* z) {
 
     uint8_t tx_buffer[7] = {LIS3DH_OUT_X_L | LIS3DH_SPI_MULTI_READ};
     uint8_t rx_buffer[7];
@@ -150,7 +150,7 @@ void readAxisData(int16_t* x, int16_t* y, int16_t* z) {
  */
 double getPitchAngle(void) {
     int16_t x, y, z;
-    readAxisData(&x, &y, &z);
+    lisReadAxisData(&x, &y, &z);
     float accX = x / SENSITIVITY;
     float accY = y / SENSITIVITY;
     float accZ = z / SENSITIVITY;
@@ -163,28 +163,9 @@ double getPitchAngle(void) {
  */
 double getRollAngle(void) {
     int16_t x, y, z;
-    readAxisData(&x, &y, &z);
+    lisReadAxisData(&x, &y, &z);
     float accX = x / SENSITIVITY;
     float accY = y / SENSITIVITY;
     float accZ = z / SENSITIVITY;
     return atan2(-accX, sqrt(accY * accY + accZ * accZ)) * (180.0 / M_PI);
-}
-
-/* checkOrientation()
- * ------------------
- * Function to update the direction flag if the device is tilted past 40 degrees inline with the screen.
- */
-uint8_t checkOrientation(int* direction) {
-    double angle = getPitchAngle();
-    if (angle < -40 && *direction) {
-        // flip upside down
-        *direction = 0;
-        return 1;
-    }
-    if (angle > 40 && !*direction) {
-        // flip normal
-        *direction = 1;
-        return 1;
-    }
-    return 0;
 }
