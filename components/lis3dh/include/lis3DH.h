@@ -8,8 +8,8 @@
  ******************************************************************************
  */
 
-#ifndef LIS3DH_H_
-#define LIS3DH_H_
+#ifndef LIS3DH_H
+#define LIS3DH_H
 
 #include <stdint.h>
 
