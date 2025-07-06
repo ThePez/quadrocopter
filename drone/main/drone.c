@@ -18,6 +18,7 @@
 // ESP-IDF Prebuilts
 #include "driver/mcpwm_prelude.h"
 #include "driver/spi_master.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -48,6 +49,8 @@
 #define MOTOR_SPEED_MIN 1000
 #define MOTOR_SPEED_MAX 2000
 
+#define IMU_DT 5 // 5ms
+
 // Stack Sizes
 #define SYS_STACK (configMINIMAL_STACK_SIZE * 2)
 #define RADIO_STACK (configMINIMAL_STACK_SIZE * 2)
@@ -61,34 +64,55 @@
 
 typedef enum { MOTOR_A, MOTOR_B, MOROT_C, MOTOR_D } MotorIndex;
 
+typedef struct {
+    double kp;           // Proportional scaler
+    double ki;           // Intergral scaler
+    double kd;           // Derivative scaler
+    double intergral;    // running average total of the error
+    double prevError;    // previous error
+    uint64_t prevTimeUS; // Last update time in us
+} PID_t;
+
 ///////////////////////////////// Prototypes /////////////////////////////////
 
 // Task Function Prototypes
-void system_task(void);
+void flight_controller(void);
 void radio_task(void);
 void imu_task(void);
 
 // Setup Function Prototypes
 void spi_bus_setup(spi_host_device_t host);
-void print_task_stats(void);
 void esc_pwm_init(void);
 void esc_pwm_set_duty_cycle(uint8_t motor, uint16_t duty_cycle);
+void decode_packet(void* input, void* output);
+void print_task_stats(void);
 
 ////////////////////////////// Global Variables //////////////////////////////
 
+// Task Handles
 TaskHandle_t systemTask = NULL;
 TaskHandle_t radioTask = NULL;
 TaskHandle_t accelTask = NULL;
-// Queue for remote control inputs
+
+// Queue's Used by the tasks
 QueueHandle_t radioQueue = NULL;
+QueueHandle_t imuQueue = NULL;
+
 // Each comparator controls the duty cycle of each PWM signal for the ESC's
 mcpwm_cmpr_handle_t esc_pwm_comparators[4] = {NULL};
+
+uint64_t previousAngleTime = 0;
+
+// PID_t structs for each of the directions
+PID_t pitchPID = {.kp = 0.9, .ki = 0.5, .kd = 0.5};
+PID_t rollPID = {.kp = 0.9, .ki = 0.5, .kd = 0.5};
+PID_t yawPID = {.kp = 0.9, .ki = 0.5, .kd = 0.5};
 
 //////////////////////////////////////////////////////////////////////////////
 
 void app_main(void) {
 
-    xTaskCreate((void*) &system_task, "SYS_CONTROL", SYS_STACK, NULL, SYS_PRIO, &systemTask);
+    xTaskCreate((void*) &flight_controller, "FC_Task", SYS_STACK, NULL, SYS_PRIO, &systemTask);
     xTaskCreate((void*) &radio_task, "RADIO", RADIO_STACK, NULL, RADIO_PRIO, &radioTask);
     xTaskCreate((void*) &imu_task, "IMU", LIS_STACK, NULL, LIS_PRIO, &accelTask);
 
@@ -98,10 +122,37 @@ void app_main(void) {
     }
 }
 
-void system_task(void) {
+void flight_controller(void) {
+
+    while (!imuQueue && !radioQueue) {
+        // Wait until both input queues are created
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    QueueSetHandle_t controlLoopSet = xQueueCreateSet(10);
+    xQueueAddToSet(radioQueue, controlLoopSet);
+    xQueueAddToSet(imuQueue, controlLoopSet);
+    float remoteInputs[5] = {1000, 0, 0, 0, 0};
+    double imuInputs[5] = {0}; // 0-2: GYRO -> change in x,y,z | 3-4: LIS -> pitch & roll current
 
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(500));
+
+        QueueSetMemberHandle_t xActivatedMember;
+        if (controlLoopSet) {
+            xActivatedMember = xQueueSelectFromSet(controlLoopSet, portMAX_DELAY);
+
+            // Update remote inputs
+            if (xActivatedMember == radioQueue) {
+                xQueueReceive(radioQueue, remoteInputs, 0);
+                printf("Remote Data Updated\r\n");
+            }
+            // New position data arrived, run PID loop and update ESC's
+            else if (xActivatedMember == imuQueue) {
+                xQueueReceive(imuQueue, imuInputs, 0);
+                printf("PID Loop Run\r\nGyro x: %lf, y: %lf, z: %lf\t LIS pitch: %lf, roll: %lf\r\n", imuInputs[0],
+                       imuInputs[1], imuInputs[2], imuInputs[3], imuInputs[4]);
+            }
+        }
     }
 }
 
@@ -120,33 +171,72 @@ void radio_task(void) {
 
     // Setup variables
     uint8_t rx_buffer[32];
-    radioQueue = xQueueCreate(5, sizeof(rx_buffer));
+    uint8_t decodedPacket[16];
+    float inputs[5];
+    while (!radioQueue) {
+        // Loop to ensure the radio queue is created
+        radioQueue = xQueueCreate(5, sizeof(inputs));
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
     printf("NRF24L01+ RX listening...\n");
 
     while (1) {
         if (nrf24l01plus_recieve_packet(rx_buffer) && radioQueue) {
-            xQueueSendToFront(radioQueue, rx_buffer, pdMS_TO_TICKS(5));
+            // Decode packet
+            decode_packet((void*) rx_buffer, (void*) decodedPacket);
+            // Move into float space
+            memcpy(inputs, decodedPacket, sizeof(decodedPacket));
+            // Send input data to FC
+            xQueueSendToFront(radioQueue, inputs, pdMS_TO_TICKS(5));
         }
 
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
-
-    // Should the loop be broken, cleanup memory.
-    vQueueDelete(radioQueue);
-    radioTask = NULL;
-    radioQueue = NULL;
-    vTaskDelete(NULL);
 }
 
+/* imu_task()
+ * ----------
+ * Task to read the telemetry data from the LIS3DH and L3GD20 sensors. This data is then
+ * sent to the flight controller.
+ */
 void imu_task(void) {
+
+    // Setup variables
+    int16_t x, y, z;
+    double gyroX, gyroY, gyroZ, pitch, roll;
+    double inputs[5] = {gyroX, gyroY, gyroZ, pitch, roll};
+
+    while (!imuQueue) {
+        // Loop to ensure the imu queue is created
+        imuQueue = xQueueCreate(5, sizeof(inputs));
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
 
     spi_bus_setup(HSPI_HOST);
     lis3dh_init(HSPI_HOST);
     gyro_init(HSPI_HOST);
 
     while (1) {
+        
+        lisReadAxisData(&x, &y, &z);
+        // Get Pitch angle from accelerometer
+        pitch = getPitchAngle(x, y, z);
+        // Get roll angle from accelerometer
+        roll = getRollAngle(x, y, z);
+        // Get the axis data from the gyroscope
+        gyroReadAxisData(&x, &y, &z);
+        gyroX = (double) x;
+        gyroY = (double) y;
+        gyroZ = (double) z;
 
-        vTaskDelay(pdMS_TO_TICKS(500));
+        // Send data to the Flight controller for processing
+        if (imuQueue) {
+            xQueueSendToFront(imuQueue, inputs, pdMS_TO_TICKS(1));
+        }
+
+        // Repeat this vey quickly
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
 
@@ -169,23 +259,6 @@ void spi_bus_setup(spi_host_device_t host) {
 
     ESP_ERROR_CHECK(spi_bus_initialize(host, &bus_config, SPI_DMA_CH_AUTO));
     spiBusInitialised = 1;
-}
-
-void print_task_stats(void) {
-
-    uint16_t numTasks = uxTaskGetNumberOfTasks();
-    uint16_t bufferLength = numTasks * 50;
-    char* taskListBuffer = pvPortMalloc(bufferLength * sizeof(char));
-    if (taskListBuffer == NULL) {
-        return; // Malloc Failed
-    }
-
-    vTaskList(taskListBuffer);
-    printf("\r\nTask          State  Priority   Stack\tID\r\n");
-    printf("=============================================\r\n");
-    printf("%s\r\n", taskListBuffer);
-    // Free memory
-    vPortFree(taskListBuffer);
 }
 
 /* esc_pwm_init()
@@ -268,9 +341,76 @@ void esc_pwm_init(void) {
 void esc_pwm_set_duty_cycle(uint8_t motor, uint16_t duty_cycle) {
 
     // Limits on the inputs
-    if (motor > 3 || duty_cycle > 20000) {
+    if (motor > 3 || duty_cycle > 2000 || duty_cycle < 1000) {
         return;
     }
 
     ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(esc_pwm_comparators[motor], duty_cycle));
+}
+
+void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawPID) {
+
+    double motorA = throttle - pitchPID + rollPID + yawPID; // Front left (CW)
+    double motorB = throttle + pitchPID + rollPID - yawPID; // Rear left (CCW)
+    double motorC = throttle + pitchPID - rollPID + yawPID; // Rear right (CW)
+    double motorD = throttle - pitchPID - rollPID - yawPID; // Front right (CCW)
+    uint16_t speeds[4] = {(uint16_t) motorA, (uint16_t) motorB, (uint16_t) motorC, (uint16_t) motorD};
+
+    for (uint8_t i = 0; i < 4; i++) {
+        esc_pwm_set_duty_cycle(i, speeds[i]);
+    }
+}
+
+double calculate_angle_from_rate(double rate) {
+
+    uint64_t now = esp_timer_get_time();
+    // uint64_t dt = now - previousAngleTime * 1000 * 1000; // Seconds
+    previousAngleTime = now;
+    return 0.0;
+}
+
+double pid_update(PID_t* pid, double error) {
+
+    uint64_t nowUS = esp_timer_get_time();
+
+    if (pid->prevTimeUS == 0) {
+        pid->prevTimeUS = nowUS;
+        return 0.0;
+    }
+
+    uint64_t dt = nowUS - pid->prevTimeUS;
+    pid->prevTimeUS = nowUS;
+
+    double derivative = (error - pid->prevError) / dt;
+
+    pid->prevError = error;
+    pid->intergral += error * dt;
+
+    double output = pid->kp * error + pid->ki * pid->intergral + pid->kd * derivative;
+    return output;
+}
+
+void decode_packet(void* input, void* output) {
+    uint16_t* in = (uint16_t*) input;
+    uint8_t* out = (uint8_t*) output;
+    for (uint8_t i = 0; i < NRF24L01PLUS_TX_PLOAD_WIDTH / 2; i++) {
+        out[i] = hamming_word_decode(in[i]);
+    }
+}
+
+void print_task_stats(void) {
+
+    uint16_t numTasks = uxTaskGetNumberOfTasks();
+    uint16_t bufferLength = numTasks * 50;
+    char* taskListBuffer = pvPortMalloc(bufferLength * sizeof(char));
+    if (taskListBuffer == NULL) {
+        return; // Malloc Failed
+    }
+
+    vTaskList(taskListBuffer);
+    printf("\r\nTask          State  Priority   Stack\tID\r\n");
+    printf("=============================================\r\n");
+    printf("%s\r\n", taskListBuffer);
+    // Free memory
+    vPortFree(taskListBuffer);
 }
