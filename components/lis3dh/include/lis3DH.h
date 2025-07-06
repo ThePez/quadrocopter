@@ -26,8 +26,8 @@
 #define LIS3DH_SPI_WRITE 0x7F
 // Auto-increment for multi-byte read
 #define LIS3DH_SPI_MULTI_READ 0xC0
-//Axis Data length
-#define LIS3DH_AXIS_DATA_LENGTH 6
+// Axis Data length
+#define LIS3DH_AXIS_DATA_LENGTH 7
 
 // Control Register 1 bits
 #define CTRL_REG1_ODR3 0x80
@@ -69,8 +69,9 @@
 #define LIS3DH_OUT_Z_L 0x2C
 #define LIS3DH_OUT_Z_H 0x2D
 
-// 16 bit range / 2G
-#define SENSITIVITY 16384.0
+// 12 bit range / 2G
+#define LIS3DH_SENSITIVITY_2G 1.0 // mg/LSB
+// #define SENSITIVITY 16384.0 
 
 // Status Enum
 typedef enum {
@@ -90,7 +91,7 @@ void lisPowerDown(void);
 uint8_t lisReadRegister(uint8_t addr);
 void lisWriteRegister(uint8_t addr, uint8_t data);
 void lisReadAxisData(int16_t* x, int16_t* y, int16_t* z);
-double getPitchAngle(void);
-double getRollAngle(void);
+double getPitchAngle(int16_t x, int16_t y, int16_t z);
+double getRollAngle(int16_t x, int16_t y, int16_t z);
 
 #endif

@@ -22,7 +22,7 @@
  */
 uint16_t hamming_byte_encode(uint8_t value) {
 
-    uint16_t encodedResult = hamming_nibble_encode(value & 0xF);
+    uint16_t encodedResult = hamming_nibble_encode(value & 0x0F);
     encodedResult |= hamming_nibble_encode(value >> 4) << 8;
     return encodedResult;
 }

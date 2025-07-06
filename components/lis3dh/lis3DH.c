@@ -65,7 +65,7 @@ void lis3dh_init(spi_host_device_t spi_bus) {
         lisWriteRegister(LIS3DH_CTRL_REG1, 0x57);
         lisWriteRegister(LIS3DH_CTRL_REG2, 0x00); // No HighPass filter
         lisWriteRegister(LIS3DH_CTRL_REG3, 0x00); // No interrupts
-        lisWriteRegister(LIS3DH_CTRL_REG4, 0x00); // defaults
+        lisWriteRegister(LIS3DH_CTRL_REG4, 0x08); // High resolution
         lisWriteRegister(LIS3DH_CTRL_REG5, 0x00); // defaults
         lisWriteRegister(LIS3DH_CTRL_REG6, 0x00); // defaults
         printf(lis_strings[0]);
@@ -113,7 +113,7 @@ uint8_t lisReadRegister(uint8_t reg_addr) {
  */
 void lisWriteRegister(uint8_t reg_addr, uint8_t data) {
 
-    uint8_t tx_buffer[2] = {LIS3DH_SPI_WRITE | reg_addr, data};
+    uint8_t tx_buffer[2] = {LIS3DH_SPI_WRITE & reg_addr, data};
     spi_transaction_t transaction = {
         .length = 16,           // Transaction length in bits
         .tx_buffer = tx_buffer, // Pointer to transmit buffer
@@ -139,33 +139,49 @@ void lisReadAxisData(int16_t* x, int16_t* y, int16_t* z) {
 
     ESP_ERROR_CHECK(spi_device_transmit(lis3dh_spi_handle, &transaction));
 
-    *x = (int16_t) (rx_buffer[2] << 8 | rx_buffer[1]);
-    *y = (int16_t) (rx_buffer[4] << 8 | rx_buffer[3]);
-    *z = (int16_t) (rx_buffer[6] << 8 | rx_buffer[5]);
+    int16_t rawX = (rx_buffer[2] << 8 | rx_buffer[1]);
+    int16_t rawY = (rx_buffer[4] << 8 | rx_buffer[3]);
+    int16_t rawZ = (rx_buffer[6] << 8 | rx_buffer[5]);
+
+    // Adjust the values for the Left justification of a 12bit number
+    rawX >>= 4;
+    rawY >>= 4;
+    rawZ >>= 4;
+    if (rawX & 0x0800) {
+        rawX |= 0xF000;
+    }
+
+    if (rawY & 0x0800) {
+        rawY |= 0xF000;
+    }
+
+    if (rawZ & 0x0800) {
+        rawZ |= 0xF000;
+    }
+
+    *x = rawX;
+    *y = rawY;
+    *z = rawZ;
 }
 
 /* getPitchAngle()
  * ---------------
  * Function will return the calculated pitch angle.
  */
-double getPitchAngle(void) {
-    int16_t x, y, z;
-    lisReadAxisData(&x, &y, &z);
-    float accX = x / SENSITIVITY;
-    float accY = y / SENSITIVITY;
-    float accZ = z / SENSITIVITY;
-    return atan2(accY, sqrt(accX * accX + accZ * accZ)) * (180.0 / M_PI);
+double getPitchAngle(int16_t x, int16_t y, int16_t z) {
+    double accX = x * LIS3DH_SENSITIVITY_2G / 1000.0;
+    double accY = y * LIS3DH_SENSITIVITY_2G / 1000.0;
+    double accZ = z * LIS3DH_SENSITIVITY_2G / 1000.0;
+    return atan2(accY, sqrt(pow(accX, 2) + pow(accZ, 2))) * (180.0 / M_PI);
 }
 
 /* getRollAngle()
  * --------------
  * Function will return the calculated roll angle.
  */
-double getRollAngle(void) {
-    int16_t x, y, z;
-    lisReadAxisData(&x, &y, &z);
-    float accX = x / SENSITIVITY;
-    float accY = y / SENSITIVITY;
-    float accZ = z / SENSITIVITY;
-    return atan2(-accX, sqrt(accY * accY + accZ * accZ)) * (180.0 / M_PI);
+double getRollAngle(int16_t x, int16_t y, int16_t z) {
+    double accX = x * LIS3DH_SENSITIVITY_2G / 1000.0;
+    double accY = y * LIS3DH_SENSITIVITY_2G / 1000.0;
+    double accZ = z * LIS3DH_SENSITIVITY_2G / 1000.0;
+    return atan2(-accX, sqrt(pow(accY, 2) + pow(accZ, 2))) * (180.0 / M_PI);
 }
