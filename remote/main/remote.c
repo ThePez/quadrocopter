@@ -16,14 +16,18 @@
 // Prebuilts
 #include "driver/spi_master.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+
 // Custom Components
 #include "hamming.h"
+#include "mcp3208.h"
 #include "nrf24l01plus.h"
 
-// Defines //
+/////////////////////////////////// Defines //////////////////////////////////
 
+// SPI Pins
 #define HSPI_MISO 12
 #define HSPI_MOSI 13
 #define HSPI_CLK 14
@@ -37,75 +41,159 @@
 #define JOYSTICK_PRIO (tskIDLE_PRIORITY + 4)
 #define RADIO_PRIO (tskIDLE_PRIORITY + 3)
 
+#define MAX_ANGLE (30.0)
+#define MIN_ANGLE (-30.0)
+#define ANGLE_RANGE (60.0)
+
+///////////////////////////// Structures & Enums /////////////////////////////
+
+///////////////////////////////// Prototypes /////////////////////////////////
+
 // Task Function Prototypes
-void system_task(void);
-void joystick_task(void);
+void remote_controller(void);
+void remote_input_task(void);
 void radio_remote_task(void);
 
-// Setup Function Prototypes
 void spi_bus_setup(spi_host_device_t host);
-void print_task_stats(void);
+void encode_packet(void* input, void* output);
 
-// Global Variables
+////////////////////////////// Global Variables //////////////////////////////
 TaskHandle_t systemTask = NULL;
 TaskHandle_t joystickTask = NULL;
 TaskHandle_t radioTask = NULL;
+QueueHandle_t radioQueue = NULL;
+QueueHandle_t inputQueue = NULL;
 
 //////////////////////////////////////////////////////////////////////////////
 
 void app_main(void) {
 
-    xTaskCreate((void*) &system_task, "SYS_CONTROL", SYS_STACK, NULL, SYS_PRIO, &systemTask);
-    xTaskCreate((void*) &joystick_task, "JOYSTICK", JOYSTICK_STACK, NULL, JOYSTICK_PRIO, &joystickTask);
+    xTaskCreate((void*) &remote_controller, "REMOTE_TASK", SYS_STACK, NULL, SYS_PRIO, &systemTask);
+    xTaskCreate((void*) &remote_input_task, "ADC_INPUTS", JOYSTICK_STACK, NULL, JOYSTICK_PRIO, &joystickTask);
     xTaskCreate((void*) &radio_remote_task, "RADIO_REMOTE", RADIO_STACK, NULL, RADIO_PRIO, &radioTask);
+
+}
+
+/* remote_controller()
+ * -------------------
+ * Controller task for the remote. Handle the processing of data from the ADC inputs, and 
+ * forwards the encoded packet to the radio for sending.
+ */
+void remote_controller(void) {
+
+    uint16_t adcValues[5] = {0};
+    uint8_t packet[32] = {0};
+    while (!inputQueue || !radioQueue) {
+        // Idle until both queue's are created
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
     while (1) {
-        // print_task_stats();
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        // Get adc values from the input queue
+        if (inputQueue && xQueueReceive(inputQueue, adcValues, portMAX_DELAY) == pdTRUE) {
+
+            float controlInputs[4];
+            // Throttle
+            // Convert slider. Base line is 1000us then add level * 100 for a range of 1000us to 2000us
+            controlInputs[3] = (float) adcValues[4] / 4.096f + 1000.0f;
+            // Pitch -> roll -> yaw
+            for (uint8_t i = 0; i < 3; i++) {
+                // Fix offset so that 2048 is 0 degrees, then convert number into degrees
+                controlInputs[i] = ((float) adcValues[0] - 2048.0f) / 68.267f;
+            }
+
+            // Store the float data into an array of bytes
+            uint8_t rawInput[16];
+            memcpy(rawInput, controlInputs, sizeof(controlInputs));
+            
+            // Encode the inputs via hamming
+            encode_packet((void*) rawInput, (void*) packet);
+
+            // Send the resulting packet to the radio task
+            if (radioQueue) {
+                xQueueSendToFront(radioQueue, packet, pdMS_TO_TICKS(5));
+            }
+         
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
 
-void system_task(void) {
+/* remote_input_task()
+ * -------------------
+ * Task handles the comunication with the MCP3208. This task requests the 5 channels of
+ * adc inputs be read. This data is then passed to the remote_controller task.
+ */
+void remote_input_task(void) {
+
+    uint16_t adcValues[5];
+    while (!inputQueue) {
+        // Loop to ensure the input queue is created
+        inputQueue = xQueueCreate(5, sizeof(adcValues));
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    spi_bus_setup(HSPI_HOST);
+    mcp3208_init(HSPI_HOST);
 
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(500));
+
+        for (uint8_t i = 0; i < 5; i++) {
+            // Channels 0 to 3 are joysticks, 4 is slider
+            adcValues[i] = mcp3208_read_adc_channel(i, 0);
+        }
+
+        if (inputQueue) {
+            xQueueSendToFront(inputQueue, adcValues, pdMS_TO_TICKS(10));
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 
-void joystick_task(void) {
-
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
-}
-
+/* radio_remote_task()
+ * -------------------
+ * Simple task that utilises the NRF24L01plus radio module to send messages. Task
+ * will wait on it's queue until a message is received, then proceed to send it.
+ */
 void radio_remote_task(void) {
 
+    uint8_t toSend[NRF24L01PLUS_TX_PLOAD_WIDTH]; // Storage buffer for messages to send
+    while (!radioQueue) {
+        // Loop to ensure the radio queue is created
+        radioQueue = xQueueCreate(2, sizeof(toSend));
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    // Initialise SPI host and setip the radio IC
     spi_bus_setup(HSPI_HOST);
     nrf24l01plus_init(HSPI_HOST);
 
-    uint8_t data[32];
-    memset(data, 0, sizeof(data));
+    while (1) {
 
-    const char* word = "Hello World!";
-    for (int i = 0; i < strlen(word); i++) {
-        uint16_t encodded = hamming_byte_encode(word[i]);
-        data[i * 2] = (uint8_t) encodded;
-        data[i * 2 + 1] = (uint8_t) (encodded >> 8);
-    }
-    
-    printf("Sending: ");
-    for (int i = 0; i < 32; i++) {
-        printf("%02x ", data[i]);
-    }
-    printf("\r\n");
+        // Task waits until it recieves a message to send
+        if (radioQueue && xQueueReceive(radioQueue, toSend, portMAX_DELAY) == pdTRUE) {
+            // Message has been recieved -> send it
+            nrf24l01plus_send_packet(toSend);
+        }
 
-    while (1) { 
-        nrf24l01plus_send_packet(data);
-        vTaskDelay(pdMS_TO_TICKS(500));
+        // Delay to ensure idle task can run to reset watchdog timer, might remove later
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
 
+/* spi_bus_setup()
+ * ---------------
+ * Function to setup the given SPI host for use. Can only be run once.
+ */
 void spi_bus_setup(spi_host_device_t host) {
+
+    static uint8_t spiInitialised = 0;
+
+    if (spiInitialised) {
+        return;
+    }
 
     spi_bus_config_t bus_config = {
         .miso_io_num = HSPI_MISO,
@@ -116,31 +204,18 @@ void spi_bus_setup(spi_host_device_t host) {
     };
 
     ESP_ERROR_CHECK(spi_bus_initialize(host, &bus_config, SPI_DMA_CH_AUTO));
+    spiInitialised = 1;
 }
 
-void print_task_stats(void) {
+/* encode_packet()
+ * ---------------
+ * Function to encode a packet of data.
+ */
+void encode_packet(void* input, void* output) {
+    uint16_t* out = (uint16_t*) output;
+    uint8_t* in = (uint8_t*) input;
 
-    uint16_t numTasks = uxTaskGetNumberOfTasks();
-    uint16_t bufferLength = numTasks * 50;
-    char* taskListBuffer = pvPortMalloc(bufferLength * sizeof(char));
-    if (taskListBuffer == NULL) {
-        return; // Malloc Failed
+    for (uint8_t i = 0; i < NRF24L01PLUS_TX_PLOAD_WIDTH / 2; i++) {
+        out[i] = hamming_byte_encode(in[i]);
     }
-
-    vTaskList(taskListBuffer);
-    printf("\r\nTask          State  Priority   Stack\tID\r\n");
-    printf("=============================================\r\n");
-    printf("%s\r\n", taskListBuffer);
-    // Free memory
-    vPortFree(taskListBuffer);
 }
-
-// void encode_radio_transmition(uint8_t* input, uint8_t* output) {
-
-//     uint16_t message[16];
-//     for (int i = 0; i < NRF24L01PLUS_TX_PLOAD_WIDTH / 2; i++) {
-//         message[i] = hamming_byte_encode(input[i]);
-//     }
-
-//     // output = 
-// }
