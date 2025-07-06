@@ -62,12 +62,11 @@ void gyro_init(spi_host_device_t spi_bus) {
     }
 
     if (status == GYROSUCCESS) {
-        gyroWriteRegister(GYRO_CTRL_REG1, 0x57);
-        gyroWriteRegister(GYRO_CTRL_REG2, 0x00); // No HighPass filter
-        gyroWriteRegister(GYRO_CTRL_REG3, 0x00); // No interrupts
-        gyroWriteRegister(GYRO_CTRL_REG4, 0x00); // defaults
-        gyroWriteRegister(GYRO_CTRL_REG5, 0x00); // defaults
-        gyroWriteRegister(GYRO_CTRL_REG6, 0x00); // defaults
+        gyroWriteRegister(GYRO_CTRL_REG1, 0x0F); // Normal mode, all axis enabled
+        gyroWriteRegister(GYRO_CTRL_REG2, 0x00); // Default
+        gyroWriteRegister(GYRO_CTRL_REG3, 0x00); // Default
+        gyroWriteRegister(GYRO_CTRL_REG4, 0x10); // 500 dps
+        gyroWriteRegister(GYRO_CTRL_REG5, 0x00); // Default
         printf(gyro_strings[0]);
     } else {
         printf(gyro_strings[1]);
@@ -113,7 +112,7 @@ uint8_t gyroReadRegister(uint8_t reg_addr) {
  */
 void gyroWriteRegister(uint8_t reg_addr, uint8_t data) {
 
-    uint8_t tx_buffer[2] = {GYRO_SPI_WRITE | reg_addr, data};
+    uint8_t tx_buffer[2] = {GYRO_SPI_WRITE & reg_addr, data};
     spi_transaction_t transaction = {
         .length = 16,           // Transaction length in bits
         .tx_buffer = tx_buffer, // Pointer to transmit buffer
@@ -143,29 +142,3 @@ void gyroReadAxisData(int16_t* x, int16_t* y, int16_t* z) {
     *y = (int16_t) (rx_buffer[4] << 8 | rx_buffer[3]);
     *z = (int16_t) (rx_buffer[6] << 8 | rx_buffer[5]);
 }
-
-// /* getPitchAngle()
-//  * ---------------
-//  * Function will return the calculated pitch angle.
-//  */
-// double getPitchAngle(void) {
-//     int16_t x, y, z;
-//     gyroReadAxisData(&x, &y, &z);
-//     float accX = x / SENSITIVITY;
-//     float accY = y / SENSITIVITY;
-//     float accZ = z / SENSITIVITY;
-//     return atan2(accY, sqrt(accX * accX + accZ * accZ)) * (180.0 / M_PI);
-// }
-
-// /* getRollAngle()
-//  * --------------
-//  * Function will return the calculated roll angle.
-//  */
-// double getRollAngle(void) {
-//     int16_t x, y, z;
-//     gyroReadAxisData(&x, &y, &z);
-//     float accX = x / SENSITIVITY;
-//     float accY = y / SENSITIVITY;
-//     float accZ = z / SENSITIVITY;
-//     return atan2(-accX, sqrt(accY * accY + accZ * accZ)) * (180.0 / M_PI);
-// }

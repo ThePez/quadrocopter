@@ -16,7 +16,7 @@
 #include "driver/spi_master.h"
 
 // SPI CS pin
-#define GYRO_CS_PIN 24
+#define GYRO_CS_PIN 33
 
 // Setup constants
 #define GYRO_WHO_AM_I_CONTENTS 0xD4
@@ -27,7 +27,7 @@
 // Auto-increment for multi-byte read
 #define GYRO_SPI_MULTI_READ 0xC0
 // Axis Data length
-#define GYRO_AXIS_DATA_LENGTH 6
+#define GYRO_AXIS_DATA_LENGTH 7
 
 // Control Register 1 bits
 #define GYRO_CTRL_REG1_ODR3 0x80
@@ -90,8 +90,5 @@ void gyroPowerDown(void);
 uint8_t gyroReadRegister(uint8_t addr);
 void gyroWriteRegister(uint8_t addr, uint8_t data);
 void gyroReadAxisData(int16_t* x, int16_t* y, int16_t* z);
-// double getPitchAngle(void);
-// double getRollAngle(void);
-
 
 #endif
