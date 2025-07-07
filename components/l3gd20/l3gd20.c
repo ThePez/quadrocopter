@@ -14,8 +14,8 @@
 #include <stdio.h>
 
 // Strings for IMU setup
-static const char* gyro_strings[3] = {"IMU Initialization Successful\n", "IMU Initialization Failed\n",
-                                     "Expected 0x33, got 0x%02X\n"};
+static const char* gyro_strings[3] = {"GYRO Initialization Successful\n", "GYRO Initialization Failed\n",
+                                     "Expected 0xD4, got 0x%02X\n"};
 
 // SPI device handle
 spi_device_handle_t gyro_spi_handle = NULL;
@@ -56,7 +56,7 @@ void gyro_init(spi_host_device_t spi_bus) {
     // Check the ID register
     GyroErrorCode status = GYROSUCCESS;
     uint8_t id = gyroReadRegister(GYRO_WHO_AM_I);
-    if (id != GYRO_WHO_AM_I_CONTENTS) {
+    if (!(id == GYRO_WHO_AM_I_CONTENTS_L3GD20_ID || id == GYRO_WHO_AM_I_CONTENTS_L3GD20H_ID)) {
         printf(gyro_strings[2], id);
         status = GYROWHOERROR;
     }

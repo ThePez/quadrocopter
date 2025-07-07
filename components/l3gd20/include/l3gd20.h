@@ -19,8 +19,8 @@
 #define GYRO_CS_PIN 33
 
 // Setup constants
-#define GYRO_WHO_AM_I_CONTENTS 0xD4
-
+#define GYRO_WHO_AM_I_CONTENTS_L3GD20_ID 0xD4
+#define GYRO_WHO_AM_I_CONTENTS_L3GD20H_ID 0xD7
 // Bits to set for SPI Read/Write
 #define GYRO_SPI_READ 0x80
 #define GYRO_SPI_WRITE 0x7F
@@ -69,8 +69,8 @@
 #define GYRO_OUT_Z_L 0x2C
 #define GYRO_OUT_Z_H 0x2D
 
-// 16 bit range / 2G
-#define SENSITIVITY 16384.0
+// 16 bit range / +/-500dps
+#define GYRO_SENSITIVITY 0.0175
 
 // Status Enum
 typedef enum {

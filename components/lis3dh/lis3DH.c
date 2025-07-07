@@ -14,7 +14,7 @@
 #include <stdio.h>
 
 // Strings for IMU setup
-static const char* lis_strings[3] = {"IMU Initialization Successful\n", "IMU Initialization Failed\n",
+static const char* lis_strings[3] = {"ACCEL Initialization Successful\n", "ACCEL Initialization Failed\n",
                                      "Expected 0x33, got 0x%02X\n"};
 
 // SPI device handle
@@ -172,7 +172,7 @@ double getPitchAngle(int16_t x, int16_t y, int16_t z) {
     double accX = x * LIS3DH_SENSITIVITY_2G / 1000.0;
     double accY = y * LIS3DH_SENSITIVITY_2G / 1000.0;
     double accZ = z * LIS3DH_SENSITIVITY_2G / 1000.0;
-    return atan2(accY, sqrt(pow(accX, 2) + pow(accZ, 2))) * (180.0 / M_PI);
+    return atan2(-accX, sqrt(pow(accY, 2) + pow(accZ, 2))) * (180.0 / M_PI);
 }
 
 /* getRollAngle()
@@ -183,5 +183,5 @@ double getRollAngle(int16_t x, int16_t y, int16_t z) {
     double accX = x * LIS3DH_SENSITIVITY_2G / 1000.0;
     double accY = y * LIS3DH_SENSITIVITY_2G / 1000.0;
     double accZ = z * LIS3DH_SENSITIVITY_2G / 1000.0;
-    return atan2(-accX, sqrt(pow(accY, 2) + pow(accZ, 2))) * (180.0 / M_PI);
+    return atan2(accY, sqrt(pow(accX, 2) + pow(accZ, 2))) * (180.0 / M_PI);
 }
