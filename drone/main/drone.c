@@ -11,6 +11,7 @@
 // STD C lib headers
 #include <stdio.h>
 #include <string.h>
+#include <sys/param.h>
 
 // KConfig header
 #include "sdkconfig.h"
@@ -40,16 +41,16 @@
 // Motor/ESC's GPIO Pins
 // Ensure these are sequential as the PWM setup requires this.
 // If not possible alter the esc_pwm_init() function.
-#define MOTOR_A_CW 32  // Front left
-#define MOTOR_B_CCW 33 // Rear left
-#define MOTOR_C_CW 34  // Rear right
-#define MOTOR_D_CCW 35 // Front right
+#define MOTOR_A_CW 16  // Front left
+#define MOTOR_B_CCW 17 // Rear left
+#define MOTOR_C_CW 18  // Rear right
+#define MOTOR_D_CCW 19 // Front right
 
 // Throttle speeds / Duty cycle's in us
 #define MOTOR_SPEED_MIN 1000
 #define MOTOR_SPEED_MAX 2000
 
-#define IMU_DT 5 // 5ms
+#define IMU_ALPHA 0.40
 
 // Stack Sizes
 #define SYS_STACK (configMINIMAL_STACK_SIZE * 2)
@@ -73,6 +74,26 @@ typedef struct {
     uint64_t prevTimeUS; // Last update time in us
 } PID_t;
 
+typedef struct {
+    uint16_t throttle;
+    double pitch;
+    double roll;
+    double yaw;
+} ControlSetPoint_t;
+
+typedef struct {
+    double errPitch;
+    double errRoll;
+    double errYaw;
+} ControlError_t;
+
+typedef struct {
+    double pitchAngle;
+    double rollAngle;
+    double yawAngle;
+    uint64_t prevTime;
+} Telemitry_t;
+
 ///////////////////////////////// Prototypes /////////////////////////////////
 
 // Task Function Prototypes
@@ -83,7 +104,9 @@ void imu_task(void);
 // Setup Function Prototypes
 void spi_bus_setup(spi_host_device_t host);
 void esc_pwm_init(void);
-void esc_pwm_set_duty_cycle(uint8_t motor, uint16_t duty_cycle);
+void esc_pwm_set_duty_cycle(MotorIndex motor, uint16_t duty_cycle);
+void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawPID);
+double pid_update(PID_t* pid, double error);
 void decode_packet(void* input, void* output);
 void print_task_stats(void);
 
@@ -101,12 +124,10 @@ QueueHandle_t imuQueue = NULL;
 // Each comparator controls the duty cycle of each PWM signal for the ESC's
 mcpwm_cmpr_handle_t esc_pwm_comparators[4] = {NULL};
 
-uint64_t previousAngleTime = 0;
-
 // PID_t structs for each of the directions
-PID_t pitchPID = {.kp = 0.9, .ki = 0.5, .kd = 0.5};
-PID_t rollPID = {.kp = 0.9, .ki = 0.5, .kd = 0.5};
-PID_t yawPID = {.kp = 0.9, .ki = 0.5, .kd = 0.5};
+PID_t pitchPID = {.kp = 5, .ki = 0.0, .kd = 0.5};
+PID_t rollPID = {.kp = 5, .ki = 0.0, .kd = 0.5};
+PID_t yawPID = {.kp = 5, .ki = 0.0, .kd = 0.5};
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -122,35 +143,57 @@ void app_main(void) {
     }
 }
 
+/* flight_controller()
+ * -------------------
+ *
+ */
 void flight_controller(void) {
 
+    // Varables
+    ControlSetPoint_t remoteData = {.throttle = 1000};
+    ControlError_t pidError = {0};
+    Telemitry_t imuData = {0};
+
+    // Wait until both input queues are created
     while (!imuQueue && !radioQueue) {
-        // Wait until both input queues are created
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
+    esc_pwm_init();
+
+    // Create QueueSet
     QueueSetHandle_t controlLoopSet = xQueueCreateSet(10);
     xQueueAddToSet(radioQueue, controlLoopSet);
     xQueueAddToSet(imuQueue, controlLoopSet);
-    float remoteInputs[5] = {1000, 0, 0, 0, 0};
-    double imuInputs[5] = {0}; // 0-2: GYRO -> change in x,y,z | 3-4: LIS -> pitch & roll current
+    QueueSetMemberHandle_t xActivatedMember;
 
     while (1) {
 
-        QueueSetMemberHandle_t xActivatedMember;
+        // This task only delay's based on the QueueSet.
+        // Usually the imuTask will activate it every ~5ms
+
         if (controlLoopSet) {
             xActivatedMember = xQueueSelectFromSet(controlLoopSet, portMAX_DELAY);
 
             // Update remote inputs
             if (xActivatedMember == radioQueue) {
-                xQueueReceive(radioQueue, remoteInputs, 0);
+                xQueueReceive(radioQueue, &remoteData, 0);
                 printf("Remote Data Updated\r\n");
             }
+
             // New position data arrived, run PID loop and update ESC's
-            else if (xActivatedMember == imuQueue) {
-                xQueueReceive(imuQueue, imuInputs, 0);
-                printf("PID Loop Run\r\nGyro x: %lf, y: %lf, z: %lf\t LIS pitch: %lf, roll: %lf\r\n", imuInputs[0],
-                       imuInputs[1], imuInputs[2], imuInputs[3], imuInputs[4]);
+            if (xActivatedMember == imuQueue) {
+                xQueueReceive(imuQueue, &imuData, 0);
+                // Run the PID loop
+                pidError.errPitch = remoteData.pitch - imuData.pitchAngle;
+                pidError.errRoll = remoteData.roll - imuData.rollAngle;
+                pidError.errYaw = remoteData.yaw - imuData.yawAngle;
+                double pitchOutput = pid_update(&pitchPID, pidError.errPitch);
+                double rollOutput = pid_update(&rollPID, pidError.errRoll);
+                double yawOutput = pid_update(&yawPID, pidError.errYaw);
+                // printf("PIDs: %f pitch, %f roll, %f yaw\r\n", pitchOutput, rollOutput, yawOutput);
+                // Then update the ESC's
+                update_escs(remoteData.throttle, pitchOutput, rollOutput, yawOutput);
             }
         }
     }
@@ -173,9 +216,10 @@ void radio_task(void) {
     uint8_t rx_buffer[32];
     uint8_t decodedPacket[16];
     float inputs[5];
+    ControlSetPoint_t remoteInputs = {0};
     while (!radioQueue) {
         // Loop to ensure the radio queue is created
-        radioQueue = xQueueCreate(5, sizeof(inputs));
+        radioQueue = xQueueCreate(5, sizeof(remoteInputs));
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
@@ -187,8 +231,14 @@ void radio_task(void) {
             decode_packet((void*) rx_buffer, (void*) decodedPacket);
             // Move into float space
             memcpy(inputs, decodedPacket, sizeof(decodedPacket));
+
+            remoteInputs.throttle = (uint16_t) inputs[0];
+            remoteInputs.pitch = (double) inputs[1];
+            remoteInputs.roll = (double) inputs[2];
+            remoteInputs.yaw = (double) inputs[3];
+
             // Send input data to FC
-            xQueueSendToFront(radioQueue, inputs, pdMS_TO_TICKS(5));
+            xQueueSendToFront(radioQueue, &remoteInputs, pdMS_TO_TICKS(5));
         }
 
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -203,13 +253,12 @@ void radio_task(void) {
 void imu_task(void) {
 
     // Setup variables
+    Telemitry_t imuData = {0};
     int16_t x, y, z;
-    double gyroX, gyroY, gyroZ, pitch, roll;
-    double inputs[5] = {gyroX, gyroY, gyroZ, pitch, roll};
 
     while (!imuQueue) {
         // Loop to ensure the imu queue is created
-        imuQueue = xQueueCreate(5, sizeof(inputs));
+        imuQueue = xQueueCreate(5, sizeof(imuData));
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
@@ -218,21 +267,37 @@ void imu_task(void) {
     gyro_init(HSPI_HOST);
 
     while (1) {
-        
+
         lisReadAxisData(&x, &y, &z);
-        // Get Pitch angle from accelerometer
-        pitch = getPitchAngle(x, y, z);
-        // Get roll angle from accelerometer
-        roll = getRollAngle(x, y, z);
+        // Get Pitch & Roll angles from accelerometer
+        double accPitch = getPitchAngle(x, y, z);
+        double accRoll = getRollAngle(x, y, z);
+
+        // Get current time
+        uint64_t now = esp_timer_get_time();
+
         // Get the axis data from the gyroscope
         gyroReadAxisData(&x, &y, &z);
-        gyroX = (double) x;
-        gyroY = (double) y;
-        gyroZ = (double) z;
+        long double dt = (now - imuData.prevTime) / 1e6;
+        imuData.prevTime = now; // Store current time for next run
+
+        // Calculate the changes in angles from the Gyroscope data
+        double gyroPitch = x * dt * GYRO_SENSITIVITY;
+        double gyroRoll = y * dt * GYRO_SENSITIVITY;
+        double gyroYaw = z * dt * GYRO_SENSITIVITY;
+
+        // Sum up the Yaw angle changes over time, ignoring tiny changes in Z (removes some noise)
+        if (z > 50 || z < -50) {
+            imuData.yawAngle += gyroYaw;
+        }
+
+        // Calculate the Pitch & Roll angles using both sets of data
+        imuData.pitchAngle = IMU_ALPHA * (imuData.pitchAngle + gyroPitch) + (1 - IMU_ALPHA) * accPitch;
+        imuData.rollAngle = IMU_ALPHA * (imuData.rollAngle + gyroRoll) + (1 - IMU_ALPHA) * accRoll;
 
         // Send data to the Flight controller for processing
         if (imuQueue) {
-            xQueueSendToFront(imuQueue, inputs, pdMS_TO_TICKS(1));
+            xQueueSendToFront(imuQueue, &imuData, pdMS_TO_TICKS(1));
         }
 
         // Repeat this vey quickly
@@ -281,6 +346,7 @@ void spi_bus_setup(spi_host_device_t host) {
  */
 void esc_pwm_init(void) {
 
+    // Create and configure the timer
     mcpwm_timer_handle_t pwm_timer = NULL;
     mcpwm_timer_config_t pwm_timer_config = {
         .resolution_hz = 1000000,                // 1MHz
@@ -289,7 +355,6 @@ void esc_pwm_init(void) {
         .count_mode = MCPWM_TIMER_COUNT_MODE_UP, // Count up from 0 then reset to 0
         .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT   // Default clock source
     };
-
     ESP_ERROR_CHECK(mcpwm_new_timer(&pwm_timer_config, &pwm_timer));
 
     // Connect the operators to the timer
@@ -338,16 +403,21 @@ void esc_pwm_init(void) {
  *    motor - Which of the comparators to adjust
  *    duty_cycle - The value in us after which the PWM signal will go low
  */
-void esc_pwm_set_duty_cycle(uint8_t motor, uint16_t duty_cycle) {
+void esc_pwm_set_duty_cycle(MotorIndex motor, uint16_t duty_cycle) {
 
-    // Limits on the inputs
-    if (motor > 3 || duty_cycle > 2000 || duty_cycle < 1000) {
+    if (motor > 3) {
         return;
     }
 
+    // Limits on the inputs
+    duty_cycle = (duty_cycle > 2000) ? 2000 : duty_cycle < 1000 ? 1000 : duty_cycle;
     ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(esc_pwm_comparators[motor], duty_cycle));
 }
 
+/* update_escs()
+ * -------------
+ *
+ */
 void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawPID) {
 
     double motorA = throttle - pitchPID + rollPID + yawPID; // Front left (CW)
@@ -358,17 +428,15 @@ void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawP
 
     for (uint8_t i = 0; i < 4; i++) {
         esc_pwm_set_duty_cycle(i, speeds[i]);
+        printf("Motor %d, Speed: %d\t", i, speeds[i]);
     }
+    printf("\r\n");
 }
 
-double calculate_angle_from_rate(double rate) {
-
-    uint64_t now = esp_timer_get_time();
-    // uint64_t dt = now - previousAngleTime * 1000 * 1000; // Seconds
-    previousAngleTime = now;
-    return 0.0;
-}
-
+/* pid_update()
+ * ------------
+ *
+ */
 double pid_update(PID_t* pid, double error) {
 
     uint64_t nowUS = esp_timer_get_time();
@@ -390,6 +458,10 @@ double pid_update(PID_t* pid, double error) {
     return output;
 }
 
+/* decode_packet()
+ * ---------------
+ *
+ */
 void decode_packet(void* input, void* output) {
     uint16_t* in = (uint16_t*) input;
     uint8_t* out = (uint8_t*) output;
