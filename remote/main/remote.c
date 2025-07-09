@@ -31,6 +31,9 @@
 #define HSPI_MISO 12
 #define HSPI_MOSI 13
 #define HSPI_CLK 14
+#define VSPI_MISO 19
+#define VSPI_MOSI 23
+#define VSPI_CLK 18
 
 // Stack Sizes
 #define SYS_STACK (configMINIMAL_STACK_SIZE * 2)
@@ -58,26 +61,53 @@ void spi_bus_setup(spi_host_device_t host);
 void encode_packet(void* input, void* output);
 
 ////////////////////////////// Global Variables //////////////////////////////
+
 TaskHandle_t systemTask = NULL;
 TaskHandle_t joystickTask = NULL;
 TaskHandle_t radioTask = NULL;
+
 QueueHandle_t radioQueue = NULL;
 QueueHandle_t inputQueue = NULL;
 
+// Ensure the SPI bus is only setup once
+static uint8_t spiVBusInitialised = 0;
+static uint8_t spiHBusInitialised = 0;
+
 //////////////////////////////////////////////////////////////////////////////
 
+/* app_main()
+ * ----------
+ * Main entry point for the remote controller firmware.
+ *
+ * Creates and launches three FreeRTOS tasks:
+ *   - remote_controller: Handles collecting ADC joystick data and forwarding it.
+ *   - remote_input_task: Reads analog inputs from the MCP3208 ADC.
+ *   - radio_remote_task: Transmits encoded control packets via NRF24L01+.
+ *
+ * Runs once at boot.
+ */
 void app_main(void) {
 
     xTaskCreate((void*) &remote_controller, "REMOTE_TASK", SYS_STACK, NULL, SYS_PRIO, &systemTask);
     xTaskCreate((void*) &remote_input_task, "ADC_INPUTS", JOYSTICK_STACK, NULL, JOYSTICK_PRIO, &joystickTask);
     xTaskCreate((void*) &radio_remote_task, "RADIO_REMOTE", RADIO_STACK, NULL, RADIO_PRIO, &radioTask);
-
 }
 
 /* remote_controller()
- * -------------------
- * Controller task for the remote. Handle the processing of data from the ADC inputs, and 
- * forwards the encoded packet to the radio for sending.
+ * --------------------
+ * Main controller task for the remote unit.
+ *
+ * Waits for new ADC input data from the input queue, encodes it using
+ * Hamming code for error detection, then forwards the resulting packet
+ * to the radio queue for transmission.
+ *
+ * Responsibilities:
+ *   - Blocks until both input and radio queues are ready.
+ *   - Receives raw ADC channel data.
+ *   - Encodes the data with Hamming codes for robust transmission.
+ *   - Sends encoded packets to the radio task.
+ *
+ * Runs continuously as a FreeRTOS task.
  */
 void remote_controller(void) {
 
@@ -92,20 +122,11 @@ void remote_controller(void) {
         // Get adc values from the input queue
         if (inputQueue && xQueueReceive(inputQueue, adcValues, portMAX_DELAY) == pdTRUE) {
 
-            float controlInputs[4];
-            // Throttle
-            // Convert slider. Base line is 1000us then add level * 100 for a range of 1000us to 2000us
-            controlInputs[3] = (float) adcValues[4] / 4.096f + 1000.0f;
-            // Pitch -> roll -> yaw
-            for (uint8_t i = 0; i < 3; i++) {
-                // Fix offset so that 2048 is 0 degrees, then convert number into degrees
-                controlInputs[i] = ((float) adcValues[0] - 2048.0f) / 68.267f;
-            }
+            printf("ADC: %d, %d, %d, %d\r\n", adcValues[0], adcValues[1], adcValues[2], adcValues[3]);
 
-            // Store the float data into an array of bytes
             uint8_t rawInput[16];
-            memcpy(rawInput, controlInputs, sizeof(controlInputs));
-            
+            memcpy(rawInput, adcValues, sizeof(adcValues));
+
             // Encode the inputs via hamming
             encode_packet((void*) rawInput, (void*) packet);
 
@@ -113,17 +134,23 @@ void remote_controller(void) {
             if (radioQueue) {
                 xQueueSendToFront(radioQueue, packet, pdMS_TO_TICKS(5));
             }
-         
         }
 
-        vTaskDelay(pdMS_TO_TICKS(5));
+        // vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
 
 /* remote_input_task()
- * -------------------
- * Task handles the comunication with the MCP3208. This task requests the 5 channels of
- * adc inputs be read. This data is then passed to the remote_controller task.
+ * --------------------
+ * Continuously reads analog joystick and slider inputs using the MCP3208 ADC.
+ *
+ * Initializes the SPI bus for the ADC and reads five channels:
+ *   - Channels 0–3: Joystick axes
+ *   - Channel 4: Slider or other analog input
+ *
+ * Collected data is sent to the remote_controller task via a queue.
+ *
+ * Runs continuously as a FreeRTOS task.
  */
 void remote_input_task(void) {
 
@@ -134,14 +161,14 @@ void remote_input_task(void) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
-    spi_bus_setup(HSPI_HOST);
-    mcp3208_init(HSPI_HOST);
+    spi_bus_setup(VSPI_HOST);
+    mcp3208_init(VSPI_HOST);
 
     while (1) {
 
         for (uint8_t i = 0; i < 5; i++) {
             // Channels 0 to 3 are joysticks, 4 is slider
-            adcValues[i] = mcp3208_read_adc_channel(i, 0);
+            adcValues[i] = mcp3208_read_adc_channel(i, MCP3208_SINGLE);
         }
 
         if (inputQueue) {
@@ -153,9 +180,18 @@ void remote_input_task(void) {
 }
 
 /* radio_remote_task()
- * -------------------
- * Simple task that utilises the NRF24L01plus radio module to send messages. Task
- * will wait on it's queue until a message is received, then proceed to send it.
+ * --------------------
+ * Handles wireless data transmission using the NRF24L01+ module.
+ *
+ * Waits on the radio queue for an encoded packet from the remote_controller,
+ * then transmits it via the NRF24L01+ radio.
+ *
+ * Responsibilities:
+ *   - Initializes the SPI bus and radio module.
+ *   - Waits for new packets to send.
+ *   - Sends packets wirelessly.
+ *
+ * Runs continuously as a FreeRTOS task.
  */
 void radio_remote_task(void) {
 
@@ -166,7 +202,7 @@ void radio_remote_task(void) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
-    // Initialise SPI host and setip the radio IC
+    // Initialise SPI host and setup the radio IC
     spi_bus_setup(HSPI_HOST);
     nrf24l01plus_init(HSPI_HOST);
 
@@ -176,6 +212,7 @@ void radio_remote_task(void) {
         if (radioQueue && xQueueReceive(radioQueue, toSend, portMAX_DELAY) == pdTRUE) {
             // Message has been recieved -> send it
             nrf24l01plus_send_packet(toSend);
+            // printf("Data sent\r\n");
         }
 
         // Delay to ensure idle task can run to reset watchdog timer, might remove later
@@ -184,32 +221,56 @@ void radio_remote_task(void) {
 }
 
 /* spi_bus_setup()
- * ---------------
- * Function to setup the given SPI host for use. Can only be run once.
+ * ----------------
+ * Initializes the specified SPI bus (HSPI or VSPI) for use with
+ * either the ADC or the radio module.
+ *
+ * Ensures that each bus is only initialized once to avoid redundant setup.
+ *
+ * Parameters:
+ *   host - The SPI bus to initialize (HSPI_HOST or VSPI_HOST).
+ *
+ * Dependencies:
+ *   - Uses ESP-IDF SPI Master driver.
+ *   - Tracks initialization state with static flags.
  */
 void spi_bus_setup(spi_host_device_t host) {
 
-    static uint8_t spiInitialised = 0;
-
-    if (spiInitialised) {
+    if ((host == VSPI_HOST && spiVBusInitialised) || (host == HSPI_HOST && spiHBusInitialised)) {
         return;
     }
 
     spi_bus_config_t bus_config = {
-        .miso_io_num = HSPI_MISO,
-        .mosi_io_num = HSPI_MOSI,
-        .sclk_io_num = HSPI_CLK,
+        .miso_io_num = (host == HSPI_HOST) ? HSPI_MISO : VSPI_MISO,
+        .mosi_io_num = (host == HSPI_HOST) ? HSPI_MOSI : VSPI_MOSI,
+        .sclk_io_num = (host == HSPI_HOST) ? HSPI_CLK : VSPI_CLK,
         .quadhd_io_num = -1,
         .quadwp_io_num = -1,
     };
 
     ESP_ERROR_CHECK(spi_bus_initialize(host, &bus_config, SPI_DMA_CH_AUTO));
-    spiInitialised = 1;
+
+    if (host == HSPI_HOST) {
+        spiHBusInitialised = 1;
+    } else if (host == VSPI_HOST) {
+        spiVBusInitialised = 1;
+    }
 }
 
 /* encode_packet()
- * ---------------
- * Function to encode a packet of data.
+ * ----------------
+ * Encodes a data packet using Hamming codes for error detection.
+ *
+ * Converts an array of raw input bytes into encoded 16-bit words.
+ * Used to protect transmitted control data from bit errors during
+ * wireless communication.
+ *
+ * Parameters:
+ *   input  - Pointer to the raw byte array.
+ *   output - Pointer to the destination buffer for encoded words.
+ *
+ * Dependencies:
+ *   - Uses hamming_byte_encode().
  */
 void encode_packet(void* input, void* output) {
     uint16_t* out = (uint16_t*) output;
