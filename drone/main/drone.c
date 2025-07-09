@@ -53,7 +53,7 @@
 #define MOTOR_SPEED_MIN 1000
 #define MOTOR_SPEED_MAX 2000
 
-#define IMU_ALPHA 0.40
+#define GYRO_ALPHA 0.40
 
 // Stack Sizes
 #define SYS_STACK (configMINIMAL_STACK_SIZE * 2)
@@ -113,6 +113,8 @@ double pid_update(PID_t* pid, double error);
 void decode_packet(void* input, void* output);
 void print_task_stats(void);
 
+void imu_sign_check_task(void);
+
 ////////////////////////////// Global Variables //////////////////////////////
 
 // Task Handles
@@ -154,6 +156,7 @@ void app_main(void) {
     xTaskCreate((void*) &flight_controller, "FC_Task", SYS_STACK, NULL, SYS_PRIO, &systemTask);
     xTaskCreate((void*) &radio_task, "RADIO", RADIO_STACK, NULL, RADIO_PRIO, &radioTask);
     xTaskCreate((void*) &imu_task, "IMU", LIS_STACK, NULL, LIS_PRIO, &accelTask);
+    // xTaskCreate((void*) &imu_sign_check_task, "SIGN_CHECK", 4096, NULL, tskIDLE_PRIORITY + 1, NULL);
 }
 
 /* flight_controller()
@@ -343,8 +346,8 @@ void imu_task(void) {
         imuData.prevTime = now; // Store current time for next run
 
         // Calculate the changes in angles from the Gyroscope data
-        double gyroPitch = x * dt * GYRO_SENSITIVITY;
-        double gyroRoll = y * dt * GYRO_SENSITIVITY;
+        double gyroPitch = -1 * y * dt * GYRO_SENSITIVITY;
+        double gyroRoll = -1 * x * dt * GYRO_SENSITIVITY;
         double gyroYaw = z * dt * GYRO_SENSITIVITY;
 
         // Sum up the Yaw angle changes over time, ignoring tiny changes in Z (removes some noise)
@@ -353,8 +356,8 @@ void imu_task(void) {
         }
 
         // Calculate the Pitch & Roll angles using both sets of data
-        imuData.pitchAngle = IMU_ALPHA * (imuData.pitchAngle + gyroPitch) + (1 - IMU_ALPHA) * accPitch;
-        imuData.rollAngle = IMU_ALPHA * (imuData.rollAngle + gyroRoll) + (1 - IMU_ALPHA) * accRoll;
+        imuData.pitchAngle = GYRO_ALPHA * (imuData.pitchAngle + gyroPitch) + (1 - GYRO_ALPHA) * accPitch;
+        imuData.rollAngle = GYRO_ALPHA * (imuData.rollAngle + gyroRoll) + (1 - GYRO_ALPHA) * accRoll;
 
         // Send data to the Flight controller for processing
         if (imuQueue) {
@@ -521,7 +524,9 @@ void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawP
 
     for (uint8_t i = 0; i < 4; i++) {
         esc_pwm_set_duty_cycle(i, speeds[i]);
+        printf("Motor %d: %d | ", i, speeds[i]);
     }
+    printf("\r\n");
 }
 
 /* pid_update()
@@ -608,4 +613,37 @@ void print_task_stats(void) {
     printf("%s\r\n", taskListBuffer);
     // Free memory
     vPortFree(taskListBuffer);
+}
+
+/*
+ * IMU sign check test
+ * -------------------
+ * This task reads accelerometer and gyro data, calculates pitch/roll
+ * angles from the accelerometer, and prints raw gyro rates.
+ * Use this to check if signs and axes match.
+ */
+
+void imu_sign_check_task(void) {
+    int16_t ax, ay, az;
+    int16_t gx, gy, gz;
+
+    spi_bus_setup(HSPI_HOST);
+    lis3dh_init(HSPI_HOST);
+    spi_bus_setup(VSPI_HOST);
+    gyro_init(VSPI_HOST);
+
+    while (1) {
+        // Read accelerometer data
+        lisReadAxisData(&ax, &ay, &az);
+        double accPitch = getPitchAngle(ax, ay, az);
+        double accRoll = getRollAngle(ax, ay, az);
+
+        // Read gyro raw rates
+        gyroReadAxisData(&gx, &gy, &gz);
+
+        printf("ACC: Pitch = %.2f deg, Roll = %.2f deg | ", accPitch, accRoll);
+        printf("GYRO: X = %d, Y = %d, Z = %d (raw dps)\r\n", gx, gy, gz);
+
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
 }
