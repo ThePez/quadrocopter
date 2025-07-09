@@ -32,8 +32,7 @@ void mcp3208_spi_init(spi_host_device_t spi_bus) {
         .clock_speed_hz = 1000000,      // 1 MHz Clock speed
         .spics_io_num = MCP3208_CS_PIN, // Chip Select pin for device
         .queue_size = 1,                // Number of pending transactions allowed
-        .mode = 0                       /* SPI mode, representing a pair of (CPOL, CPHA). CPOL = 0 (clock idles low)
-                                          CPHA = 0 (data is sampled on the rising edge, changed on the falling edge) */
+        .mode = 0                       // SPI mode, representing a pair of (CPOL, CPHA). CPOL = 1 CPHA = 1
     };
 
     ESP_ERROR_CHECK(spi_bus_add_device(spi_bus, &device_config, &mcp3208_spi_handle));
@@ -52,9 +51,9 @@ void mcp3208_init(spi_host_device_t spi_bus) {
     gpio_set_direction(MCP3208_CS_PIN, GPIO_MODE_OUTPUT);
     // Cycle the CS pin upon startup
     gpio_set_level(MCP3208_CS_PIN, 0);
-    esp_rom_delay_us(5);
+    esp_rom_delay_us(50);
     gpio_set_level(MCP3208_CS_PIN, 1);
-    esp_rom_delay_us(5);
+    esp_rom_delay_us(50);
     gpio_set_level(MCP3208_CS_PIN, 0);
 
     mcp3208_spi_init(spi_bus);
@@ -63,18 +62,23 @@ void mcp3208_init(spi_host_device_t spi_bus) {
 /* mcp3208_read_adc_channel()
  * --------------------------
  * Signals the mcp3208 to perform a adc of the selected input channel.
- * 
+ *
  * Parameters:
  *   channel - the input channel to be used for the conversion
- *   type - 0 or 1 for single ended or differential input channels
  */
 uint16_t mcp3208_read_adc_channel(uint8_t channel, uint8_t type) {
 
-    // Format the request to have 5 leading 0's
-    uint16_t request = MCP3208_REQUEST(type, channel);
+    uint16_t channelMask;
+    if (type) {
+        // Single
+        channelMask = MCP3208_SINGLE_CHANNEL_MASK(channel);
+    } else {
+        // Differential
+        channelMask = MCP3208_DIFFERENTIAL_CHANNEL_MASK(channel);
+    }
     
     // Store the request as 2 bytes
-    uint8_t tx_buffer[3] = {(uint8_t) request >> 8, (uint8_t) request, 0};
+    uint8_t tx_buffer[3] = {(uint8_t) (channelMask >> 8), (uint8_t) (channelMask & 0xFF), 0x00};
     uint8_t rx_buffer[3];
 
     spi_transaction_t transaction = {
@@ -86,6 +90,6 @@ uint16_t mcp3208_read_adc_channel(uint8_t channel, uint8_t type) {
     ESP_ERROR_CHECK(spi_device_transmit(mcp3208_spi_handle, &transaction));
 
     // Format the output to only include the final 12 bits.
-    uint16_t output = rx_buffer[2] | ((rx_buffer[1] & 0xF) << 8);
+    uint16_t output = rx_buffer[2] | ((rx_buffer[1] & 0x0F) << 8);
     return output;
 }
