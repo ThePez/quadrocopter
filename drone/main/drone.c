@@ -37,14 +37,17 @@
 #define HSPI_MISO 12
 #define HSPI_MOSI 13
 #define HSPI_CLK 14
+#define VSPI_MISO 19
+#define VSPI_MOSI 23
+#define VSPI_CLK 18
 
 // Motor/ESC's GPIO Pins
 // Ensure these are sequential as the PWM setup requires this.
 // If not possible alter the esc_pwm_init() function.
-#define MOTOR_A_CW 16  // Front left
-#define MOTOR_B_CCW 17 // Rear left
-#define MOTOR_C_CW 18  // Rear right
-#define MOTOR_D_CCW 19 // Front right
+#define MOTOR_A_CW 4   // Front left
+#define MOTOR_B_CCW 16 // Rear left
+#define MOTOR_C_CW 17  // Rear right
+#define MOTOR_D_CCW 5  // Front right
 
 // Throttle speeds / Duty cycle's in us
 #define MOTOR_SPEED_MIN 1000
@@ -121,6 +124,10 @@ TaskHandle_t accelTask = NULL;
 QueueHandle_t radioQueue = NULL;
 QueueHandle_t imuQueue = NULL;
 
+// Ensure the SPI bus is only setup once
+static uint8_t spiVBusInitialised = 0;
+static uint8_t spiHBusInitialised = 0;
+
 // Each comparator controls the duty cycle of each PWM signal for the ESC's
 mcpwm_cmpr_handle_t esc_pwm_comparators[4] = {NULL};
 
@@ -131,21 +138,38 @@ PID_t yawPID = {.kp = 5, .ki = 0.0, .kd = 0.5};
 
 //////////////////////////////////////////////////////////////////////////////
 
+/* app_main()
+ * ----------
+ * Main entry point for the application.
+ *
+ * Creates and launches the three main FreeRTOS tasks:
+ *   - flight_controller: Handles the main flight PID loop and motor control.
+ *   - radio_task: Handles receiving radio packets from the NRF24L01+.
+ *   - imu_task: Reads IMU sensor data (accelerometer + gyro) and fuses it.
+ *
+ * This function runs once at boot.
+ */
 void app_main(void) {
 
     xTaskCreate((void*) &flight_controller, "FC_Task", SYS_STACK, NULL, SYS_PRIO, &systemTask);
     xTaskCreate((void*) &radio_task, "RADIO", RADIO_STACK, NULL, RADIO_PRIO, &radioTask);
     xTaskCreate((void*) &imu_task, "IMU", LIS_STACK, NULL, LIS_PRIO, &accelTask);
-
-    while (1) {
-        // print_task_stats();
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
 }
 
 /* flight_controller()
  * -------------------
+ * The main control loop for the quadcopter.
  *
+ * This task waits for new telemetry and radio control data using a QueueSet,
+ * then calculates the pitch, roll, and yaw errors, runs the PID control loops,
+ * and updates the motor ESC signals accordingly.
+ *
+ * This ensures the drone maintains its desired attitude and throttle based
+ * on remote control inputs and sensor feedback.
+ *
+ * Dependencies:
+ *   - Requires both radioQueue and imuQueue to be created before running.
+ *   - Must be run as a FreeRTOS task.
  */
 void flight_controller(void) {
 
@@ -155,10 +179,11 @@ void flight_controller(void) {
     Telemitry_t imuData = {0};
 
     // Wait until both input queues are created
-    while (!imuQueue && !radioQueue) {
+    while (!radioQueue && !imuQueue) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
+    // Setup PWM
     esc_pwm_init();
 
     // Create QueueSet
@@ -173,12 +198,13 @@ void flight_controller(void) {
         // Usually the imuTask will activate it every ~5ms
 
         if (controlLoopSet) {
+
             xActivatedMember = xQueueSelectFromSet(controlLoopSet, portMAX_DELAY);
 
             // Update remote inputs
             if (xActivatedMember == radioQueue) {
                 xQueueReceive(radioQueue, &remoteData, 0);
-                printf("Remote Data Updated\r\n");
+                // printf("Remote Data Updated\r\n");
             }
 
             // New position data arrived, run PID loop and update ESC's
@@ -200,45 +226,68 @@ void flight_controller(void) {
 }
 
 /* radio_task()
- * ------------
- * The radio task first initialised the NRF24L01plus module for use as a receiver. After
- * which it then monitors for incomming packets, upon successful complete packet being
- * received it is then added to a queue for processing.
+ * -------------
+ * Initializes and runs the NRF24L01+ radio receiver.
+ *
+ * This task sets up the SPI bus and radio module, then listens for
+ * incoming encoded packets from the remote controller.
+ * Successfully received packets are decoded and translated into
+ * throttle and attitude setpoints, which are sent to the flight controller
+ * via a FreeRTOS queue.
+ *
+ * Runs continuously as a FreeRTOS task.
+ *
+ * Dependencies:
+ *   - Uses spi_bus_setup() and nrf24l01plus_*() driver functions.
+ *   - Outputs to radioQueue.
  */
 void radio_task(void) {
-
-    // Setup hardware
-    spi_bus_setup(HSPI_HOST);
-    nrf24l01plus_init(HSPI_HOST);
-    nrf24l01plus_recieve_mode();
 
     // Setup variables
     uint8_t rx_buffer[32];
     uint8_t decodedPacket[16];
-    float inputs[5];
+    uint16_t inputs[5];
     ControlSetPoint_t remoteInputs = {0};
+
     while (!radioQueue) {
         // Loop to ensure the radio queue is created
-        radioQueue = xQueueCreate(5, sizeof(remoteInputs));
-        vTaskDelay(pdMS_TO_TICKS(20));
+        radioQueue = xQueueCreate(5, sizeof(ControlSetPoint_t));
+        vTaskDelay(pdMS_TO_TICKS(200));
     }
+
+    // Setup hardware
+    spi_bus_setup(VSPI_HOST);
+    nrf24l01plus_init(VSPI_HOST);
+    nrf24l01plus_recieve_mode();
 
     printf("NRF24L01+ RX listening...\n");
 
     while (1) {
-        if (nrf24l01plus_recieve_packet(rx_buffer) && radioQueue) {
+        if (nrf24l01plus_recieve_packet(rx_buffer)) {
+
             // Decode packet
             decode_packet((void*) rx_buffer, (void*) decodedPacket);
-            // Move into float space
-            memcpy(inputs, decodedPacket, sizeof(decodedPacket));
+            memcpy(inputs, decodedPacket, sizeof(inputs));
 
-            remoteInputs.throttle = (uint16_t) inputs[0];
-            remoteInputs.pitch = (double) inputs[1];
-            remoteInputs.roll = (double) inputs[2];
-            remoteInputs.yaw = (double) inputs[3];
+            // Throttle conversion
+            remoteInputs.throttle = (uint16_t) ((float) inputs[0] / 4.096f + 1000.0f);
+
+            // Pitch, Roll & Yaw conversion
+            double controlInputs[3];
+            for (int i = 1; i < 4; i++) {
+                controlInputs[i - 1] = ((float) inputs[i] - 2048.0f) / 68.267f;
+            }
+
+            remoteInputs.pitch = controlInputs[0];
+            remoteInputs.roll = controlInputs[1];
+            remoteInputs.yaw = controlInputs[2];
+
+            // printf("inputs: %d, %f, %f, %f\r\n", remoteInputs.throttle, remoteInputs.pitch, remoteInputs.roll,
+            //        remoteInputs.yaw);
 
             // Send input data to FC
             xQueueSendToFront(radioQueue, &remoteInputs, pdMS_TO_TICKS(5));
+            // printf("Data sent over queue\r\n");
         }
 
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -247,8 +296,19 @@ void radio_task(void) {
 
 /* imu_task()
  * ----------
- * Task to read the telemetry data from the LIS3DH and L3GD20 sensors. This data is then
- * sent to the flight controller.
+ * Continuously reads sensor data from the LIS3DH accelerometer
+ * and L3GD20 gyroscope.
+ *
+ * Calculates pitch, roll, and yaw angles using a complementary filter
+ * to fuse accelerometer and gyro data. Sends updated telemetry to
+ * the flight controller via imuQueue.
+ *
+ * Runs continuously as a FreeRTOS task.
+ *
+ * Dependencies:
+ *   - Uses lis3dh_init(), gyro_init(), lisReadAxisData(), gyroReadAxisData(),
+ *     getPitchAngle(), getRollAngle().
+ *   - Outputs to imuQueue.
  */
 void imu_task(void) {
 
@@ -259,12 +319,13 @@ void imu_task(void) {
     while (!imuQueue) {
         // Loop to ensure the imu queue is created
         imuQueue = xQueueCreate(5, sizeof(imuData));
-        vTaskDelay(pdMS_TO_TICKS(20));
+        vTaskDelay(pdMS_TO_TICKS(200));
     }
 
     spi_bus_setup(HSPI_HOST);
     lis3dh_init(HSPI_HOST);
-    gyro_init(HSPI_HOST);
+    spi_bus_setup(VSPI_HOST);
+    gyro_init(VSPI_HOST);
 
     while (1) {
 
@@ -305,25 +366,41 @@ void imu_task(void) {
     }
 }
 
+/* spi_bus_setup()
+ * ----------------
+ * Configures and initializes the specified SPI bus (HSPI or VSPI).
+ *
+ * Each bus is initialized only once per boot. Pins are configured
+ * depending on which host is requested.
+ *
+ * Parameters:
+ *   host - The SPI bus to initialize (HSPI_HOST or VSPI_HOST).
+ *
+ * Dependencies:
+ *   - Uses ESP-IDF SPI Master driver.
+ *   - Updates global flags spiHBusInitialised and spiVBusInitialised.
+ */
 void spi_bus_setup(spi_host_device_t host) {
 
-    // Ensure the SPI bus is only setup once
-    static uint8_t spiBusInitialised = 0;
-
-    if (spiBusInitialised) {
+    if ((host == VSPI_HOST && spiVBusInitialised) || (host == HSPI_HOST && spiHBusInitialised)) {
         return;
     }
 
     spi_bus_config_t bus_config = {
-        .miso_io_num = HSPI_MISO,
-        .mosi_io_num = HSPI_MOSI,
-        .sclk_io_num = HSPI_CLK,
+        .miso_io_num = (host == HSPI_HOST) ? HSPI_MISO : VSPI_MISO,
+        .mosi_io_num = (host == HSPI_HOST) ? HSPI_MOSI : VSPI_MOSI,
+        .sclk_io_num = (host == HSPI_HOST) ? HSPI_CLK : VSPI_CLK,
         .quadhd_io_num = -1,
         .quadwp_io_num = -1,
     };
 
     ESP_ERROR_CHECK(spi_bus_initialize(host, &bus_config, SPI_DMA_CH_AUTO));
-    spiBusInitialised = 1;
+
+    if (host == HSPI_HOST) {
+        spiHBusInitialised = 1;
+    } else if (host == VSPI_HOST) {
+        spiVBusInitialised = 1;
+    }
 }
 
 /* esc_pwm_init()
@@ -375,8 +452,11 @@ void esc_pwm_init(void) {
     // Create and configure the Generators
     mcpwm_gen_handle_t generators[4] = {NULL};
     mcpwm_generator_config_t generator_configs[4];
+    generator_configs[0].gen_gpio_num = MOTOR_A_CW;
+    generator_configs[1].gen_gpio_num = MOTOR_B_CCW;
+    generator_configs[2].gen_gpio_num = MOTOR_C_CW;
+    generator_configs[3].gen_gpio_num = MOTOR_D_CCW;
     for (uint8_t i = 0; i < 4; i++) {
-        generator_configs[i].gen_gpio_num = i + MOTOR_A_CW;
         ESP_ERROR_CHECK(mcpwm_new_generator(operators[i % 2], &generator_configs[i], &generators[i]));
     }
 
@@ -416,7 +496,20 @@ void esc_pwm_set_duty_cycle(MotorIndex motor, uint16_t duty_cycle) {
 
 /* update_escs()
  * -------------
+ * Function to update the PWM duty cycles for all four ESCs based on
+ * throttle and the outputs of the pitch, roll, and yaw PID controllers.
  *
+ * The mixing formula adjusts each motor’s throttle to achieve the desired
+ * pitch, roll, and yaw simultaneously.
+ *
+ * Parameters:
+ *   throttle - Base throttle level (1000–2000 us)
+ *   pitchPID - Output of the pitch PID controller
+ *   rollPID  - Output of the roll PID controller
+ *   yawPID   - Output of the yaw PID controller
+ *
+ * Globals:
+ *   Uses esc_pwm_set_duty_cycle() to update each motor’s PWM.
  */
 void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawPID) {
 
@@ -428,14 +521,25 @@ void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawP
 
     for (uint8_t i = 0; i < 4; i++) {
         esc_pwm_set_duty_cycle(i, speeds[i]);
-        printf("Motor %d, Speed: %d\t", i, speeds[i]);
     }
-    printf("\r\n");
 }
 
 /* pid_update()
  * ------------
+ * Runs a single update step of a PID controller.
  *
+ * Calculates the proportional, integral, and derivative terms based on the
+ * current error and time elapsed since the last update.
+ *
+ * Parameters:
+ *   pid   - Pointer to a PID_t structure with the PID state and constants.
+ *   error - Current control error value.
+ *
+ * Returns:
+ *   The calculated control output for the PID loop.
+ *
+ * Side effects:
+ *   Updates the PID's stored previous error, integral sum, and previous timestamp.
  */
 double pid_update(PID_t* pid, double error) {
 
@@ -460,7 +564,17 @@ double pid_update(PID_t* pid, double error) {
 
 /* decode_packet()
  * ---------------
+ * Decodes a received data packet using Hamming decoding.
  *
+ * The NRF24L01+ transmits a 32-byte encoded packet (16 words of 16 bits),
+ * which this function decodes into the original 16-byte payload.
+ *
+ * Parameters:
+ *   input  - Pointer to the raw received packet buffer.
+ *   output - Pointer to the decoded output buffer.
+ *
+ * Dependencies:
+ *   Uses hamming_word_decode() to correct single-bit errors.
  */
 void decode_packet(void* input, void* output) {
     uint16_t* in = (uint16_t*) input;
@@ -470,6 +584,15 @@ void decode_packet(void* input, void* output) {
     }
 }
 
+/* print_task_stats()
+ * ------------------
+ * Prints a formatted list of all currently running FreeRTOS tasks,
+ * including their state, priority, stack usage, and task ID.
+ *
+ * Helpful for debugging stack usage and system health.
+ *
+ * Uses vTaskList() from FreeRTOS and outputs to standard printf().
+ */
 void print_task_stats(void) {
 
     uint16_t numTasks = uxTaskGetNumberOfTasks();
