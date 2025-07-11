@@ -17,6 +17,7 @@
 
 #define NRF24L01PLUS_CS_PIN 26
 #define NRF24L01PLUS_CE_PIN 27
+#define NRF24L01PLUS_IQR_PIN 36
 
 #define NRF24L01PLUS_TX_ADR_WIDTH 5    // 5 unsigned chars TX(RX) address width
 #define NRF24L01PLUS_TX_PLOAD_WIDTH 32 // 32 unsigned chars TX payload
@@ -86,14 +87,15 @@
 #define NRF_CE_LOW() gpio_set_level(NRF24L01PLUS_CE_PIN, 0)
 
 void nrf24l01plus_spi_init(spi_host_device_t spi_bus);
-void nrf24l01plus_init(spi_host_device_t spi_bus);
+void nrf24l01plus_interrupt_init(void* handler);
+void nrf24l01plus_init(spi_host_device_t spi_bus, void* handler);
 void nrf24l01plus_write_register(uint8_t reg_addr, uint8_t val);
 uint8_t nrf24l01plus_read_register(uint8_t reg_addr);
 void nrf24l01plus_write_buffer(uint8_t reg_addr, uint8_t* buffer, int buffer_len);
 void nrf24l01plus_read_buffer(uint8_t reg_addr, uint8_t* buffer, int buffer_len);
 int nrf24l01plus_recieve_packet(uint8_t* rx_buf);
 void nrf24l01plus_send_packet(uint8_t* tx_buf);
-void nrf24l01plus_recieve_mode(void);
+void nrf24l01plus_receive_mode(void);
 void nrf24l01plus_send_mode(void);
 int nrf24l01plus_txFifoEmpty(void);
 int nrf24l01plus_rxFifoEmpty(void);

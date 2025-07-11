@@ -204,7 +204,7 @@ void radio_remote_task(void) {
 
     // Initialise SPI host and setup the radio IC
     spi_bus_setup(HSPI_HOST);
-    nrf24l01plus_init(HSPI_HOST);
+    nrf24l01plus_init(HSPI_HOST, NULL);
 
     while (1) {
 

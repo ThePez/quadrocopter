@@ -19,11 +19,12 @@
 #define DEFAULT_RF_CHANNEL 40                                   // Default radio channel
 static uint8_t default_addr[] = {0x12, 0x34, 0x56, 0x78, 0x90}; // Default address with MSB first
 static spi_device_handle_t radio_spi_handle;                    // Handle for the ESP's SPI device driver
+static uint8_t useIQR = 0;
 
 /* nrf24l01plus_spi_init()
  * -----------------------
  * Initializes the SPI device handle for the NRF24L01+.
- * Configures the clock speed, SPI mode (CPOL=0, CPHA=0), chip select pin,
+ * Configures clock speed, SPI mode (CPOL=0, CPHA=0), chip select pin,
  * and adds the device to the specified SPI bus.
  *
  * Parameters:
@@ -43,14 +44,62 @@ void nrf24l01plus_spi_init(spi_host_device_t spi_bus) {
     ESP_ERROR_CHECK(spi_bus_add_device(spi_bus, &device_config, &radio_spi_handle));
 }
 
+/* nrf24l01plus_interrupt_init()
+ * -----------------------------
+ * Configures the GPIO pin used for the NRF24L01+ IRQ as an external interrupt source.
+ * Sets the pin direction to input, enables an internal pull-up resistor (to handle the
+ * open-drain active-low IRQ signal), and configures the interrupt to trigger on a falling edge.
+ * Installs the GPIO ISR service if not already installed, and attaches the user-provided
+ * interrupt handler to the IRQ pin.
+ *
+ * Parameters:
+ *   handler - A pointer to the ISR handler function to be called when the interrupt fires.
+ */
+void nrf24l01plus_interrupt_init(void* handler) {
+
+    gpio_config_t config = {
+        .mode = GPIO_MODE_INPUT,                        // Direction of the pin
+        .pin_bit_mask = (1ULL << NRF24L01PLUS_IQR_PIN), // Pin is listed here as a bit mask
+        .pull_up_en = GPIO_PULLUP_ENABLE,               // Enable pull-up (IRQ is active low)
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,          // No internal pull-down
+        .intr_type = GPIO_INTR_NEGEDGE                  // Interrupt on the falling edge
+    };
+
+    ESP_ERROR_CHECK(gpio_config(&config));
+
+    // Install the ISR service if not already installed
+    esp_err_t err = gpio_install_isr_service(0);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_ERROR_CHECK(err);
+    }
+
+    // Hook ISR handler for the IQR pin
+    ESP_ERROR_CHECK(gpio_isr_handler_add(NRF24L01PLUS_IQR_PIN, handler, NULL));
+}
+
 /* nrf24l01plus_init()
  * -------------------
- * Function to setup the NRF24L01plus for use.
+ * Initializes the NRF24L01+ radio module for operation.
+ * Sets up the CE pin, configures the IRQ pin if a handler is provided,
+ * initializes SPI, sets default addresses, disables auto-ack,
+ * enables Pipe0, sets payload width and RF channel,
+ * configures power and data rate, and puts the module into RX mode.
+ *
+ * Parameters:
+ *   spi_bus - The SPI bus to use.
+ *   handler - Pointer to the ISR handler function, or NULL if unused.
  */
-void nrf24l01plus_init(spi_host_device_t spi_bus) {
+void nrf24l01plus_init(spi_host_device_t spi_bus, void* handler) {
 
     // Setup the NRF24L01plus CE pin
     gpio_set_direction(NRF24L01PLUS_CE_PIN, GPIO_MODE_INPUT_OUTPUT);
+
+    // Configure the GPIO pin used by the IQR pin if a ISR handler passed in
+    if (handler != NULL) {
+        useIQR = 1;
+        nrf24l01plus_interrupt_init(handler);
+    }
+
     // Configure the SPI
     nrf24l01plus_spi_init(spi_bus);
 
@@ -58,9 +107,9 @@ void nrf24l01plus_init(spi_host_device_t spi_bus) {
     NRF_CE_LOW();
 
     // Writes TX_Address to nRF24L01
-    nrf24l01plus_write_buffer(NRF24L01PLUS_WRITE_REG | NRF24L01PLUS_TX_ADDR, default_addr, 5);
+    nrf24l01plus_write_buffer(NRF24L01PLUS_TX_ADDR, default_addr, 5);
     // Writes RX_Address to nRF24L01
-    nrf24l01plus_write_buffer(NRF24L01PLUS_WRITE_REG | NRF24L01PLUS_RX_ADDR_P0, default_addr, 5);
+    nrf24l01plus_write_buffer(NRF24L01PLUS_RX_ADDR_P0, default_addr, 5);
     // Disable Auto.Ack
     nrf24l01plus_write_register(NRF24L01PLUS_EN_AA, 0x00);
     // Enable Pipe0
@@ -72,8 +121,8 @@ void nrf24l01plus_init(spi_host_device_t spi_bus) {
     // TX_PWR:0dBm, Datarate:1Mbps
     nrf24l01plus_write_register(NRF24L01PLUS_RF_SETUP, 0x06);
 
-    // Put the device into sending mode
-    nrf24l01plus_send_mode();
+    // Put device into receive mode
+    nrf24l01plus_receive_mode();
 }
 
 /* nrf24l01plus_write_register()
@@ -88,9 +137,9 @@ void nrf24l01plus_write_register(uint8_t reg_addr, uint8_t val) {
 
     uint8_t tx_buffer[2] = {NRF24L01PLUS_WRITE_REG | reg_addr, val};
     spi_transaction_t transaction = {
-        .length = 16,            // Transaction length in bits
+        .length = 16,           // Transaction length in bits
         .tx_buffer = tx_buffer, // Pointer to transmit buffer
-        .rx_buffer = NULL,       // Pointer to receive buffer
+        .rx_buffer = NULL,      // Pointer to receive buffer
     };
 
     ESP_ERROR_CHECK(spi_device_transmit(radio_spi_handle, &transaction));
@@ -104,7 +153,7 @@ void nrf24l01plus_write_register(uint8_t reg_addr, uint8_t val) {
  *   reg_addr - Register address to read from.
  *
  * Returns:
- *   The byte read from the register.
+ *   Byte read from the register.
  */
 uint8_t nrf24l01plus_read_register(uint8_t reg_addr) {
 
@@ -138,7 +187,7 @@ void nrf24l01plus_write_buffer(uint8_t reg_addr, uint8_t* buffer, int buffer_len
 
     spi_transaction_t transaction = {
         .length = (buffer_len + 1) * 8, // Transaction length in bits
-        .tx_buffer = tx_buffer,        // Pointer to transmit buffer
+        .tx_buffer = tx_buffer,         // Pointer to transmit buffer
         .rx_buffer = NULL,              // Pointer to receive buffer
     };
 
@@ -174,14 +223,16 @@ void nrf24l01plus_read_buffer(uint8_t reg_addr, uint8_t* buffer, int buffer_len)
 
 /* nrf24l01plus_recieve_packet()
  * -----------------------------
- * Checks if a new packet has been received (RX_DR bit).
- * If a packet is available:
- *   - Reads the payload from the RX FIFO into the provided buffer.
- *   - Flushes the RX FIFO to clear any leftover data.
- *   - Clears the RX_DR interrupt flag in the STATUS register.
+ * Checks for a received packet. If available:
+ *   - Reads payload from RX FIFO into the provided buffer.
+ *   - Flushes RX FIFO.
+ *   - Clears RX_DR interrupt flag.
+ *
+ * Parameters:
+ *   rx_buffer - Pointer to buffer to store received payload.
+ *
  * Returns:
- *   1 if a packet was read,
- *   0 if no packet was available.
+ *   1 if a packet was read, 0 if no packet is available.
  */
 int nrf24l01plus_recieve_packet(uint8_t* rx_buffer) {
 
@@ -203,12 +254,12 @@ int nrf24l01plus_recieve_packet(uint8_t* rx_buffer) {
 /* nrf24l01plus_send_packet()
  * --------------------------
  * Sends a single payload over the air.
- * Steps:
- *   - Switches the radio to TX mode (PWR_UP = 1, PRIM_RX = 0).
- *   - Writes the new payload into the TX FIFO.
- *   - Pulses the CE pin HIGH for at least 10 µs to start transmission.
- *   - Waits 4.5 ms for the transmission to complete and the radio to return to Standby-I.
- *   - Switches the radio back to RX mode by setting PRIM_RX = 1.
+ * Switches to TX mode, writes payload to TX FIFO,
+ * pulses CE high to transmit, waits for completion,
+ * and switches back to RX mode if interrupts are unused.
+ *
+ * Parameters:
+ *   tx_buf - Pointer to payload buffer to send.
  */
 void nrf24l01plus_send_packet(uint8_t* tx_buf) {
 
@@ -219,34 +270,46 @@ void nrf24l01plus_send_packet(uint8_t* tx_buf) {
     NRF_CE_HIGH(); // CE pulse >10 µs
     esp_rom_delay_us(20);
     NRF_CE_LOW();
-    esp_rom_delay_us(4500); // Wait for TX -> Standby-I (~4.5 ms)
-    nrf24l01plus_recieve_mode();
+    
+    if (!useIQR) {
+        esp_rom_delay_us(4500); // Wait for TX -> Standby-I (~4.5 ms)
+        nrf24l01plus_receive_mode();
+    }
 }
 
-/* nrf24l01plus_recieve_mode()
+/* nrf24l01plus_receive_mode()
  * ---------------------------
  * Puts the NRF24L01+ into RX mode.
  * Sets PRIM_RX=1, PWR_UP=1.
  * CONFIG bits: MASK_RX_DR | MASK_TX_DS | MASK_MAX_RT | EN_CRC | CRCO | PWR_UP | PRIM_RX
  * CE high to start listening.
  */
-void nrf24l01plus_recieve_mode(void) {
+void nrf24l01plus_receive_mode(void) {
 
-    nrf24l01plus_write_register(NRF24L01PLUS_CONFIG, 0x7B);
+    if (useIQR) {
+        nrf24l01plus_write_register(NRF24L01PLUS_CONFIG, 0x1B);
+    } else {
+        nrf24l01plus_write_register(NRF24L01PLUS_CONFIG, 0x7B);
+    }
+
     NRF_CE_HIGH();
 }
 
 /* nrf24l01plus_send_mode()
- * --------------------
+ * ------------------------
  * Puts the NRF24L01+ into TX mode.
- * Sets PRIM_RX=0, PWR_UP=1.
- * CONFIG bits: MASK_RX_DR | MASK_TX_DS | MASK_MAX_RT | EN_CRC | CRCO | PWR_UP | PRIM_RX
- * CE stays low until you pulse it for TX
+ * Sets PRIM_RX=0, PWR_UP=1, and ensures CE stays low
+ * until pulsed for transmission.
  */
 void nrf24l01plus_send_mode(void) {
 
     NRF_CE_LOW();
-    nrf24l01plus_write_register(NRF24L01PLUS_CONFIG, 0x7A);
+    
+    if (useIQR) {
+        nrf24l01plus_write_register(NRF24L01PLUS_CONFIG, 0x1A);
+    } else {
+        nrf24l01plus_write_register(NRF24L01PLUS_CONFIG, 0x7A);
+    }
 }
 
 /* nrf24l01plus_txFifoEmpty()
