@@ -17,6 +17,7 @@
 #include "sdkconfig.h"
 
 // ESP-IDF Prebuilts
+#include "driver/i2c_master.h"
 #include "driver/mcpwm_prelude.h"
 #include "driver/spi_master.h"
 #include "esp_timer.h"
@@ -27,6 +28,7 @@
 
 // Custom Components
 #include "hamming.h"
+#include "hmc5883l.h"
 #include "l3gd20.h"
 #include "lis3DH.h"
 #include "nrf24l01plus.h"
@@ -106,6 +108,7 @@ void imu_task(void);
 
 // Setup Function Prototypes
 void spi_bus_setup(spi_host_device_t host);
+i2c_master_bus_handle_t i2c_bus_setup(void);
 void esc_pwm_init(void);
 void esc_pwm_set_duty_cycle(MotorIndex motor, uint16_t duty_cycle);
 void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawPID);
@@ -329,6 +332,8 @@ void imu_task(void) {
     lis3dh_init(HSPI_HOST);
     spi_bus_setup(VSPI_HOST);
     gyro_init(VSPI_HOST);
+    i2c_master_bus_handle_t bus = i2c_bus_setup();
+    magnetometer_init(bus);
 
     while (1) {
 
@@ -406,6 +411,26 @@ void spi_bus_setup(spi_host_device_t host) {
     }
 }
 
+/* i2c_bus_setup()
+ * ---------------
+ *
+ */
+i2c_master_bus_handle_t i2c_bus_setup(void) {
+
+    i2c_master_bus_config_t i2c_mst_config = {
+        .clk_source = I2C_CLK_SRC_DEFAULT,    // Default
+        .i2c_port = -1,                       // Auto select
+        .scl_io_num = GPIO_NUM_22,            // Default
+        .sda_io_num = GPIO_NUM_21,            // Default
+        .glitch_ignore_cnt = 7,               // Default
+        .flags.enable_internal_pullup = true, // Default
+    };
+
+    i2c_master_bus_handle_t bus_handle;
+    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &bus_handle));
+    return bus_handle;
+}
+
 /* esc_pwm_init()
  * ---------------
  * Function to initialize the MCPWM peripheral for driving four ESC signals.
@@ -427,40 +452,41 @@ void spi_bus_setup(spi_host_device_t host) {
 void esc_pwm_init(void) {
 
     // Create and configure the timer
-    mcpwm_timer_handle_t pwm_timer = NULL;
-    mcpwm_timer_config_t pwm_timer_config = {
-        .resolution_hz = 1000000,                // 1MHz
-        .period_ticks = 20000,                   // 20ms
-        .group_id = 0,                           // Group 0
-        .count_mode = MCPWM_TIMER_COUNT_MODE_UP, // Count up from 0 then reset to 0
-        .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT   // Default clock source
-    };
-    ESP_ERROR_CHECK(mcpwm_new_timer(&pwm_timer_config, &pwm_timer));
+    mcpwm_timer_handle_t pwm_timers[2] = {NULL};
+    for (uint8_t i = 0; i < 2; i++) {
+        mcpwm_timer_config_t pwm_timer_config = {
+            .resolution_hz = 1000000,                // 1MHz
+            .period_ticks = 20000,                   // 20ms
+            .group_id = i,                           // Group 0
+            .count_mode = MCPWM_TIMER_COUNT_MODE_UP, // Count up from 0 then reset to 0
+            .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT   // Default clock source
+        };
+
+        ESP_ERROR_CHECK(mcpwm_new_timer(&pwm_timer_config, &pwm_timers[i]));
+    }
 
     // Connect the operators to the timer
-    mcpwm_oper_handle_t operators[2] = {NULL};
+    mcpwm_oper_handle_t operators[4] = {NULL};
     // Operator must be in the same group as timer
-    mcpwm_operator_config_t operator_config = {.group_id = 0};
-    for (uint8_t i = 0; i < 2; i++) {
-        ESP_ERROR_CHECK(mcpwm_new_operator(&operator_config, &operators[i]));
-        ESP_ERROR_CHECK(mcpwm_operator_connect_timer(operators[i], pwm_timer));
+    mcpwm_operator_config_t operator_configs[2] = {{.group_id = 0}, {.group_id = 1}};
+    for (uint8_t i = 0; i < 4; i++) {
+        ESP_ERROR_CHECK(mcpwm_new_operator(&operator_configs[i % 2], &operators[i]));
+        ESP_ERROR_CHECK(mcpwm_operator_connect_timer(operators[i], pwm_timers[i % 2]));
     }
 
     // Create and configure the Comparators
     mcpwm_comparator_config_t cmpr_config = {};
-    for (uint8_t i = 0; i < 4; i++) {
-        ESP_ERROR_CHECK(mcpwm_new_comparator(operators[i % 2], &cmpr_config, &esc_pwm_comparators[i]));
-    }
-
     // Create and configure the Generators
     mcpwm_gen_handle_t generators[4] = {NULL};
-    mcpwm_generator_config_t generator_configs[4];
+    mcpwm_generator_config_t generator_configs[4] = {};
     generator_configs[0].gen_gpio_num = MOTOR_A_CW;
     generator_configs[1].gen_gpio_num = MOTOR_B_CCW;
     generator_configs[2].gen_gpio_num = MOTOR_C_CW;
     generator_configs[3].gen_gpio_num = MOTOR_D_CCW;
+
     for (uint8_t i = 0; i < 4; i++) {
-        ESP_ERROR_CHECK(mcpwm_new_generator(operators[i % 2], &generator_configs[i], &generators[i]));
+        ESP_ERROR_CHECK(mcpwm_new_comparator(operators[i], &cmpr_config, &esc_pwm_comparators[i]));
+        ESP_ERROR_CHECK(mcpwm_new_generator(operators[i], &generator_configs[i], &generators[i]));
     }
 
     // On timer period (counter reaches zero): set output high
@@ -473,8 +499,10 @@ void esc_pwm_init(void) {
             MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, esc_pwm_comparators[i], MCPWM_GEN_ACTION_LOW)));
     }
 
-    ESP_ERROR_CHECK(mcpwm_timer_enable(pwm_timer));
-    ESP_ERROR_CHECK(mcpwm_timer_start_stop(pwm_timer, MCPWM_TIMER_START_NO_STOP));
+    for (uint8_t i = 0; i < 2; i++) {
+        ESP_ERROR_CHECK(mcpwm_timer_enable(pwm_timers[i]));
+        ESP_ERROR_CHECK(mcpwm_timer_start_stop(pwm_timers[i], MCPWM_TIMER_START_NO_STOP));
+    }
 }
 
 /* esc_pwm_set_duty_cycle()
@@ -615,14 +643,12 @@ void print_task_stats(void) {
     vPortFree(taskListBuffer);
 }
 
-/*
- * IMU sign check test
- * -------------------
+/* IMU sign check test()
+ * ---------------------
  * This task reads accelerometer and gyro data, calculates pitch/roll
  * angles from the accelerometer, and prints raw gyro rates.
  * Use this to check if signs and axes match.
  */
-
 void imu_sign_check_task(void) {
     int16_t ax, ay, az;
     int16_t gx, gy, gz;

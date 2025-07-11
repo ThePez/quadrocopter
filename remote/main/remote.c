@@ -167,7 +167,7 @@ void remote_input_task(void) {
     while (1) {
 
         for (uint8_t i = 0; i < 5; i++) {
-            // Channels 0 to 3 are joysticks, 4 is slider
+            // Channels 1 to 4 are joysticks, 0 is slider
             adcValues[i] = mcp3208_read_adc_channel(i, MCP3208_SINGLE);
         }
 
