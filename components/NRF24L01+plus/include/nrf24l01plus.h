@@ -17,7 +17,7 @@
 
 #define NRF24L01PLUS_CS_PIN 26
 #define NRF24L01PLUS_CE_PIN 27
-#define NRF24L01PLUS_IQR_PIN 36
+#define NRF24L01PLUS_IQR_PIN 35
 
 #define NRF24L01PLUS_TX_ADR_WIDTH 5    // 5 unsigned chars TX(RX) address width
 #define NRF24L01PLUS_TX_PLOAD_WIDTH 32 // 32 unsigned chars TX payload

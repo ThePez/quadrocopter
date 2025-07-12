@@ -29,9 +29,9 @@ static uint8_t spiHBusInitialised = 0;
 mcpwm_cmpr_handle_t esc_pwm_comparators[4] = {NULL};
 
 // PID_t structs for each of the directions
-PID_t pitchPID = {.kp = 5, .ki = 0.5, .kd = 0.5};
-PID_t rollPID = {.kp = 5, .ki = 0.5, .kd = 0.5};
-PID_t yawPID = {.kp = 5, .ki = 0.5, .kd = 0.5};
+PID_t pitchPID = {.kp = 10, .ki = 0.5, .kd = 0.5};
+PID_t rollPID = {.kp = 10, .ki = 0.5, .kd = 0.5};
+PID_t yawPID = {.kp = 10, .ki = 0.5, .kd = 0.5};
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -186,8 +186,10 @@ void radio_task(void) {
         if (xTaskNotifyWait(0, UINT32_MAX, NULL, portMAX_DELAY) == pdTRUE) {
 
             // Read STATUS register
-            uint8_t status = nrf24l01plus_read_register(NRF24L01PLUS_STATUS); 
-            
+            uint8_t status = nrf24l01plus_read_register(NRF24L01PLUS_STATUS);
+
+            printf("IQR Triggered Data\r\n");
+
             // Data is ready
             if (status & NRF24L01PLUS_RX_DR) {
 
@@ -211,15 +213,16 @@ void radio_task(void) {
 
                 // Send input data to FC
                 xQueueSendToFront(radioQueue, &remoteInputs, pdMS_TO_TICKS(5));
-            } 
-            
+            }
+
             // Data was sent
             if (status & NRF24L01PLUS_TX_DS) {
                 // Clear RX_DR, TX_DS, MAX_RT bits
-                nrf24l01plus_write_register(NRF24L01PLUS_STATUS, 0x70); 
+                nrf24l01plus_write_register(NRF24L01PLUS_STATUS, 0x70);
                 nrf24l01plus_receive_mode();
             }
 
+            // Max retries were attempted
             if (status & NRF24L01PLUS_MAX_RT) {
                 // Clear RX_DR, TX_DS, MAX_RT bits
                 nrf24l01plus_write_register(NRF24L01PLUS_STATUS, 0x70);
@@ -267,8 +270,8 @@ void imu_task(void) {
 
         lisReadAxisData(&x, &y, &z);
         // Get Pitch & Roll angles from accelerometer
-        double accPitch = getPitchAngle(x, y, z);
-        double accRoll = getRollAngle(x, y, z);
+        double accPitch = -1 * getPitchAngle(x, y, z); // Nose up with the -1 gives positive sign
+        double accRoll = getRollAngle(x, y, z);        // Left wing up gives positive angle
 
         // Get current time
         uint64_t now = esp_timer_get_time();
@@ -279,9 +282,9 @@ void imu_task(void) {
         imuData.prevTime = now; // Store current time for next run
 
         // Calculate the changes in angles from the Gyroscope data
-        double gyroPitch = -1 * y * dt * GYRO_SENSITIVITY;
-        double gyroRoll = -1 * x * dt * GYRO_SENSITIVITY;
-        double gyroYaw = z * dt * GYRO_SENSITIVITY;
+        double gyroPitch = y * dt * GYRO_SENSITIVITY;     // Nose up gives positive angle
+        double gyroRoll = -1 * x * dt * GYRO_SENSITIVITY; // Left wing up gives positive angle with -1
+        double gyroYaw = -1 * z * dt * GYRO_SENSITIVITY;  // Nose turned right gives positive angle with -1
 
         // Sum up the Yaw angle changes over time, ignoring tiny changes in Z (removes some noise)
         if (z > 50 || z < -50) {
@@ -508,12 +511,17 @@ void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawP
 
             // Calculate the new motor speed
             motorSpeeds[i] = throttle + changes[i];
+            if (i == 1 || i == 2) {
+                motorSpeeds[i] += 100; // Add some power to the back motors
+            }
         }
     }
 
     for (uint8_t i = 0; i < NUMBER_OF_MOTORS; i++) {
         esc_pwm_set_duty_cycle(i, (uint16_t) motorSpeeds[i]);
+        printf("Motor %d: %d\t", i+1, (uint16_t) motorSpeeds[i]);
     }
+    printf("\r\n");
 }
 
 /* pid_update()
@@ -626,11 +634,9 @@ void imu_sign_check_task(void) {
         // Read gyro raw rates
         gyroReadAxisData(&gx, &gy, &gz);
 
-        printf("ACC: Pitch = %.2f deg, Roll = %.2f deg | ", accPitch, accRoll);
-        printf("GYRO: X = %d, Y = %d, Z = %d (raw dps)\r\n", gx, gy, gz);
+        printf("ACC: Pitch = %.2f deg, Roll = %.2f deg | ", -accPitch, accRoll);
+        printf("GYRO: X = %d, Y = %d, Z = %d (raw dps)\r\n", -gx, gy, -gz);
 
         vTaskDelay(pdMS_TO_TICKS(200));
     }
 }
-
-

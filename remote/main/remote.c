@@ -122,7 +122,16 @@ void remote_controller(void) {
         // Get adc values from the input queue
         if (inputQueue && xQueueReceive(inputQueue, adcValues, portMAX_DELAY) == pdTRUE) {
 
-            printf("ADC: %d, %d, %d, %d\r\n", adcValues[0], adcValues[1], adcValues[2], adcValues[3]);
+            double inputs[4];
+            // Throttle conversion
+            inputs[0] = ((double) adcValues[0] / 4.095 + 1000.0);
+            // Pitch, Roll & Yaw conversion
+            for (int i = 1; i < 4; i++) {
+                inputs[i] = (adcValues[i] - 2048.0) / 68.267;
+            }
+
+            printf("Throttle: %d, Pitch: %f, Roll: %f, Yaw: %f\r\n", (uint16_t) inputs[0], inputs[1], inputs[2],
+                   inputs[3]);
 
             uint8_t rawInput[16];
             memcpy(rawInput, adcValues, sizeof(adcValues));
@@ -135,8 +144,6 @@ void remote_controller(void) {
                 xQueueSendToFront(radioQueue, packet, pdMS_TO_TICKS(5));
             }
         }
-
-        // vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
 
@@ -205,6 +212,7 @@ void radio_remote_task(void) {
     // Initialise SPI host and setup the radio IC
     spi_bus_setup(HSPI_HOST);
     nrf24l01plus_init(HSPI_HOST, NULL);
+    printf("RADIO setup\r\n");
 
     while (1) {
 
@@ -212,11 +220,7 @@ void radio_remote_task(void) {
         if (radioQueue && xQueueReceive(radioQueue, toSend, portMAX_DELAY) == pdTRUE) {
             // Message has been recieved -> send it
             nrf24l01plus_send_packet(toSend);
-            // printf("Data sent\r\n");
         }
-
-        // Delay to ensure idle task can run to reset watchdog timer, might remove later
-        vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
 
