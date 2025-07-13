@@ -121,6 +121,15 @@ void nrf24l01plus_init(spi_host_device_t spi_bus, void* handler) {
     // TX_PWR:0dBm, Datarate:1Mbps
     nrf24l01plus_write_register(NRF24L01PLUS_RF_SETUP, 0x06);
 
+    // Power down
+    nrf24l01plus_write_register(NRF24L01PLUS_CONFIG, 0x00);
+    esp_rom_delay_us(2000); // 2 ms spin delay
+    // Power up
+    nrf24l01plus_write_register(NRF24L01PLUS_CONFIG, 0x02);
+    esp_rom_delay_us(2000); // 2 ms spin delay
+
+    // Clear Any interrupt bits set
+    nrf24l01plus_write_register(NRF24L01PLUS_STATUS, 0x70);
     // Put device into receive mode
     nrf24l01plus_receive_mode();
 }
@@ -226,7 +235,7 @@ void nrf24l01plus_read_buffer(uint8_t reg_addr, uint8_t* buffer, int buffer_len)
  * Checks for a received packet. If available:
  *   - Reads payload from RX FIFO into the provided buffer.
  *   - Flushes RX FIFO.
- *   - Clears RX_DR interrupt flag.
+ *   - Clears RX_DR, TX_DS & MAX_RT interrupt flags.
  *
  * Parameters:
  *   rx_buffer - Pointer to buffer to store received payload.
@@ -244,7 +253,8 @@ int nrf24l01plus_recieve_packet(uint8_t* rx_buffer) {
         esp_rom_delay_us(10);
         nrf24l01plus_write_register(NRF24L01PLUS_FLUSH_RX, 0); // Flush RX FIFO
         esp_rom_delay_us(10);
-        nrf24l01plus_write_register(NRF24L01PLUS_STATUS, 0x70); // Clear RX_DR, TX_DS, MAX_RT bits
+        nrf24l01plus_write_register(NRF24L01PLUS_STATUS, NRF24L01PLUS_RX_DR); // Clear RX_DR
+        esp_rom_delay_us(10);
         return 1;
     }
 
