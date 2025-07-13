@@ -44,7 +44,7 @@
 #define I2C_SDA 21
 
 void spi_bus_setup(spi_host_device_t host);
-i2c_master_bus_handle_t i2c_bus_setup(void);
+i2c_master_bus_handle_t* i2c_bus_setup(void);
 void print_task_stats(void);
 
 extern SemaphoreHandle_t spiHMutex;

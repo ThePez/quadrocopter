@@ -60,7 +60,7 @@ void spi_bus_setup(spi_host_device_t host) {
  * ---------------
  *
  */
-i2c_master_bus_handle_t i2c_bus_setup(void) {
+i2c_master_bus_handle_t* i2c_bus_setup(void) {
 
     i2c_master_bus_config_t i2c_mst_config = {
         .clk_source = I2C_CLK_SRC_DEFAULT,    // Default
@@ -71,10 +71,12 @@ i2c_master_bus_handle_t i2c_bus_setup(void) {
         .flags.enable_internal_pullup = true, // Default
     };
 
-    i2c_master_bus_handle_t bus_handle;
-    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &bus_handle));
+    i2c_master_bus_handle_t busHandle;
+    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &busHandle));
+    i2c_master_bus_handle_t* handle = malloc(sizeof(i2c_master_bus_handle_t));
+    *handle = busHandle;
     i2cMutex = xSemaphoreCreateMutex();
-    return bus_handle;
+    return handle;
 }
 
 /* print_task_stats()

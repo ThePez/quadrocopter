@@ -25,6 +25,13 @@
 ///////////////////////////// Structures & Enums /////////////////////////////
 
 typedef struct {
+    double pitch;
+    double roll;
+    double yaw;
+    double throttle;
+} RemoteSetPoints_t;
+
+typedef struct {
     double kp;           // Proportional scaler
     double ki;           // Intergral scaler
     double kd;           // Derivative scaler
@@ -43,6 +50,8 @@ typedef struct {
 
 // Task Function Prototypes
 void flight_controller(void);
+double throttle_adc_convert(uint16_t value);
+double angle_adc_convert(uint16_t value);
 void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawPID);
 double pid_update(PID_t* pid, double error);
 
