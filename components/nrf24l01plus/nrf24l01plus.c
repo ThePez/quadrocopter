@@ -121,12 +121,12 @@ void nrf24l01plus_init(spi_host_device_t spi_bus, void* handler) {
     // TX_PWR:0dBm, Datarate:1Mbps
     nrf24l01plus_write_register(NRF24L01PLUS_RF_SETUP, 0x06);
 
-    // Power down
-    nrf24l01plus_write_register(NRF24L01PLUS_CONFIG, 0x00);
-    esp_rom_delay_us(2000); // 2 ms spin delay
-    // Power up
-    nrf24l01plus_write_register(NRF24L01PLUS_CONFIG, 0x02);
-    esp_rom_delay_us(2000); // 2 ms spin delay
+    // // Power down
+    // nrf24l01plus_write_register(NRF24L01PLUS_CONFIG, 0x00);
+    // esp_rom_delay_us(2000); // 2 ms spin delay
+    // // Power up
+    // nrf24l01plus_write_register(NRF24L01PLUS_CONFIG, 0x02);
+    // esp_rom_delay_us(2000); // 2 ms spin delay
 
     // Clear Any interrupt bits set
     nrf24l01plus_write_register(NRF24L01PLUS_STATUS, 0x70);
@@ -235,7 +235,7 @@ void nrf24l01plus_read_buffer(uint8_t reg_addr, uint8_t* buffer, int buffer_len)
  * Checks for a received packet. If available:
  *   - Reads payload from RX FIFO into the provided buffer.
  *   - Flushes RX FIFO.
- *   - Clears RX_DR, TX_DS & MAX_RT interrupt flags.
+ *   - Clears RX_DR interrupt flag.
  *
  * Parameters:
  *   rx_buffer - Pointer to buffer to store received payload.
@@ -291,7 +291,7 @@ void nrf24l01plus_send_packet(uint8_t* tx_buf) {
  * ---------------------------
  * Puts the NRF24L01+ into RX mode.
  * Sets PRIM_RX=1, PWR_UP=1.
- * CONFIG bits: MASK_RX_DR | MASK_TX_DS | MASK_MAX_RT | EN_CRC | CRCO | PWR_UP | PRIM_RX
+ * CONFIG bits: Reserved | MASK_RX_DR | MASK_TX_DS | MASK_MAX_RT | EN_CRC | CRCO | PWR_UP | PRIM_RX
  * CE high to start listening.
  */
 void nrf24l01plus_receive_mode(void) {

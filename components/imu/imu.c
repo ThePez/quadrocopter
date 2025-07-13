@@ -31,23 +31,13 @@ QueueHandle_t imuQueue = NULL;
  *     getPitchAngle(), getRollAngle().
  *   - Outputs to imuQueue.
  */
-void imu_task(void) {
+void imu_task(void* pvParams) {
 
-    // Setup variables
-    Telemitry_t imuData = {0};
-    uint8_t accSuccess, gyroSuccess, magnoSuccess;
-    int16_t x, y, z;
-    double accPitch, accRoll, gyroPitch, gyroRoll, gyroYaw;
-
-    while (!imuQueue) {
-        // Loop to ensure the imu queue is created
-        imuQueue = xQueueCreate(5, sizeof(imuData));
-        vTaskDelay(pdMS_TO_TICKS(200));
-    }
-
-    spi_bus_setup(HSPI_HOST);
-    spi_bus_setup(VSPI_HOST);
-    i2c_master_bus_handle_t bus = i2c_bus_setup();
+    ImuParams_t* params = (ImuParams_t*) pvParams;
+    SemaphoreHandle_t spiHMutex = *(params->spiHMutex);
+    SemaphoreHandle_t spiVMutex = *(params->spiVMutex);
+    SemaphoreHandle_t i2cMutex = *(params->i2cMutex);
+    // i2c_master_bus_handle_t bus = *(params->i2cHost);
 
     xSemaphoreTake(spiHMutex, portMAX_DELAY);
     lis3dh_init(HSPI_HOST);
@@ -57,9 +47,21 @@ void imu_task(void) {
     gyro_init(VSPI_HOST);
     xSemaphoreGive(spiVMutex);
 
-    xSemaphoreTake(i2cMutex, portMAX_DELAY);
-    magnetometer_init(bus);
-    xSemaphoreGive(i2cMutex);
+    // xSemaphoreTake(i2cMutex, portMAX_DELAY);
+    // magnetometer_init(bus);
+    // xSemaphoreGive(i2cMutex);
+
+    // Setup variables
+    Telemitry_t imuData = {0};
+    uint8_t accSuccess, gyroSuccess, magnoSuccess;
+    int16_t x, y, z;
+    double accPitch, accRoll, gyroPitch, gyroRoll, gyroYaw;
+
+    while (!imuQueue) {
+        // Loop to ensure the imu queue is created
+        imuQueue = xQueueCreate(IMU_QUEUE_LENGTH, sizeof(Telemitry_t));
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
 
     while (1) {
 
@@ -104,7 +106,7 @@ void imu_task(void) {
         if (xSemaphoreTake(i2cMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
             // Read Compass data
             xSemaphoreGive(i2cMutex);
-            
+
             magnoSuccess = 1;
         } else {
             magnoSuccess = 0;
@@ -123,7 +125,7 @@ void imu_task(void) {
         }
 
         // Repeat this vey quickly
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
@@ -137,9 +139,7 @@ void imu_sign_check_task(void) {
     int16_t ax, ay, az;
     int16_t gx, gy, gz;
 
-    spi_bus_setup(HSPI_HOST);
     lis3dh_init(HSPI_HOST);
-    spi_bus_setup(VSPI_HOST);
     gyro_init(VSPI_HOST);
 
     while (1) {
