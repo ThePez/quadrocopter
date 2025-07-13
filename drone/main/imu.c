@@ -1,0 +1,159 @@
+/*
+ *****************************************************************************
+ * File: radio.c
+ * Author: Jack Cairns
+ * Date: 13-07-2025
+ * Brief:
+ * REFERENCE: None
+ *****************************************************************************
+ */
+
+#include "imu.h"
+
+TaskHandle_t imuTask = NULL;
+QueueHandle_t imuQueue = NULL;
+
+//////////////////////////////////////////////////////////////////////////////
+
+/* imu_task()
+ * ----------
+ * Continuously reads sensor data from the LIS3DH accelerometer
+ * and L3GD20 gyroscope.
+ *
+ * Calculates pitch, roll, and yaw angles using a complementary filter
+ * to fuse accelerometer and gyro data. Sends updated telemetry to
+ * the flight controller via imuQueue.
+ *
+ * Runs continuously as a FreeRTOS task.
+ *
+ * Dependencies:
+ *   - Uses lis3dh_init(), gyro_init(), lisReadAxisData(), gyroReadAxisData(),
+ *     getPitchAngle(), getRollAngle().
+ *   - Outputs to imuQueue.
+ */
+void imu_task(void) {
+
+    // Setup variables
+    Telemitry_t imuData = {0};
+    uint8_t accSuccess, gyroSuccess, magnoSuccess;
+    int16_t x, y, z;
+    double accPitch, accRoll, gyroPitch, gyroRoll, gyroYaw;
+
+    while (!imuQueue) {
+        // Loop to ensure the imu queue is created
+        imuQueue = xQueueCreate(5, sizeof(imuData));
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+
+    spi_bus_setup(HSPI_HOST);
+    spi_bus_setup(VSPI_HOST);
+    i2c_master_bus_handle_t bus = i2c_bus_setup();
+
+    xSemaphoreTake(spiHMutex, portMAX_DELAY);
+    lis3dh_init(HSPI_HOST);
+    xSemaphoreGive(spiHMutex);
+
+    xSemaphoreTake(spiVMutex, portMAX_DELAY);
+    gyro_init(VSPI_HOST);
+    xSemaphoreGive(spiVMutex);
+
+    xSemaphoreTake(i2cMutex, portMAX_DELAY);
+    magnetometer_init(bus);
+    xSemaphoreGive(i2cMutex);
+
+    while (1) {
+
+        // Get current time
+        uint64_t now = esp_timer_get_time();
+        long double dt = (now - imuData.prevTime) / 1e6;
+        imuData.prevTime = now; // Store current time for next run
+
+        // Get the axis data from the accelerometer
+        if (xSemaphoreTake(spiHMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+            lisReadAxisData(&x, &y, &z);
+            xSemaphoreGive(spiHMutex);
+
+            // Get Pitch & Roll angles from accelerometer
+            accPitch = -1 * getPitchAngle(x, y, z); // Nose up with the -1 gives positive sign
+            accRoll = getRollAngle(x, y, z);        // Left wing up gives positive angle
+            accSuccess = 1;
+        } else {
+            accSuccess = 0;
+        }
+
+        // Get the axis data from the gyroscope
+        if (xSemaphoreTake(spiVMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+            gyroReadAxisData(&x, &y, &z);
+            xSemaphoreGive(spiVMutex);
+
+            // Calculate the changes in angles from the Gyroscope data
+            gyroPitch = y * dt * GYRO_SENSITIVITY;     // Nose up gives positive angle
+            gyroRoll = -1 * x * dt * GYRO_SENSITIVITY; // Left wing up gives positive angle with -1
+            gyroYaw = -1 * z * dt * GYRO_SENSITIVITY;  // Nose turned right gives positive angle with -1
+            // Sum up the Yaw angle changes over time, ignoring tiny changes in Z (removes some noise)
+            if (z > 50 || z < -50) {
+                imuData.yawAngle += gyroYaw;
+            }
+
+            gyroSuccess = 1;
+        } else {
+            gyroSuccess = 0;
+        }
+
+        // Get the axis data from the magnetometer
+        if (xSemaphoreTake(i2cMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+            // Read Compass data
+            xSemaphoreGive(i2cMutex);
+            
+            magnoSuccess = 1;
+        } else {
+            magnoSuccess = 0;
+        }
+
+        // All SPI/I2C reads were successful -> process the data and send to queue
+        if (accSuccess && gyroSuccess && magnoSuccess) {
+            // Calculate the Pitch & Roll angles using both sets of data
+            imuData.pitchAngle = GYRO_ALPHA * (imuData.pitchAngle + gyroPitch) + (1 - GYRO_ALPHA) * accPitch;
+            imuData.rollAngle = GYRO_ALPHA * (imuData.rollAngle + gyroRoll) + (1 - GYRO_ALPHA) * accRoll;
+
+            // Send data to the Flight controller for processing
+            if (imuQueue) {
+                xQueueSendToFront(imuQueue, &imuData, pdMS_TO_TICKS(1));
+            }
+        }
+
+        // Repeat this vey quickly
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+/* IMU sign check test()
+ * ---------------------
+ * This task reads accelerometer and gyro data, calculates pitch/roll
+ * angles from the accelerometer, and prints raw gyro rates.
+ * Use this to check if signs and axes match.
+ */
+void imu_sign_check_task(void) {
+    int16_t ax, ay, az;
+    int16_t gx, gy, gz;
+
+    spi_bus_setup(HSPI_HOST);
+    lis3dh_init(HSPI_HOST);
+    spi_bus_setup(VSPI_HOST);
+    gyro_init(VSPI_HOST);
+
+    while (1) {
+        // Read accelerometer data
+        lisReadAxisData(&ax, &ay, &az);
+        double accPitch = getPitchAngle(ax, ay, az);
+        double accRoll = getRollAngle(ax, ay, az);
+
+        // Read gyro raw rates
+        gyroReadAxisData(&gx, &gy, &gz);
+
+        printf("ACC: Pitch = %.2f deg, Roll = %.2f deg | ", -accPitch, accRoll);
+        printf("GYRO: X = %d, Y = %d, Z = %d (raw dps)\r\n", -gx, gy, -gz);
+
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+}
