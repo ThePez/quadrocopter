@@ -37,7 +37,7 @@ void imu_task(void* pvParams) {
     SemaphoreHandle_t spiHMutex = *(params->spiHMutex);
     SemaphoreHandle_t spiVMutex = *(params->spiVMutex);
     SemaphoreHandle_t i2cMutex = *(params->i2cMutex);
-    // i2c_master_bus_handle_t bus = *(params->i2cHost);
+    i2c_master_bus_handle_t bus = *(params->i2cHost);
 
     xSemaphoreTake(spiHMutex, portMAX_DELAY);
     lis3dh_init(HSPI_HOST);
@@ -47,9 +47,9 @@ void imu_task(void* pvParams) {
     gyro_init(VSPI_HOST);
     xSemaphoreGive(spiVMutex);
 
-    // xSemaphoreTake(i2cMutex, portMAX_DELAY);
-    // magnetometer_init(bus);
-    // xSemaphoreGive(i2cMutex);
+    xSemaphoreTake(i2cMutex, portMAX_DELAY);
+    magnetometer_init(bus);
+    xSemaphoreGive(i2cMutex);
 
     // Setup variables
     Telemitry_t imuData = {0};
@@ -76,8 +76,9 @@ void imu_task(void* pvParams) {
             xSemaphoreGive(spiHMutex);
 
             // Get Pitch & Roll angles from accelerometer
-            accPitch = -1 * getPitchAngle(x, y, z); // Nose up with the -1 gives positive sign
-            accRoll = getRollAngle(x, y, z);        // Left wing up gives positive angle
+            accPitch = getPitchAngle(x, y, z); // Nose up with the -1 gives positive sign
+            accRoll = getRollAngle(x, y, z);   // Left wing up gives positive angle
+            printf("ACC Pitch: %.03f, Roll: %.03f\t", accPitch, accRoll);
             accSuccess = 1;
         } else {
             accSuccess = 0;
@@ -89,9 +90,11 @@ void imu_task(void* pvParams) {
             xSemaphoreGive(spiVMutex);
 
             // Calculate the changes in angles from the Gyroscope data
-            gyroPitch = y * dt * GYRO_SENSITIVITY;     // Nose up gives positive angle
-            gyroRoll = -1 * x * dt * GYRO_SENSITIVITY; // Left wing up gives positive angle with -1
-            gyroYaw = -1 * z * dt * GYRO_SENSITIVITY;  // Nose turned right gives positive angle with -1
+            gyroPitch = x * dt * GYRO_SENSITIVITY; // Nose up gives positive angle
+            gyroRoll = y * dt * GYRO_SENSITIVITY;  // Left wing up gives positive angle with -1
+            gyroYaw = z * dt * GYRO_SENSITIVITY;   // Nose turned right gives positive angle with -1
+            printf("GYRO Rates X: %.03f, Y: %.03f, Z: %.03f \t", x * GYRO_SENSITIVITY, y * GYRO_SENSITIVITY,
+                   z * GYRO_SENSITIVITY);
             // Sum up the Yaw angle changes over time, ignoring tiny changes in Z (removes some noise)
             if (z > 50 || z < -50) {
                 imuData.yawAngle += gyroYaw;
@@ -105,7 +108,9 @@ void imu_task(void* pvParams) {
         // Get the axis data from the magnetometer
         if (xSemaphoreTake(i2cMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
             // Read Compass data
+            magnetometer_read_axis(&x, &y, &z);
             xSemaphoreGive(i2cMutex);
+            printf("MAG X: %d, Y: %d, Z: %d\r\n", x, y, z);
 
             magnoSuccess = 1;
         } else {

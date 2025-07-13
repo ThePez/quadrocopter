@@ -26,6 +26,29 @@ PID_t yawPID = {.kp = 40, .ki = 0, .kd = 0.0};
 
 //////////////////////////////////////////////////////////////////////////////
 
+void radio_task_init(void) {
+    
+    SemaphoreHandle_t radioSetupMutex = xSemaphoreCreateMutex();
+    RadioParams_t* radioTaskParams = malloc(sizeof(RadioParams_t));
+    radioTaskParams->spiHost = VSPI_HOST;
+    radioTaskParams->spiMutex = &spiVMutex;
+    radioTaskParams->setupMutex = &radioSetupMutex;
+    xTaskCreate((void*) &radio_control_task, "RADIO_CON", RADIO_STACK, radioTaskParams, RADIO_PRIO, &radioControlTask);
+    xTaskCreate((void*) &radio_receiver_task, "RX_RADIO", RADIO_STACK, radioTaskParams, RADIO_PRIO, &radioReceiverTask);
+    xTaskCreate((void*) &radio_transmitter_task, "TX_RADIO", RADIO_STACK, radioTaskParams, RADIO_PRIO,
+                &radioTransmitterTask);
+}
+
+void imu_task_init(i2c_master_bus_handle_t* i2cBus) {
+
+    ImuParams_t* imuTaskParams = malloc(sizeof(ImuParams_t));
+    imuTaskParams->i2cHost = i2cBus;
+    imuTaskParams->i2cMutex = &i2cMutex;
+    imuTaskParams->spiHMutex = &spiHMutex;
+    imuTaskParams->spiVMutex = &spiVMutex;
+    xTaskCreate((void*) &imu_task, "IMU", IMU_STACK, imuTaskParams, IMU_PRIO, &imuTask);
+}
+
 /* app_main()
  * ----------
  * Main entry point for the application.
@@ -45,26 +68,10 @@ void app_main(void) {
 
     // Setup PWM
     esc_pwm_init();
-
     // Radio Setup
-    SemaphoreHandle_t radioSetupMutex = xSemaphoreCreateMutex();
-    RadioParams_t* radioTaskParams = malloc(sizeof(RadioParams_t));
-    radioTaskParams->spiHost = VSPI_HOST;
-    radioTaskParams->spiMutex = &spiVMutex;
-    radioTaskParams->setupMutex = &radioSetupMutex;
-    xTaskCreate((void*) &radio_control_task, "RADIO_CON", RADIO_STACK, radioTaskParams, RADIO_PRIO,
-                &radioControlTask);
-    xTaskCreate((void*) &radio_receiver_task, "RX_RADIO", RADIO_STACK, radioTaskParams, RADIO_PRIO, &radioReceiverTask);
-    xTaskCreate((void*) &radio_transmitter_task, "TX_RADIO", RADIO_STACK, radioTaskParams, RADIO_PRIO,
-                &radioTransmitterTask);
-
+    radio_task_init();
     // IMU Setup
-    ImuParams_t* imuTaskParams = malloc(sizeof(ImuParams_t));
-    imuTaskParams->i2cHost = i2cBus;
-    imuTaskParams->i2cMutex = &i2cMutex;
-    imuTaskParams->spiHMutex = &spiHMutex;
-    imuTaskParams->spiVMutex = &spiVMutex;
-    xTaskCreate((void*) &imu_task, "IMU", IMU_STACK, imuTaskParams, IMU_PRIO, &imuTask);
+    imu_task_init(i2cBus);
 
     // Flight Controller
     xTaskCreate((void*) &flight_controller, "FC_Task", SYS_STACK, NULL, SYS_PRIO, &systemTask);
@@ -148,8 +155,8 @@ void flight_controller(void) {
                 double yawOutput = pid_update(&yawPID, errYaw);
                 // Then update the ESC's
                 update_escs(remoteData.throttle, pitchOutput, rollOutput, yawOutput);
-                uint8_t item[16] = {0x34, 0x56, 0x78, 0x92};
-                xQueueSendToBack(radioTransmitterQueue, item, pdMS_TO_TICKS(5));
+                // uint8_t item[16] = {0x34, 0x56, 0x78, 0x92};
+                // xQueueSendToBack(radioTransmitterQueue, item, pdMS_TO_TICKS(5));
             }
         }
     }
@@ -254,9 +261,9 @@ void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawP
     for (uint8_t i = 0; i < NUMBER_OF_MOTORS; i++) {
         esc_pwm_set_duty_cycle(i, (uint16_t) motorSpeeds[i]);
         if (i == 3) {
-            printf("Motor %d: %d\r\n", i + 1, (uint16_t) motorSpeeds[i]);
+            // printf("Motor %d: %d\r\n", i + 1, (uint16_t) motorSpeeds[i]);
         } else {
-            printf("Motor %d: %d\t", i + 1, (uint16_t) motorSpeeds[i]);
+            // printf("Motor %d: %d\t", i + 1, (uint16_t) motorSpeeds[i]);
         }
     }
 }

@@ -36,6 +36,8 @@ void magnetometer_init(i2c_master_bus_handle_t bus) {
     ESP_ERROR_CHECK(i2c_master_transmit(magnoI2CHandle, config_b, 2, -1));
     // Write Mode Register
     ESP_ERROR_CHECK(i2c_master_transmit(magnoI2CHandle, mode, 2, -1));
+
+    printf("Compass Setup\r\n");
 }
 
 uint8_t magnetometer_read_register(uint8_t address) {
@@ -53,7 +55,7 @@ void magnetometer_read_axis(int16_t* x, int16_t* y, int16_t* z) {
     uint8_t addr = HMC5883L_OUTPUT_X_MSB_REG_ADDR;
     uint8_t outputBuffer[6];
 
-    ESP_ERROR_CHECK(i2c_master_transmit_receive(magnoI2CHandle, &addr, 1, outputBuffer, 6, 5));
+    ESP_ERROR_CHECK(i2c_master_transmit_receive(magnoI2CHandle, &addr, 1, outputBuffer, 6, 1000));
     *x = ((int16_t) outputBuffer[0] << 8) | outputBuffer[1];
     *z = ((int16_t) outputBuffer[2] << 8) | outputBuffer[3];
     *y = ((int16_t) outputBuffer[4] << 8) | outputBuffer[5];
