@@ -284,3 +284,25 @@ void encode_packet(void* input, void* output) {
         out[i] = hamming_byte_encode(in[i]);
     }
 }
+
+/* decode_packet()
+ * ---------------
+ * Decodes a received data packet using Hamming decoding.
+ *
+ * The NRF24L01+ transmits a 32-byte encoded packet (16 words of 16 bits),
+ * which this function decodes into the original 16-byte payload.
+ *
+ * Parameters:
+ *   input  - Pointer to the raw received packet buffer.
+ *   output - Pointer to the decoded output buffer.
+ *
+ * Dependencies:
+ *   Uses hamming_word_decode() to correct single-bit errors.
+ */
+void decode_packet(void* input, void* output) {
+    uint16_t* in = (uint16_t*) input;
+    uint8_t* out = (uint8_t*) output;
+    for (uint8_t i = 0; i < NRF24L01PLUS_TX_PLOAD_WIDTH / 2; i++) {
+        out[i] = hamming_word_decode(in[i]);
+    }
+}
