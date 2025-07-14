@@ -10,6 +10,17 @@
 
 #include "imu.h"
 
+// STD C lib headers
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/param.h>
+
+// Custom Components
+#include "hmc5883l.h"
+#include "l3gd20.h"
+#include "lis3DH.h"
+
 TaskHandle_t imuTask = NULL;
 QueueHandle_t imuQueue = NULL;
 
@@ -55,7 +66,7 @@ void imu_task(void* pvParams) {
     Telemitry_t imuData = {0};
     uint8_t accSuccess, gyroSuccess, magnoSuccess;
     int16_t x, y, z;
-    double accPitch, accRoll, gyroPitch, gyroRoll, gyroYaw;
+    double pitch, roll, yaw, pitchRate, rollRate, yawRate;
 
     while (!imuQueue) {
         // Loop to ensure the imu queue is created
@@ -65,20 +76,15 @@ void imu_task(void* pvParams) {
 
     while (1) {
 
-        // Get current time
-        uint64_t now = esp_timer_get_time();
-        long double dt = (now - imuData.prevTime) / 1e6;
-        imuData.prevTime = now; // Store current time for next run
-
         // Get the axis data from the accelerometer
         if (xSemaphoreTake(spiHMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
             lisReadAxisData(&x, &y, &z);
             xSemaphoreGive(spiHMutex);
-
+            // printf("X: %d\r\n", x);
             // Get Pitch & Roll angles from accelerometer
-            accPitch = getPitchAngle(x, y, z); // Nose up with the -1 gives positive sign
-            accRoll = getRollAngle(x, y, z);   // Left wing up gives positive angle
-            printf("ACC Pitch: %.03f, Roll: %.03f\t", accPitch, accRoll);
+            pitch = getPitchAngle(x, y, z); // Nose up with the -1 gives positive sign
+            roll = getRollAngle(y, z);      // Left wing up gives positive angle
+
             accSuccess = 1;
         } else {
             accSuccess = 0;
@@ -90,16 +96,9 @@ void imu_task(void* pvParams) {
             xSemaphoreGive(spiVMutex);
 
             // Calculate the changes in angles from the Gyroscope data
-            gyroPitch = x * dt * GYRO_SENSITIVITY; // Nose up gives positive angle
-            gyroRoll = y * dt * GYRO_SENSITIVITY;  // Left wing up gives positive angle with -1
-            gyroYaw = z * dt * GYRO_SENSITIVITY;   // Nose turned right gives positive angle with -1
-            printf("GYRO Rates X: %.03f, Y: %.03f, Z: %.03f \t", x * GYRO_SENSITIVITY, y * GYRO_SENSITIVITY,
-                   z * GYRO_SENSITIVITY);
-            // Sum up the Yaw angle changes over time, ignoring tiny changes in Z (removes some noise)
-            if (z > 50 || z < -50) {
-                imuData.yawAngle += gyroYaw;
-            }
-
+            pitchRate = y * GYRO_SENSITIVITY; // Nose up gives positive angle
+            rollRate = x * GYRO_SENSITIVITY;  // Left wing up gives positive angle with -1
+            yawRate = z * GYRO_SENSITIVITY;   // Nose turned right gives positive angle with -1
             gyroSuccess = 1;
         } else {
             gyroSuccess = 0;
@@ -110,18 +109,29 @@ void imu_task(void* pvParams) {
             // Read Compass data
             magnetometer_read_axis(&x, &y, &z);
             xSemaphoreGive(i2cMutex);
-            printf("MAG X: %d, Y: %d, Z: %d\r\n", x, y, z);
+            if (accSuccess) {
+                yaw = getYawAngle(pitch, roll, x, y, z);
+                magnoSuccess = 1;
+            } else {
+                magnoSuccess = 0;
+            }
 
-            magnoSuccess = 1;
         } else {
             magnoSuccess = 0;
         }
 
         // All SPI/I2C reads were successful -> process the data and send to queue
         if (accSuccess && gyroSuccess && magnoSuccess) {
+            printf("Angle Pitch: %.03f, Roll: %.03f, Yaw %.03f\r\n", pitch, roll, yaw);
+            printf("Rates Pitch: %.03f, Roll: %.03f, Yaw: %.03f\r\n", pitchRate, rollRate, yawRate);
+
             // Calculate the Pitch & Roll angles using both sets of data
-            imuData.pitchAngle = GYRO_ALPHA * (imuData.pitchAngle + gyroPitch) + (1 - GYRO_ALPHA) * accPitch;
-            imuData.rollAngle = GYRO_ALPHA * (imuData.rollAngle + gyroRoll) + (1 - GYRO_ALPHA) * accRoll;
+            imuData.pitchAngle = pitch;
+            imuData.pitchRate = pitchRate;
+            imuData.rollAngle = roll;
+            imuData.rollRate = rollRate;
+            imuData.yawAngle = yaw;
+            imuData.yawRate = yawRate;
 
             // Send data to the Flight controller for processing
             if (imuQueue) {
@@ -130,7 +140,7 @@ void imu_task(void* pvParams) {
         }
 
         // Repeat this vey quickly
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -151,7 +161,7 @@ void imu_sign_check_task(void) {
         // Read accelerometer data
         lisReadAxisData(&ax, &ay, &az);
         double accPitch = getPitchAngle(ax, ay, az);
-        double accRoll = getRollAngle(ax, ay, az);
+        double accRoll = getRollAngle(ay, az);
 
         // Read gyro raw rates
         gyroReadAxisData(&gx, &gy, &gz);

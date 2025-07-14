@@ -11,26 +11,15 @@
 #ifndef IMU_H
 #define IMU_H
 
-// STD C lib headers
-#include <math.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <string.h>
-#include <sys/param.h>
 
 // ESP-IDF Prebuilts
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
-#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-
-// Custom Components
-#include "hmc5883l.h"
-#include "l3gd20.h"
-#include "lis3DH.h"
 
 #define GYRO_ALPHA 0.30
 
