@@ -71,7 +71,6 @@
 
 // 12 bit range / 2G
 #define LIS3DH_SENSITIVITY_2G 1.0 // mg/LSB
-// #define SENSITIVITY 16384.0 
 
 // Status Enum
 typedef enum {
@@ -92,6 +91,6 @@ uint8_t lisReadRegister(uint8_t addr);
 void lisWriteRegister(uint8_t addr, uint8_t data);
 void lisReadAxisData(int16_t* x, int16_t* y, int16_t* z);
 double getPitchAngle(int16_t x, int16_t y, int16_t z);
-double getRollAngle(int16_t x, int16_t y, int16_t z);
+double getRollAngle(int16_t y, int16_t z);
 
 #endif

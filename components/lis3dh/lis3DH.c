@@ -13,6 +13,9 @@
 #include <math.h>
 #include <stdio.h>
 
+#define DEG_TO_RAD (M_PI / 180.0)
+#define RAD_TO_DEG (180.0 / M_PI)
+
 // Strings for IMU setup
 static const char* lis_strings[3] = {"ACCEL Initialization Successful\n", "ACCEL Initialization Failed\n",
                                      "Expected 0x33, got 0x%02X\n"};
@@ -62,7 +65,7 @@ void lis3dh_init(spi_host_device_t spi_bus) {
     }
 
     if (status == LISSUCCESS) {
-        lisWriteRegister(LIS3DH_CTRL_REG1, 0x57);
+        lisWriteRegister(LIS3DH_CTRL_REG1, 0x27);
         lisWriteRegister(LIS3DH_CTRL_REG2, 0x00); // No HighPass filter
         lisWriteRegister(LIS3DH_CTRL_REG3, 0x00); // No interrupts
         lisWriteRegister(LIS3DH_CTRL_REG4, 0x08); // High resolution
@@ -72,8 +75,6 @@ void lis3dh_init(spi_host_device_t spi_bus) {
     } else {
         printf(lis_strings[1]);
     }
-
-    return;
 }
 
 /* lisPowerDown()
@@ -166,22 +167,33 @@ void lisReadAxisData(int16_t* x, int16_t* y, int16_t* z) {
 
 /* getPitchAngle()
  * ---------------
- * Function will return the calculated pitch angle.
+ * Calculates pitch (nose up/down) in degrees.
+ * Positive = nose up.
+ * Assumes:
+ *   - X = forward
+ *   - Y = left
+ *   - Z = up
  */
 double getPitchAngle(int16_t x, int16_t y, int16_t z) {
-    double accX = x * LIS3DH_SENSITIVITY_2G / 1000.0;
+    double accX = x * LIS3DH_SENSITIVITY_2G / 1000.0; // Convert mg → g
     double accY = y * LIS3DH_SENSITIVITY_2G / 1000.0;
     double accZ = z * LIS3DH_SENSITIVITY_2G / 1000.0;
-    return atan2(-accX, sqrt(pow(accY, 2) + pow(accZ, 2))) * (180.0 / M_PI);
+
+    return atan2(accX, sqrt(pow(accY,2) + pow(accZ,2))) * RAD_TO_DEG;
 }
 
 /* getRollAngle()
  * --------------
- * Function will return the calculated roll angle.
+ * Calculates roll (left/right wing up/down) in degrees.
+ * Positive = left wing up.
+ * Assumes:
+ *   - X = forward
+ *   - Y = left
+ *   - Z = up
  */
-double getRollAngle(int16_t x, int16_t y, int16_t z) {
-    double accX = x * LIS3DH_SENSITIVITY_2G / 1000.0;
-    double accY = y * LIS3DH_SENSITIVITY_2G / 1000.0;
+double getRollAngle(int16_t y, int16_t z) {
+    double accY = y * LIS3DH_SENSITIVITY_2G / 1000.0; // Convert mg → g
     double accZ = z * LIS3DH_SENSITIVITY_2G / 1000.0;
-    return atan2(accY, sqrt(pow(accX, 2) + pow(accZ, 2))) * (180.0 / M_PI);
+
+    return atan2(accY, accZ) * RAD_TO_DEG;
 }

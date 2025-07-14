@@ -32,10 +32,13 @@
 #define HMC5883L_ID_B_REG_ADDR 0x0B
 #define HMC5883L_ID_C_REG_ADDR 0x0C
 
+#define HMC5883L_SCALE (1.0 / 1090.0)
+
 void i2c_add_device(i2c_master_bus_handle_t bus);
 void magnetometer_init(i2c_master_bus_handle_t bus);
 uint8_t magnetometer_read_register(uint8_t address);
 void magnetometer_write_register(uint8_t address, uint8_t data);
 void magnetometer_read_axis(int16_t* x, int16_t* y, int16_t* z);
+double getYawAngle(double pitch, double roll, int16_t x, int16_t y, int16_t z);
 
 #endif
