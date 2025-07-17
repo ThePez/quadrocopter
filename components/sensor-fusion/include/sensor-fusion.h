@@ -11,7 +11,7 @@
 #ifndef SENSOR_FUSION_H
 #define SENSOR_FUSION_H
 
-#include "sh2.c"
+#include "sh2.h"
 #include "sh2_util.h"
 
 #endif

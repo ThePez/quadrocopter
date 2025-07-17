@@ -106,22 +106,22 @@ void esc_pwm_set_duty_cycle(MotorIndex motor, uint16_t duty_cycle) {
     duty_cycle = (duty_cycle > MOTOR_SPEED_MAX) ? MOTOR_SPEED_MAX
                  : duty_cycle < MOTOR_SPEED_MIN ? MOTOR_SPEED_MIN
                                                 : duty_cycle;
-    switch (motor) {
-    case 0:
-        duty_cycle -= MOTOR_A_OFFSET;
-        break;
-    case 1:
-        duty_cycle -= MOTOR_B_OFFSET;
-        break;
-    case 2:
-        duty_cycle -= MOTOR_C_OFFSET;
-        break;
-    case 3:
-        duty_cycle -= MOTOR_D_OFFSET;
+    // switch (motor) {
+    // case 0:
+    //     duty_cycle -= MOTOR_A_OFFSET;
+    //     break;
+    // case 1:
+    //     duty_cycle -= MOTOR_B_OFFSET;
+    //     break;
+    // case 2:
+    //     duty_cycle -= MOTOR_C_OFFSET;
+    //     break;
+    // case 3:
+    //     duty_cycle -= MOTOR_D_OFFSET;
 
-    default:
-        break;
-    }
+    // default:
+    //     break;
+    // }
 
     // Update the comparitor used by the specified motor
     ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(esc_pwm_comparators[motor], duty_cycle));
