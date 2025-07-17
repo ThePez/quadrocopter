@@ -58,7 +58,18 @@ void spi_bus_setup(spi_host_device_t host) {
 
 /* i2c_bus_setup()
  * ---------------
+ * Configures and initializes the I2C master bus with default parameters.
  *
+ * The I2C port is auto-selected, and default GPIO pins for SDA and SCL
+ * are used (GPIO 21 and GPIO 22). Internal pull-ups are enabled.
+ *
+ * Returns:
+ *   Pointer to a malloc'ed handle for the initialized I2C master bus.
+ *
+ * Dependencies:
+ *   - Uses ESP-IDF I2C Master driver.
+ *   - Allocates memory for and returns the bus handle pointer.
+ *   - Creates a mutex (i2cMutex) for I2C bus access synchronization.
  */
 i2c_master_bus_handle_t* i2c_bus_setup(void) {
 
