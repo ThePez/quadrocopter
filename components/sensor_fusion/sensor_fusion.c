@@ -11,11 +11,30 @@
 #include "sensor_fusion.h"
 
 #include "esp_rom_sys.h"
-#include <math.h>
+#include "esp_timer.h"
 
-spi_device_handle_t fusionSPIHandle;
+#include "sh2.h"
+#include "sh2_SensorValue.h"
+#include "sh2_err.h"
+
+// Prototypes
+void fusion_hardware_reset(void);
+int fusion_hal_open(sh2_Hal_t* self);
+void fusion_hal_close(sh2_Hal_t* self);
+int fusion_hal_read(sh2_Hal_t* self, uint8_t* pBuffer, unsigned int len, uint32_t* timeUS);
+int fusion_hal_write(sh2_Hal_t* self, uint8_t* pBuffer, unsigned int len);
+uint32_t fusion_hal_getTimeUs(sh2_Hal_t* self);
+void fusion_hal_callback(void* cookie, sh2_AsyncEvent_t* pEvent);
+void fusion_sensor_handler(void* cookie, sh2_SensorEvent_t* event);
+
+// Global vaiables
 TaskHandle_t fusionTaskHandle = NULL;
-static uint8_t resetInitialised = 0;
+QueueHandle_t fusionQueue = NULL;
+
+// SPI
+static spi_device_handle_t fusionSPIHandle;
+static SemaphoreHandle_t spiMutex = NULL;
+// static txZeros[SH2_HAL_MAX_TRANSFER_IN] = {0};
 
 // SH2 objects
 static sh2_Hal_t fusionHal;
@@ -97,7 +116,7 @@ void fusion_interrupt_init(void* handler) {
     ESP_ERROR_CHECK(gpio_isr_handler_add(FUSION_INT_PIN, handler, NULL));
 }
 
-void fusion_reset_pin_init(void) {
+void fusion_reset_init(void) {
 
     gpio_config_t config = {
         .mode = GPIO_MODE_INPUT_OUTPUT,             // Direction of the pin
@@ -108,10 +127,9 @@ void fusion_reset_pin_init(void) {
     };
 
     ESP_ERROR_CHECK(gpio_config(&config));
-    resetInitialised = 1;
 }
 
-static void fusion_hardware_reset(void) {
+void fusion_hardware_reset(void) {
     gpio_set_level(FUSION_RESET_PIN, 1);
     esp_rom_delay_us(10);
     gpio_set_level(FUSION_RESET_PIN, 0);
@@ -120,69 +138,89 @@ static void fusion_hardware_reset(void) {
     vTaskDelay(pdMS_TO_TICKS(50)); // Datasheet: wait for boot
 }
 
-static int fusion_hal_open(sh2_Hal_t* self) {
+int fusion_hal_open(sh2_Hal_t* self) {
 
     fusion_hardware_reset();
     return SH2_OK;
 }
 
-static void fusion_hal_close(sh2_Hal_t* self) {
+void fusion_hal_close(sh2_Hal_t* self) {
 
     // Nothing needed
 }
 
-static int fusion_hal_read(sh2_Hal_t* self, uint8_t* pBuffer, uint32_t len, uint32_t* pBytesRead) {
-    uint8_t txDummy[2] = {0x00, 0x00};
+int fusion_hal_read(sh2_Hal_t* self, uint8_t* pBuffer, unsigned int len, uint32_t* timeUS) {
 
-    spi_transaction_t t = {
-        .length = len * 8,
+    // Read 4-byte header
+    spi_transaction_t transactionHeader = {
         .rx_buffer = pBuffer,
-        .tx_buffer = txDummy,
+        .tx_buffer = NULL,
+        .length = 32 // Bits
     };
-    esp_err_t err = spi_device_transmit(fusionSPIHandle, &t);
-    if (err == ESP_OK) {
-        *pBytesRead = len;
-        return SH2_OK;
+
+    esp_err_t err = spi_device_transmit(fusionSPIHandle, &transactionHeader);
+    if (err != ESP_OK) {
+        return 0;
     }
-    return SH2_ERR_IO;
+
+    uint16_t packet_size = (uint16_t) pBuffer[0] | ((uint16_t) pBuffer[1] << 8);
+    packet_size &= ~0x8000; // clear continue bit
+
+    if (packet_size > len) {
+        return 0;
+    }
+
+    spi_transaction_t transactionBody = {
+        .rx_buffer = pBuffer,
+        .tx_buffer = NULL,
+        .length = (packet_size) * 8 // Bits
+    };
+
+    // uint8_t* dummyBuffer = malloc(sizeof(uint8_t) * packet_size);
+    // memset(dummyBuffer, 0xFF, sizeof(dummyBuffer));
+    // transaction.tx_buffer = dummyBuffer;
+    // transaction.rx_buffer = pBuffer;
+    // transaction.length = packet_size * 8;
+    err = spi_device_transmit(fusionSPIHandle, &transactionBody);
+    // free(dummyBuffer);
+    if (err != ESP_OK) {
+        return 0;
+    }
+
+    *timeUS = esp_timer_get_time();
+    return packet_size;
 }
 
-static int fusion_hal_write(sh2_Hal_t* self, uint8_t* pBuffer, uint32_t len) {
-    spi_transaction_t t = {
+int fusion_hal_write(sh2_Hal_t* self, uint8_t* pBuffer, unsigned int len) {
+
+    spi_transaction_t transaction = {
         .length = len * 8,
         .tx_buffer = pBuffer,
+        .rx_buffer = NULL,
     };
-    esp_err_t err = spi_device_transmit(fusionSPIHandle, &t);
-    return err == ESP_OK ? SH2_OK : SH2_ERR_IO;
+
+    esp_err_t err = spi_device_transmit(fusionSPIHandle, &transaction);
+    if (err == ESP_OK) {
+        return len;
+    }
+    return 0;
 }
 
-static uint32_t fusion_hal_getTimeUs(sh2_Hal_t* self) {
+uint32_t fusion_hal_getTimeUs(sh2_Hal_t* self) {
     return esp_timer_get_time();
 }
 
-void quatToEuler(float qw, float qx, float qy, float qz, float* roll, float* pitch, float* yaw) {
-
-    // roll (x-axis rotation)
-    float sinr_cosp = 2.0f * (qw * qx + qy * qz);
-    float cosr_cosp = 1.0f - 2.0f * (pow(qx, 2) + pow(qy, 2));
-    *roll = atan2f(sinr_cosp, cosr_cosp);
-
-    // pitch (y-axis rotation)
-    float sinp = 2.0f * (qw * qy - qz * qx);
-    if (fabsf(sinp) >= 1.0f)
-        *pitch = copysignf(M_PI / 2.0f, sinp); // use 90 degrees if out of range
-    else
-        *pitch = asinf(sinp);
-
-    // yaw (z-axis rotation)
-    float siny_cosp = 2.0f * (qw * qz + qx * qy);
-    float cosy_cosp = 1.0f - 2.0f * (pow(qy, 2) + pow(qz, 2));
-    *yaw = atan2f(siny_cosp, cosy_cosp);
+void fusion_hal_callback(void* cookie, sh2_AsyncEvent_t* pEvent) {
+    if (pEvent->eventId == SH2_RESET) {
+    }
 }
 
-static void fusion_sensor_handler(void* cookie, sh2_SensorEvent_t* pEvent) {
+void fusion_sensor_handler(void* cookie, sh2_SensorEvent_t* event) {
 
-    int rc = sh2_decodeSensorEvent(&sensorValue, pEvent);
+    SensorData_t data;
+    uint8_t gyro = 0;
+    uint8_t rotate = 0;
+    int rc = sh2_decodeSensorEvent(&sensorValue, event);
     if (rc != SH2_OK) {
 
         sensorValue.timestamp = 0;
@@ -190,29 +228,34 @@ static void fusion_sensor_handler(void* cookie, sh2_SensorEvent_t* pEvent) {
     }
 
     if (sensorValue.sensorId == SH2_ROTATION_VECTOR) {
-        float qw = sensorValue.un.rotationVector.real;
-        float qx = sensorValue.un.rotationVector.i;
-        float qy = sensorValue.un.rotationVector.j;
-        float qz = sensorValue.un.rotationVector.k;
-
-        float roll, pitch, yaw;
-        quatToEuler(qw, qx, qy, qz, &roll, &pitch, &yaw);
+        data.qw = sensorValue.un.rotationVector.real;
+        data.qx = sensorValue.un.rotationVector.i;
+        data.qy = sensorValue.un.rotationVector.j;
+        data.qz = sensorValue.un.rotationVector.k;
+        rotate = 1;
     }
 
     if (sensorValue.sensorId == SH2_GYROSCOPE_CALIBRATED) {
-        float x = sensorValue.un.gyroscope.x;
-        float y = sensorValue.un.gyroscope.y;
-        float z = sensorValue.un.gyroscope.z;
+        data.gx = sensorValue.un.gyroscope.x;
+        data.gy = sensorValue.un.gyroscope.y;
+        data.gz = sensorValue.un.gyroscope.z;
+        gyro = 1;
     }
 
     // Now send data to IMU Task from here.
+    if (fusionQueue && (gyro || rotate)) {
+        printf("FUSION DATA SENT\r\n");
+        xQueueSendToFront(fusionQueue, &data, pdMS_TO_TICKS(1));
+    }
 }
 
 void fusion_init(spi_host_device_t spiHost, void* handler) {
 
     fusion_spi_init(spiHost);
     fusion_interrupt_init(handler);
-    fusion_reset_pin_init();
+    fusion_reset_init();
+    printf("FUSION HARDWARE DONE\r\n");
+    fusion_hardware_reset();
 
     // Fill HAL
     fusionHal.open = fusion_hal_open;
@@ -221,7 +264,9 @@ void fusion_init(spi_host_device_t spiHost, void* handler) {
     fusionHal.write = fusion_hal_write;
     fusionHal.getTimeUs = fusion_hal_getTimeUs;
 
-    ESP_ERROR_CHECK(sh2_open(&fusionHal, fusion_sensor_handler, NULL));
+    ESP_ERROR_CHECK(sh2_open(&fusionHal, fusion_hal_callback, NULL));
+
+    printf("FUSION OPEN DONE\r\n");
 
     sh2_SensorConfig_t config = {.reportInterval_us = 10000, // 100 Hz
                                  .changeSensitivityEnabled = false,
@@ -230,12 +275,29 @@ void fusion_init(spi_host_device_t spiHost, void* handler) {
 
     ESP_ERROR_CHECK(sh2_setSensorConfig(SH2_ROTATION_VECTOR, &config));
     ESP_ERROR_CHECK(sh2_setSensorConfig(SH2_GYROSCOPE_CALIBRATED, &config));
+
+    // Register sensor callback function
+    ESP_ERROR_CHECK(sh2_setSensorCallback(fusion_sensor_handler, NULL));
+    printf("FUSION INIT COMPLETE\r\n");
 }
 
-/* --- Task -------------------------------------------------------------- */
-void fusion_task(void* param) {
+void fusion_task(void* pvParams) {
+
+    FusionParams_t* params = (FusionParams_t*) pvParams;
+    spiMutex = *(params->spiMutex);
+
+    while (!fusionQueue) {
+        fusionQueue = xQueueCreate(FUSION_QUEUE_LENGTH, sizeof(SensorData_t));
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    fusion_init(params->spiHost, &fusion_isr_handler);
+
     while (1) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        xSemaphoreTake(spiMutex, portMAX_DELAY);
         sh2_service();
+        printf("FUSION SERVICE DONE\r\n");
+        xSemaphoreGive(spiMutex);
     }
 }
