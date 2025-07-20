@@ -9,10 +9,10 @@
  */
 
 #include "drone.h"
+#include "bno085_task.h"
 #include "common.h"
 #include "motors.h"
 #include "radio.h"
-#include "bno085_task.h"
 
 ////////////////////////////// Global Variables //////////////////////////////
 
@@ -55,10 +55,9 @@ void app_main(void) {
 
     // Allow the gpio_isr_install to happen from the Radio setup,
     // before the imu task begins
-    vTaskDelay(pdMS_TO_TICKS(20)); 
     
     // IMU task Setup
-    bno08x_start_task(); // Start the C++ task    
+    bno08x_start_task(); // Start the C++ task
 
     // Flight Controller
     xTaskCreate((void*) &flight_controller, "FC_Task", SYS_STACK, NULL, SYS_PRIO, &systemTask);
@@ -260,10 +259,10 @@ void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawP
         }
     } else {
 
-        motorSpeeds[0] = throttle - pitchPID + rollPID + yawPID; // Front left
-        motorSpeeds[1] = throttle + pitchPID + rollPID - yawPID; // Rear left
-        motorSpeeds[2] = throttle + pitchPID - rollPID + yawPID; // Rear right
-        motorSpeeds[3] = throttle - pitchPID - rollPID - yawPID; // Front right
+        motorSpeeds[0] = throttle - pitchPID + rollPID - yawPID; // Front left
+        motorSpeeds[1] = throttle + pitchPID + rollPID + yawPID; // Rear left
+        motorSpeeds[2] = throttle + pitchPID - rollPID - yawPID; // Rear right
+        motorSpeeds[3] = throttle - pitchPID - rollPID + yawPID; // Front right
     }
 
     for (uint8_t i = 0; i < NUMBER_OF_MOTORS; i++) {
