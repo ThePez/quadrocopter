@@ -10,7 +10,6 @@
 
 #include "drone.h"
 #include "common.h"
-#include "imu.h"
 #include "motors.h"
 #include "radio.h"
 #include "bno085_task.h"
