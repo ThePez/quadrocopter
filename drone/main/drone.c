@@ -55,7 +55,7 @@ void app_main(void) {
 
     // Allow the gpio_isr_install to happen from the Radio setup,
     // before the imu task begins
-    
+
     // IMU task Setup
     bno08x_start_task(); // Start the C++ task
 
@@ -173,7 +173,7 @@ void process_remote_data(RemoteSetPoints_t* setPoints, ControlSystem_t* system, 
     switch (payload[0]) {
     case PID_MODIFIERS:
         buffer = (uint8_t*) (payload + 1);
-        for (uint8_t i = 0; i < 3; i++) {
+        for (uint8_t i = 0; i < 6; i++) {
             system->pids[i].kp = buffer[0];
             system->pids[i].kd = buffer[1];
             system->pids[i].ki = buffer[2];
@@ -183,10 +183,10 @@ void process_remote_data(RemoteSetPoints_t* setPoints, ControlSystem_t* system, 
         break;
 
     case SETPOINT_UPDATE:
-        setPoints->throttle = payload[1];
-        setPoints->pitch = payload[2];
-        setPoints->roll = payload[3];
-        setPoints->yaw = payload[4];
+        setPoints->throttle = (payload[1] / 4.095 + 1000.0);
+        // setPoints->pitch = round((payload[2] - 2048.0) / 68.267);
+        // setPoints->roll = round((payload[3] - 2048.0) / 68.267);
+        // setPoints->yaw = round((payload[4] - 2048.0) / 68.267);
         break;
     }
 }

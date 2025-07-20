@@ -54,7 +54,7 @@
 
 // Task Function Prototypes
 void remote_controller(void);
-void remote_input_task(void);
+void adc_input_task(void);
 void radio_remote_task(void);
 
 void spi_bus_setup(spi_host_device_t host);
@@ -81,7 +81,7 @@ static uint8_t spiHBusInitialised = 0;
  *
  * Creates and launches three FreeRTOS tasks:
  *   - remote_controller: Handles collecting ADC joystick data and forwarding it.
- *   - remote_input_task: Reads analog inputs from the MCP3208 ADC.
+ *   - adc_input_task: Reads analog inputs from the MCP3208 ADC.
  *   - radio_remote_task: Transmits encoded control packets via NRF24L01+.
  *
  * Runs once at boot.
@@ -89,7 +89,7 @@ static uint8_t spiHBusInitialised = 0;
 void app_main(void) {
 
     xTaskCreate((void*) &remote_controller, "REMOTE_TASK", SYS_STACK, NULL, SYS_PRIO, &systemTask);
-    xTaskCreate((void*) &remote_input_task, "ADC_INPUTS", JOYSTICK_STACK, NULL, JOYSTICK_PRIO, &joystickTask);
+    xTaskCreate((void*) &adc_input_task, "ADC_INPUTS", JOYSTICK_STACK, NULL, JOYSTICK_PRIO, &joystickTask);
     xTaskCreate((void*) &radio_remote_task, "RADIO_REMOTE", RADIO_STACK, NULL, RADIO_PRIO, &radioTask);
 }
 
@@ -133,8 +133,10 @@ void remote_controller(void) {
             printf("Throttle: %d, Pitch: %f, Roll: %f, Yaw: %f\r\n", (uint16_t) inputs[0], inputs[1], inputs[2],
                    inputs[3]);
 
-            uint8_t rawInput[16];
-            memcpy(rawInput, adcValues, sizeof(adcValues));
+            uint16_t rawInput[16];
+            memset(rawInput, 0, sizeof(rawInput));
+            rawInput[0] = 1;
+            memcpy(rawInput + 1, adcValues, sizeof(adcValues));
 
             // Encode the inputs via hamming
             encode_packet((void*) rawInput, (void*) packet);
@@ -147,7 +149,7 @@ void remote_controller(void) {
     }
 }
 
-/* remote_input_task()
+/* adc_input_task()
  * --------------------
  * Continuously reads analog joystick and slider inputs using the MCP3208 ADC.
  *
@@ -159,7 +161,7 @@ void remote_controller(void) {
  *
  * Runs continuously as a FreeRTOS task.
  */
-void remote_input_task(void) {
+void adc_input_task(void) {
 
     uint16_t adcValues[5];
     while (!inputQueue) {

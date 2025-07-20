@@ -66,6 +66,7 @@ void nrf24l01plus_interrupt_init(void* handler) {
     };
 
     ESP_ERROR_CHECK(gpio_config(&config));
+    gpio_intr_disable(NRF24L01PLUS_IQR_PIN);
 
     // Install the ISR service if not already installed
     esp_err_t err = gpio_install_isr_service(0);

@@ -79,6 +79,8 @@ void radio_control_task(void* pvParams) {
     }
 
     printf("Radio Control Setup\r\n");
+    // Re-enable interrupts now that the controller task is setup
+    gpio_intr_enable(NRF24L01PLUS_IQR_PIN);
 
     while (1) {
 
@@ -86,12 +88,14 @@ void radio_control_task(void* pvParams) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         // Wait for VSPI to be available
         xSemaphoreTake(spiMutex, portMAX_DELAY);
+        
 
         uint8_t status = nrf24l01plus_read_register(NRF24L01PLUS_STATUS);
         if (status & NRF24L01PLUS_RX_DR) {
 
             // Data available
             xSemaphoreGive(spiMutex);
+            printf("Radio data available\r\n");
             // Notify the Receiver Task
             if (radioReceiverTask) {
                 xTaskNotifyGive(radioReceiverTask);
@@ -102,6 +106,7 @@ void radio_control_task(void* pvParams) {
             nrf24l01plus_write_register(NRF24L01PLUS_STATUS, NRF24L01PLUS_TX_DS);
             nrf24l01plus_receive_mode();
             xSemaphoreGive(spiMutex);
+            printf("Radio data sent\r\n");
             // Notify the Transmitter Task that further sends are now allowed
             if (radioTransmitterTask) {
                 xTaskNotifyGive(radioTransmitterTask);
@@ -249,6 +254,7 @@ SemaphoreHandle_t* radio_setup(RadioParams_t* params) {
         xSemaphoreTake(spiMutex, portMAX_DELAY);
         nrf24l01plus_init(host, &radio_isr_handler);
         nrf24l01plus_receive_mode();
+        nrf24l01plus_write_register(NRF24L01PLUS_STATUS, NRF24L01PLUS_RX_DR); // Clear RX_DR
         xSemaphoreGive(spiMutex);
 
         // Yield to allow other task to progress to ensure
