@@ -24,6 +24,8 @@
 
 ///////////////////////////// Structures & Enums /////////////////////////////
 
+enum { PID_MODIFIERS, SETPOINT_UPDATE } MessageType_t;
+
 typedef struct {
     double pitch;
     double roll;
@@ -41,18 +43,18 @@ typedef struct {
 } PID_t;
 
 typedef struct {
-    double errPitch;
-    double errRoll;
-    double errYaw;
-} ControlError_t;
+    PID_t pids[6];
+    double errors[6];
+} ControlSystem_t;
 
 ///////////////////////////////// Prototypes /////////////////////////////////
 
 // Task Function Prototypes
 void flight_controller(void);
+void process_remote_data(RemoteSetPoints_t* setPoints, ControlSystem_t* system, uint16_t* payload);
 double throttle_adc_convert(uint16_t value);
 double angle_adc_convert(uint16_t value);
 void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawPID);
-double pid_update(PID_t* pid, double error);
+double pid_update(PID_t* pid, double error, uint64_t now);
 
 #endif

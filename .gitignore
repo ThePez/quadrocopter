@@ -2,3 +2,7 @@
 **/build
 .clang-format
 *.old
+components/esp32_BNO08x-no_sh2_hal/documentation/*
+components/esp32_BNO08x-no_sh2_hal/README_images/*
+components/esp32_BNO08x-no_sh2_hal/test/*
+components/esp32_BNO08x-no_sh2_hal/README.md

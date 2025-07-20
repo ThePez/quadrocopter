@@ -13,40 +13,25 @@
 #include "imu.h"
 #include "motors.h"
 #include "radio.h"
+#include "bno085_task.h"
 
 ////////////////////////////// Global Variables //////////////////////////////
 
 // Task Handles
 TaskHandle_t systemTask = NULL;
 
-// PID_t structs for each of the directions
-PID_t pitchPID = {.kp = 40, .ki = 0, .kd = 0.0};
-PID_t rollPID = {.kp = 40, .ki = 0, .kd = 0.0};
-PID_t yawPID = {.kp = 40, .ki = 0, .kd = 0.0};
-
 //////////////////////////////////////////////////////////////////////////////
 
 void radio_task_init(void) {
-    
+
     SemaphoreHandle_t radioSetupMutex = xSemaphoreCreateMutex();
     RadioParams_t* radioTaskParams = malloc(sizeof(RadioParams_t));
-    radioTaskParams->spiHost = VSPI_HOST;
-    radioTaskParams->spiMutex = &spiVMutex;
+    radioTaskParams->spiHost = HSPI_HOST;
+    radioTaskParams->spiMutex = &spiHMutex;
     radioTaskParams->setupMutex = &radioSetupMutex;
-    xTaskCreate((void*) &radio_control_task, "RADIO_CON", RADIO_STACK, radioTaskParams, RADIO_PRIO, &radioControlTask);
-    xTaskCreate((void*) &radio_receiver_task, "RX_RADIO", RADIO_STACK, radioTaskParams, RADIO_PRIO, &radioReceiverTask);
-    xTaskCreate((void*) &radio_transmitter_task, "TX_RADIO", RADIO_STACK, radioTaskParams, RADIO_PRIO,
-                &radioTransmitterTask);
-}
-
-void imu_task_init(i2c_master_bus_handle_t* i2cBus) {
-
-    ImuParams_t* imuTaskParams = malloc(sizeof(ImuParams_t));
-    imuTaskParams->i2cHost = i2cBus;
-    imuTaskParams->i2cMutex = &i2cMutex;
-    imuTaskParams->spiHMutex = &spiHMutex;
-    imuTaskParams->spiVMutex = &spiVMutex;
-    xTaskCreate((void*) &imu_task, "IMU", IMU_STACK, imuTaskParams, IMU_PRIO, &imuTask);
+    xTaskCreate(&radio_control_task, "RADIO_CON", RADIO_STACK, radioTaskParams, RADIO_PRIO, &radioControlTask);
+    xTaskCreate(&radio_receiver_task, "RX_RADIO", RADIO_STACK, radioTaskParams, RADIO_PRIO, &radioReceiverTask);
+    xTaskCreate(&radio_transmitter_task, "TX_RADIO", RADIO_STACK, radioTaskParams, RADIO_PRIO, &radioTransmitterTask);
 }
 
 /* app_main()
@@ -61,22 +46,23 @@ void imu_task_init(i2c_master_bus_handle_t* i2cBus) {
  * This function runs once at boot.
  */
 void app_main(void) {
-    // SPI/I2C Bus Setup
-    spi_bus_setup(VSPI_HOST);
+    // SPI Bus Setup
     spi_bus_setup(HSPI_HOST);
-    i2c_master_bus_handle_t* i2cBus = i2c_bus_setup();
-
     // Setup PWM
     esc_pwm_init();
-    // Radio Setup
+
+    // Radio tasks Setup
     radio_task_init();
-    // IMU Setup
-    imu_task_init(i2cBus);
+
+    // Allow the gpio_isr_install to happen from the Radio setup,
+    // before the imu task begins
+    vTaskDelay(pdMS_TO_TICKS(20)); 
+    
+    // IMU task Setup
+    bno08x_start_task(); // Start the C++ task    
 
     // Flight Controller
     xTaskCreate((void*) &flight_controller, "FC_Task", SYS_STACK, NULL, SYS_PRIO, &systemTask);
-
-    // xTaskCreate((void*) &imu_sign_check_task, "SIGN_CHECK", 4096, NULL, tskIDLE_PRIORITY + 1, NULL);
 }
 
 /* flight_controller()
@@ -96,26 +82,42 @@ void app_main(void) {
  */
 void flight_controller(void) {
 
+    ControlSystem_t controlPIDs = {0};
+    // Set default Scalers for the PID structs
+    // Angle Outer PID's
+    for (uint8_t i = 0; i < 3; i++) {
+        controlPIDs.pids[i].kp = 5;
+        controlPIDs.pids[i].kd = 0;
+        controlPIDs.pids[i].ki = 0;
+    }
+
+    // Rate Inner PID's
+    for (uint8_t i = 3; i < 6; i++) {
+        controlPIDs.pids[i].kp = 5;
+        controlPIDs.pids[i].kd = 0;
+        controlPIDs.pids[i].ki = 0;
+    }
+
+    RemoteSetPoints_t remoteControlInputs = {.throttle = 1300};
     Telemitry_t imuData = {0};
-    RemoteSetPoints_t remoteData = {.throttle = 1000};
     uint16_t payload[NRF24L01PLUS_TX_PLOAD_WIDTH / 4]; // 8 words
 
     // Wait until both input queues are created
-    while (!radioReceiverQueue || !radioTransmitterQueue || !imuQueue) {
+    while (!radioReceiverQueue || !radioTransmitterQueue || !bno085Queue) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
     // Create QueueSet
-    uint8_t setLength = RADIO_RECEIVER_QUEUE_LENGTH + IMU_QUEUE_LENGTH;
+    uint8_t setLength = RADIO_RECEIVER_QUEUE_LENGTH + BNO085_QUEUE_LENGTH;
     QueueSetHandle_t controlLoopSet = xQueueCreateSet(setLength);
     xQueueAddToSet(radioReceiverQueue, controlLoopSet);
-    xQueueAddToSet(imuQueue, controlLoopSet);
+    xQueueAddToSet(bno085Queue, controlLoopSet);
     QueueSetMemberHandle_t xActivatedMember;
 
     while (1) {
 
         // This task only delay's based on the QueueSet.
-        // Usually the imuTask will activate it every ~5ms
+        // Usually the bno085Task will activate it every ~10ms
 
         if (controlLoopSet) {
 
@@ -124,41 +126,70 @@ void flight_controller(void) {
             // Update remote inputs
             if (xActivatedMember == radioReceiverQueue) {
                 xQueueReceive(radioReceiverQueue, payload, 0);
-                // Convert remote ADC for throttle
-                remoteData.throttle = throttle_adc_convert(payload[0]);
-                remoteData.pitch = angle_adc_convert(payload[1]);
-                remoteData.roll = angle_adc_convert(payload[2]);
-                remoteData.yaw = angle_adc_convert(payload[3]);
+                process_remote_data(&remoteControlInputs, &controlPIDs, payload);
             }
 
             // New position data arrived, run PID loop and update ESC's
-            if (xActivatedMember == imuQueue) {
-                xQueueReceive(imuQueue, &imuData, 0);
+            if (xActivatedMember == bno085Queue) {
+                xQueueReceive(bno085Queue, &imuData, 0);
                 // Run the PID loop
-                double errPitch = remoteData.pitch - imuData.pitchAngle;
+                double errPitch = remoteControlInputs.pitch - imuData.pitchAngle;
                 if (fabs(errPitch) < 2.0) {
                     errPitch = 0;
                 }
 
-                double errRoll = remoteData.roll - imuData.rollAngle;
+                double errRoll = remoteControlInputs.roll - imuData.rollAngle;
                 if (fabs(errRoll) < 2.0) {
                     errRoll = 0;
                 }
 
-                double errYaw = remoteData.yaw - imuData.yawAngle;
+                double errYaw = remoteControlInputs.yaw - imuData.yawAngle;
                 if (fabs(errYaw) < 2.0) {
                     errYaw = 0;
                 }
-                // printf("Perr: %f, Rerr: %f, Yerr: %f\r\n", pidError.errPitch, pidError.errRoll, pidError.errYaw);
-                double pitchOutput = pid_update(&pitchPID, errPitch);
-                double rollOutput = pid_update(&rollPID, errRoll);
-                double yawOutput = pid_update(&yawPID, errYaw);
+
+                uint64_t time = esp_timer_get_time();
+                double pitchRateGoal = pid_update(&controlPIDs.pids[0], errPitch, time);
+                double errPitchRate = pitchRateGoal - imuData.pitchRate;
+                double pitchOutput = pid_update(&controlPIDs.pids[1], errPitchRate, time);
+
+                double rollRateGoal = pid_update(&controlPIDs.pids[2], errRoll, time);
+                double errRollRate = rollRateGoal - imuData.rollRate;
+                double rollOutput = pid_update(&controlPIDs.pids[3], errRollRate, time);
+
+                double yawRateGoal = pid_update(&controlPIDs.pids[4], errYaw, time);
+                double errYawRate = yawRateGoal - imuData.yawRate;
+                double yawOutput = pid_update(&controlPIDs.pids[5], errYawRate, time);
+
                 // Then update the ESC's
-                update_escs(remoteData.throttle, pitchOutput, rollOutput, yawOutput);
+                update_escs(remoteControlInputs.throttle, pitchOutput, rollOutput, yawOutput);
                 // uint8_t item[16] = {0x34, 0x56, 0x78, 0x92};
                 // xQueueSendToBack(radioTransmitterQueue, item, pdMS_TO_TICKS(5));
             }
         }
+    }
+}
+
+void process_remote_data(RemoteSetPoints_t* setPoints, ControlSystem_t* system, uint16_t* payload) {
+    uint8_t* buffer;
+    switch (payload[0]) {
+    case PID_MODIFIERS:
+        buffer = (uint8_t*) (payload + 1);
+        for (uint8_t i = 0; i < 3; i++) {
+            system->pids[i].kp = buffer[0];
+            system->pids[i].kd = buffer[1];
+            system->pids[i].ki = buffer[2];
+            buffer += 3; // Move pointer along 3 bytes
+        }
+
+        break;
+
+    case SETPOINT_UPDATE:
+        setPoints->throttle = payload[1];
+        setPoints->pitch = payload[2];
+        setPoints->roll = payload[3];
+        setPoints->yaw = payload[4];
+        break;
     }
 }
 
@@ -223,47 +254,26 @@ void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawP
     double motorSpeeds[NUMBER_OF_MOTORS];
 
     // This ensure the drone's motors stay off when the throttle is off
-    if (throttle < 1040) {
+    if (throttle < 1020) {
 
         for (uint8_t i = 0; i < 4; i++) {
             motorSpeeds[i] = MOTOR_SPEED_MIN;
         }
-
     } else {
 
-        // for (uint8_t i = 0; i < 4; i++) {
-        //     motorSpeeds[i] = throttle;
-        // }
-
-        // Sign matrix: rows = motors, columns = [pitch, roll, yaw]
-        // Front Left  => [-1,  1,  1]
-        // Rear Left   => [ 1,  1, -1]
-        // Rear Right  => [ 1, -1,  1]
-        // Front Right => [-1, -1, -1]
-
-        double changes[NUMBER_OF_MOTORS];
-        const int sign_matrix[NUMBER_OF_MOTORS][3] = {{-1, 1, 1}, {1, 1, -1}, {1, -1, 1}, {-1, -1, -1}};
-        for (int i = 0; i < NUMBER_OF_MOTORS; i++) {
-
-            // Calcuate the alteration of te base throttle speed from the PID inputs
-            changes[i] = sign_matrix[i][0] * pitchPID + sign_matrix[i][1] * rollPID + sign_matrix[i][2] * yawPID;
-
-            // Cap the adjustment to no more then MAX_MOTOR_ADJUSTMENT
-            changes[i] = (changes[i] > MAX_MOTOR_ADJUSTMENT)    ? MAX_MOTOR_ADJUSTMENT
-                         : (changes[i] < -MAX_MOTOR_ADJUSTMENT) ? -MAX_MOTOR_ADJUSTMENT
-                                                                : changes[i];
-
-            // Calculate the new motor speed
-            motorSpeeds[i] = throttle + changes[i];
-        }
+        motorSpeeds[0] = throttle - pitchPID + rollPID + yawPID; // Front left
+        motorSpeeds[1] = throttle + pitchPID + rollPID - yawPID; // Rear left
+        motorSpeeds[2] = throttle + pitchPID - rollPID + yawPID; // Rear right
+        motorSpeeds[3] = throttle - pitchPID - rollPID - yawPID; // Front right
     }
 
     for (uint8_t i = 0; i < NUMBER_OF_MOTORS; i++) {
+
         esc_pwm_set_duty_cycle(i, (uint16_t) motorSpeeds[i]);
         if (i == 3) {
-            // printf("Motor %d: %d\r\n", i + 1, (uint16_t) motorSpeeds[i]);
+            printf("Motor %d: %d\r\n", i + 1, (uint16_t) motorSpeeds[i]);
         } else {
-            // printf("Motor %d: %d\t", i + 1, (uint16_t) motorSpeeds[i]);
+            printf("Motor %d: %d\t", i + 1, (uint16_t) motorSpeeds[i]);
         }
     }
 }
@@ -285,20 +295,16 @@ void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawP
  * Side effects:
  *   Updates the PID's stored previous error, integral sum, and previous timestamp.
  */
-double pid_update(PID_t* pid, double error) {
-
-    uint64_t nowUS = esp_timer_get_time();
-
+double pid_update(PID_t* pid, double error, uint64_t now) {
     if (pid->prevTimeUS == 0) {
-        pid->prevTimeUS = nowUS;
+        pid->prevTimeUS = now;
         return 0.0;
     }
 
-    long double dt = (nowUS - pid->prevTimeUS) / 1e6;
-    pid->prevTimeUS = nowUS;
+    long double dt = (now - pid->prevTimeUS) / 1e6;
+    pid->prevTimeUS = now;
 
     double derivative = (error - pid->prevError) / dt;
-
     pid->prevError = error;
     pid->intergral += error * dt;
 
