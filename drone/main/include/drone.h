@@ -56,5 +56,6 @@ double throttle_adc_convert(uint16_t value);
 double angle_adc_convert(uint16_t value);
 void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawPID);
 double pid_update(PID_t* pid, double error, uint64_t now);
+void remote_data_callback(void* args);
 
 #endif

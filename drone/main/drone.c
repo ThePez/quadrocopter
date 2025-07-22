@@ -17,21 +17,9 @@
 ////////////////////////////// Global Variables //////////////////////////////
 
 // Task Handles
-TaskHandle_t systemTask = NULL;
+TaskHandle_t flightController = NULL;
 
 //////////////////////////////////////////////////////////////////////////////
-
-void radio_task_init(void) {
-
-    SemaphoreHandle_t radioSetupMutex = xSemaphoreCreateMutex();
-    RadioParams_t* radioTaskParams = malloc(sizeof(RadioParams_t));
-    radioTaskParams->spiHost = HSPI_HOST;
-    radioTaskParams->spiMutex = &spiHMutex;
-    radioTaskParams->setupMutex = &radioSetupMutex;
-    xTaskCreate(&radio_control_task, "RADIO_CON", RADIO_STACK, radioTaskParams, RADIO_PRIO, &radioControlTask);
-    xTaskCreate(&radio_receiver_task, "RX_RADIO", RADIO_STACK, radioTaskParams, RADIO_PRIO, &radioReceiverTask);
-    xTaskCreate(&radio_transmitter_task, "TX_RADIO", RADIO_STACK, radioTaskParams, RADIO_PRIO, &radioTransmitterTask);
-}
 
 /* app_main()
  * ----------
@@ -45,14 +33,14 @@ void radio_task_init(void) {
  * This function runs once at boot.
  */
 void app_main(void) {
-    // SPI Bus Setup
-    spi_bus_setup(HSPI_HOST);
     // Setup PWM
     esc_pwm_init();
 
+    // SPI Bus Setup
+    spi_bus_setup(HSPI_HOST);
     // Radio tasks Setup
-    radio_task_init();
-
+    radio_module_init(&spiHMutex, HSPI_HOST);
+    
     // Allow the gpio_isr_install to happen from the Radio setup,
     // before the imu task begins
 
@@ -60,7 +48,7 @@ void app_main(void) {
     bno08x_start_task(); // Start the C++ task
 
     // Flight Controller
-    xTaskCreate((void*) &flight_controller, "FC_Task", SYS_STACK, NULL, SYS_PRIO, &systemTask);
+    xTaskCreate((void*) &flight_controller, "FC_Task", SYS_STACK, NULL, SYS_PRIO, &flightController);
 }
 
 /* flight_controller()
@@ -96,7 +84,7 @@ void flight_controller(void) {
         controlPIDs.pids[i].ki = 0;
     }
 
-    RemoteSetPoints_t remoteControlInputs = {.throttle = 1300};
+    RemoteSetPoints_t remoteControlInputs = {.throttle = 1000};
     Telemitry_t imuData = {0};
     uint16_t payload[NRF24L01PLUS_TX_PLOAD_WIDTH / 4]; // 8 words
 
@@ -106,11 +94,19 @@ void flight_controller(void) {
     }
 
     // Create QueueSet
-    uint8_t setLength = RADIO_RECEIVER_QUEUE_LENGTH + BNO085_QUEUE_LENGTH;
+    uint8_t setLength = RADIO_QUEUE_LENGTH + BNO085_QUEUE_LENGTH;
     QueueSetHandle_t controlLoopSet = xQueueCreateSet(setLength);
     xQueueAddToSet(radioReceiverQueue, controlLoopSet);
     xQueueAddToSet(bno085Queue, controlLoopSet);
     QueueSetMemberHandle_t xActivatedMember;
+
+    esp_timer_create_args_t config = {
+        .callback = remote_data_callback,
+        .dispatch_method = ESP_TIMER_TASK,
+    };
+    esp_timer_handle_t timerHandle = NULL;
+    esp_timer_create(&config, &timerHandle);
+    esp_timer_start_periodic(timerHandle, 100000); // 100,000us => 100ms
 
     while (1) {
 
@@ -161,8 +157,6 @@ void flight_controller(void) {
 
                 // Then update the ESC's
                 update_escs(remoteControlInputs.throttle, pitchOutput, rollOutput, yawOutput);
-                // uint8_t item[16] = {0x34, 0x56, 0x78, 0x92};
-                // xQueueSendToBack(radioTransmitterQueue, item, pdMS_TO_TICKS(5));
             }
         }
     }
@@ -183,7 +177,7 @@ void process_remote_data(RemoteSetPoints_t* setPoints, ControlSystem_t* system, 
         break;
 
     case SETPOINT_UPDATE:
-        setPoints->throttle = (payload[1] / 4.095 + 1000.0);
+        setPoints->throttle = throttle_adc_convert(payload[1]);
         // setPoints->pitch = round((payload[2] - 2048.0) / 68.267);
         // setPoints->roll = round((payload[3] - 2048.0) / 68.267);
         // setPoints->yaw = round((payload[4] - 2048.0) / 68.267);
@@ -197,7 +191,7 @@ void process_remote_data(RemoteSetPoints_t* setPoints, ControlSystem_t* system, 
  * from 1000 to 2000.
  *
  * This maps the ADC input proportionally to the expected PWM microsecond
- * range for standard ESCs or servos.
+ * range for standard ESCs.
  *
  * Dependencies:
  *   - Assumes the ADC provides an unsigned 12-bit value.
@@ -259,20 +253,33 @@ void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawP
         }
     } else {
 
-        motorSpeeds[0] = throttle - pitchPID + rollPID - yawPID; // Front left
-        motorSpeeds[1] = throttle + pitchPID + rollPID + yawPID; // Rear left
-        motorSpeeds[2] = throttle + pitchPID - rollPID - yawPID; // Rear right
-        motorSpeeds[3] = throttle - pitchPID - rollPID + yawPID; // Front right
+        motorSpeeds[0] = throttle - pitchPID + rollPID - yawPID - MOTOR_A_OFFSET; // Front left
+        motorSpeeds[1] = throttle + pitchPID + rollPID + yawPID - MOTOR_B_OFFSET; // Rear left
+        motorSpeeds[2] = throttle + pitchPID - rollPID - yawPID - MOTOR_C_OFFSET; // Rear right
+        motorSpeeds[3] = throttle - pitchPID - rollPID + yawPID - MOTOR_D_OFFSET; // Front right
     }
 
     for (uint8_t i = 0; i < NUMBER_OF_MOTORS; i++) {
 
         esc_pwm_set_duty_cycle(i, (uint16_t) motorSpeeds[i]);
-        if (i == 3) {
-            printf("Motor %d: %d\r\n", i + 1, (uint16_t) motorSpeeds[i]);
-        } else {
-            printf("Motor %d: %d\t", i + 1, (uint16_t) motorSpeeds[i]);
-        }
+        // if (i == 3) {
+        //     printf("Motor %d: %d\r\n", i + 1, (uint16_t) motorSpeeds[i]);
+        // } else {
+        //     printf("Motor %d: %d\t", i + 1, (uint16_t) motorSpeeds[i]);
+        // }
+    }
+
+    // No waits on these calls. If there hasn't been a signal to send it will be skipped
+    if (ulTaskNotifyTake(pdTRUE, 0) == pdTRUE) {
+        uint16_t payload[8] = {
+            (uint16_t) motorSpeeds[0],
+            (uint16_t) motorSpeeds[1],
+            (uint16_t) motorSpeeds[2],
+            (uint16_t) motorSpeeds[3],
+        };
+
+        // No delay, so that if no room the send is skipped
+        xQueueSendToBack(radioTransmitterQueue, payload, 0);
     }
 }
 
@@ -308,4 +315,13 @@ double pid_update(PID_t* pid, double error, uint64_t now) {
 
     double output = pid->kp * error + pid->ki * pid->intergral + pid->kd * derivative;
     return output;
+}
+
+/* remote_data_callback()
+ * ----------------------
+ * Timer callback function to notify the flight controller task that is can send
+ * info to the radio transmitter task.
+ */
+void remote_data_callback(void* args) {
+    xTaskNotifyGive(flightController);
 }
