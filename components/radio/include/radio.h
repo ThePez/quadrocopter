@@ -41,7 +41,7 @@ typedef struct {
 
 ///////////////////////////////// Prototypes /////////////////////////////////
 
-void radio_module_init(SemaphoreHandle_t* spiMutex);
+void radio_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost);
 void encode_packet(void* input, void* output);
 void decode_packet(void* input, void* output);
 

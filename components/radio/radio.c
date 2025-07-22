@@ -39,11 +39,11 @@ const char* TAG = "RADIO";
  * -------------------
  *
  */
-void radio_module_init(SemaphoreHandle_t* spiMutex) {
+void radio_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost) {
 
     SemaphoreHandle_t radioSetupMutex = xSemaphoreCreateMutex();
-    RadioParams_t* radioTaskParams = malloc(sizeof(RadioParams_t));
-    radioTaskParams->spiHost = HSPI_HOST;
+    RadioParams_t* radioTaskParams = pvPortMalloc(sizeof(RadioParams_t));
+    radioTaskParams->spiHost = spiHost;
     radioTaskParams->spiMutex = spiMutex;
     radioTaskParams->setupMutex = &radioSetupMutex;
     xTaskCreate(&radio_control_task, "CON_RADIO", RADIO_STACK, radioTaskParams, RADIO_PRIO, &radioControlTask);
@@ -221,7 +221,7 @@ static void radio_transmitter_task(void* pvParams) {
     RadioParams_t* params = (RadioParams_t*) pvParams;
     SemaphoreHandle_t spiMutex = *radio_setup(params);
     uint8_t payload[NRF24L01PLUS_TX_PLOAD_WIDTH / 2]; // Message to encode
-    uint8_t packet[NRF24L01PLUS_TX_PLOAD_WIDTH]; // Encoded message
+    uint8_t packet[NRF24L01PLUS_TX_PLOAD_WIDTH];      // Encoded message
     while (!radioTransmitterQueue) {
 
         // Loop to ensure the radio queue is created
