@@ -15,8 +15,9 @@
 #include <stdint.h>
 
 // ESP-IDF Prebuilts
-#include "driver/spi_master.h"
 #include "driver/gpio.h"
+#include "driver/spi_master.h"
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -27,11 +28,11 @@
 
 #define RADIO_STACK (configMINIMAL_STACK_SIZE * 2)
 #define RADIO_PRIO (tskIDLE_PRIORITY + 4)
-
-#define RADIO_RECEIVER_QUEUE_LENGTH 2
+#define RADIO_QUEUE_LENGTH 5
 
 ///////////////////////////// Structures & Enums /////////////////////////////
 
+// Input struct for setting up the radio module
 typedef struct {
     spi_host_device_t spiHost;
     SemaphoreHandle_t* spiMutex;
@@ -40,19 +41,15 @@ typedef struct {
 
 ///////////////////////////////// Prototypes /////////////////////////////////
 
-// Task Function Prototypes
-void radio_control_task(void* pvParams);
-void radio_receiver_task(void* pvParams);
-void radio_transmitter_task(void* pvParams);
-// Packet encoding & decoding
-SemaphoreHandle_t* radio_setup(RadioParams_t* params);
+void radio_module_init(SemaphoreHandle_t* spiMutex);
 void encode_packet(void* input, void* output);
 void decode_packet(void* input, void* output);
 
+// Task Handles
 extern TaskHandle_t radioReceiverTask;
 extern TaskHandle_t radioTransmitterTask;
 extern TaskHandle_t radioControlTask;
-
+// Queue Handles
 extern QueueHandle_t radioReceiverQueue;
 extern QueueHandle_t radioTransmitterQueue;
 

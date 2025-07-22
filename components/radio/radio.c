@@ -10,16 +10,46 @@
 
 #include "radio.h"
 
+//////////////////////////// Function Prototypes /////////////////////////////
+
+// ISR Handler function
+static void IRAM_ATTR radio_isr_handler(void);
+// Task Function Prototypes
+static void radio_control_task(void* pvParams);
+static void radio_receiver_task(void* pvParams);
+static void radio_transmitter_task(void* pvParams);
+// Task setup helper function
+static SemaphoreHandle_t* radio_setup(RadioParams_t* params);
+
 ////////////////////////////// Global Variables //////////////////////////////
 
+// Task Handles
 TaskHandle_t radioReceiverTask = NULL;
 TaskHandle_t radioTransmitterTask = NULL;
 TaskHandle_t radioControlTask = NULL;
-
+// Queue Handles
 QueueHandle_t radioReceiverQueue = NULL;
 QueueHandle_t radioTransmitterQueue = NULL;
+// Tag for log messages
+const char* TAG = "RADIO";
 
 //////////////////////////////////////////////////////////////////////////////
+
+/* radio_module_init()
+ * -------------------
+ *
+ */
+void radio_module_init(SemaphoreHandle_t* spiMutex) {
+
+    SemaphoreHandle_t radioSetupMutex = xSemaphoreCreateMutex();
+    RadioParams_t* radioTaskParams = malloc(sizeof(RadioParams_t));
+    radioTaskParams->spiHost = HSPI_HOST;
+    radioTaskParams->spiMutex = spiMutex;
+    radioTaskParams->setupMutex = &radioSetupMutex;
+    xTaskCreate(&radio_control_task, "CON_RADIO", RADIO_STACK, radioTaskParams, RADIO_PRIO, &radioControlTask);
+    xTaskCreate(&radio_receiver_task, "RX_RADIO", RADIO_STACK, radioTaskParams, RADIO_PRIO + 1, &radioReceiverTask);
+    xTaskCreate(&radio_transmitter_task, "TX_RADIO", RADIO_STACK, radioTaskParams, RADIO_PRIO, &radioTransmitterTask);
+}
 
 /* radio_isr_handler()
  * -------------------
@@ -67,7 +97,7 @@ static void IRAM_ATTR radio_isr_handler(void) {
  *   - Uses radio_setup() to initialize hardware.
  *   - Notifies radioTransmitterTask and radioReceiverTask when needed.
  */
-void radio_control_task(void* pvParams) {
+static void radio_control_task(void* pvParams) {
 
     // Deal with input parameters
     RadioParams_t* params = (RadioParams_t*) pvParams;
@@ -78,24 +108,21 @@ void radio_control_task(void* pvParams) {
         xTaskNotifyGive(radioTransmitterTask);
     }
 
-    printf("Radio Control Setup\r\n");
     // Re-enable interrupts now that the controller task is setup
     gpio_intr_enable(NRF24L01PLUS_IQR_PIN);
-
+    ESP_LOGI(TAG, "Control task initialised");
     while (1) {
 
         // Wait for IQR interrupt handler signal
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        // Wait for VSPI to be available
+        // Wait for SPI to be available
         xSemaphoreTake(spiMutex, portMAX_DELAY);
-        
-
         uint8_t status = nrf24l01plus_read_register(NRF24L01PLUS_STATUS);
         if (status & NRF24L01PLUS_RX_DR) {
 
             // Data available
             xSemaphoreGive(spiMutex);
-            printf("Radio data available\r\n");
+            ESP_LOGI(TAG, "Radio: date available ISR");
             // Notify the Receiver Task
             if (radioReceiverTask) {
                 xTaskNotifyGive(radioReceiverTask);
@@ -106,7 +133,7 @@ void radio_control_task(void* pvParams) {
             nrf24l01plus_write_register(NRF24L01PLUS_STATUS, NRF24L01PLUS_TX_DS);
             nrf24l01plus_receive_mode();
             xSemaphoreGive(spiMutex);
-            printf("Radio data sent\r\n");
+            ESP_LOGI(TAG, "Radio: data sent ISR");
             // Notify the Transmitter Task that further sends are now allowed
             if (radioTransmitterTask) {
                 xTaskNotifyGive(radioTransmitterTask);
@@ -114,11 +141,11 @@ void radio_control_task(void* pvParams) {
 
         } else {
 
-            // Failsafe to ensure SPI is allowed again, this shouldn't even happen
+            // Failsafe to ensure SPI is allowed again, this shouldn't ever happen
             uint8_t clearBoth = NRF24L01PLUS_TX_DS | NRF24L01PLUS_RX_DR;
             nrf24l01plus_write_register(NRF24L01PLUS_STATUS, clearBoth);
             xSemaphoreGive(spiMutex);
-            printf("IQR Triggered: Failsafe\r\n");
+            ESP_LOGI(TAG, "Radio: Failsafe ISR");
         }
     }
 }
@@ -139,7 +166,7 @@ void radio_control_task(void* pvParams) {
  *   - Uses nrf24l01plus_*() driver functions.
  *   - Outputs decoded packets to radioReceiverQueue.
  */
-void radio_receiver_task(void* pvParams) {
+static void radio_receiver_task(void* pvParams) {
 
     // Deal with input parameters
     RadioParams_t* params = (RadioParams_t*) pvParams;
@@ -148,23 +175,21 @@ void radio_receiver_task(void* pvParams) {
     uint8_t rxBuffer[32];
     uint8_t payload[16];
     while (!radioReceiverQueue) {
+
         // Loop to ensure the queue is created
-        radioReceiverQueue = xQueueCreate(RADIO_RECEIVER_QUEUE_LENGTH, sizeof(payload));
+        radioReceiverQueue = xQueueCreate(RADIO_QUEUE_LENGTH, sizeof(payload));
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 
-    printf("Radio Receiver setup complete\r\n");
-
+    ESP_LOGI(TAG, "Reciever task initialised");
     while (1) {
 
         // Wait for Control to signal a read is available
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
         // Wait for the SPI to be available
         xSemaphoreTake(spiMutex, portMAX_DELAY);
         nrf24l01plus_recieve_packet(rxBuffer);
         xSemaphoreGive(spiMutex);
-
         // Decode packet
         decode_packet((void*) rxBuffer, (void*) payload);
         // Send input data to Queue for processing
@@ -190,22 +215,21 @@ void radio_receiver_task(void* pvParams) {
  *   - Uses nrf24l01plus_*() driver functions.
  *   - Waits on radioTransmitterQueue for outgoing packets.
  */
-void radio_transmitter_task(void* pvParams) {
+static void radio_transmitter_task(void* pvParams) {
 
     // Deal with input parameters
     RadioParams_t* params = (RadioParams_t*) pvParams;
     SemaphoreHandle_t spiMutex = *radio_setup(params);
-
     uint8_t payload[NRF24L01PLUS_TX_PLOAD_WIDTH / 2]; // Message to encode
-    uint8_t packet[NRF24L01PLUS_TX_PLOAD_WIDTH];
+    uint8_t packet[NRF24L01PLUS_TX_PLOAD_WIDTH]; // Encoded message
     while (!radioTransmitterQueue) {
+
         // Loop to ensure the radio queue is created
-        radioTransmitterQueue = xQueueCreate(1, sizeof(payload));
+        radioTransmitterQueue = xQueueCreate(RADIO_QUEUE_LENGTH, sizeof(payload));
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 
-    printf("Radio Transmitter Task setup\r\n");
-
+    ESP_LOGI(TAG, "Transmitter task initialised");
     while (1) {
 
         // Task waits until it recieves a message to send and the task was notified that sending is allowed
@@ -242,7 +266,7 @@ void radio_transmitter_task(void* pvParams) {
  * Returns:
  *   Pointer to the shared SPI mutex handle.
  */
-SemaphoreHandle_t* radio_setup(RadioParams_t* params) {
+static SemaphoreHandle_t* radio_setup(RadioParams_t* params) {
 
     SemaphoreHandle_t spiMutex = *(params->spiMutex);
     SemaphoreHandle_t setupMutex = *(params->setupMutex);
@@ -253,8 +277,9 @@ SemaphoreHandle_t* radio_setup(RadioParams_t* params) {
         // This Task won the race for setup
         xSemaphoreTake(spiMutex, portMAX_DELAY);
         nrf24l01plus_init(host, &radio_isr_handler);
+        uint8_t clearBoth = NRF24L01PLUS_TX_DS | NRF24L01PLUS_RX_DR;
+        nrf24l01plus_write_register(NRF24L01PLUS_STATUS, clearBoth);
         nrf24l01plus_receive_mode();
-        nrf24l01plus_write_register(NRF24L01PLUS_STATUS, NRF24L01PLUS_RX_DR); // Clear RX_DR
         xSemaphoreGive(spiMutex);
 
         // Yield to allow other task to progress to ensure
@@ -266,7 +291,7 @@ SemaphoreHandle_t* radio_setup(RadioParams_t* params) {
         *(params->setupMutex) = NULL;
 
         TaskHandle_t self = xTaskGetCurrentTaskHandle();
-        printf("Current task name: %s\n", pcTaskGetName(self));
+        ESP_LOGI(TAG, "%s ran \"radio_setup\"", pcTaskGetName(self));
         // Tell the other tasks setup is complete
         if (radioTransmitterTask && self != radioTransmitterTask) {
             xTaskNotifyGive(radioTransmitterTask);
