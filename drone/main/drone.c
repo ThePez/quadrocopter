@@ -10,7 +10,7 @@
 
 #include "drone.h"
 #include "bno085_task.h"
-#include "common.h"
+#include "common_inits.h"
 #include "motors.h"
 #include "radio.h"
 

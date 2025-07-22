@@ -12,8 +12,16 @@
 #define DRONE_H
 
 // STD C lib headers
+#include <math.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/param.h>
 
+// KConfig header
+#include "sdkconfig.h"
+
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"

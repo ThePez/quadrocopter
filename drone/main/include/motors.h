@@ -11,7 +11,9 @@
 #ifndef MOTORS_H
 #define MOTORS_H
 
-#include "common.h"
+#include <stdint.h>
+
+#include "driver/mcpwm_prelude.h"
 
 // Motor/ESC's GPIO Pins
 // Ensure these are sequential as the PWM setup requires this.
