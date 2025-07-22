@@ -10,9 +10,11 @@
 
 #ifndef JOYSTICK_INPUTS_H
 #define JOYSTICK_INPUTS_H
+
 #include <stdint.h>
 
 #include "driver/spi_master.h"
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"

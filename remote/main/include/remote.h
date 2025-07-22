@@ -14,6 +14,9 @@
 // STD C lib headers
 #include <stdint.h>
 
+// KConfig header
+#include "sdkconfig.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"

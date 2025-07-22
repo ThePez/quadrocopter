@@ -1,6 +1,6 @@
 /*
  *****************************************************************************
- * File: common.h
+ * File: common_inits.h
  * Author: Jack Cairns
  * Date: 23-07-2025
  * Brief:
@@ -16,15 +16,9 @@
 #include <stdio.h>
 #include <string.h>
 
-// KConfig header
-#include "sdkconfig.h"
-
 // ESP-IDF Prebuilts
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
-#include "freertos/task.h"
 
 // SPI Pins
 #define HSPI_MISO 12

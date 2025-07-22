@@ -13,7 +13,7 @@
 //////////////////////////// Function Prototypes /////////////////////////////
 
 // ISR Handler function
-static void IRAM_ATTR radio_isr_handler(void);
+static void radio_isr_handler(void);
 // Task Function Prototypes
 static void radio_control_task(void* pvParams);
 static void radio_receiver_task(void* pvParams);
@@ -31,7 +31,7 @@ TaskHandle_t radioControlTask = NULL;
 QueueHandle_t radioReceiverQueue = NULL;
 QueueHandle_t radioTransmitterQueue = NULL;
 // Tag for log messages
-const char* TAG = "RADIO";
+static const char* TAG = "RADIO";
 
 //////////////////////////////////////////////////////////////////////////////
 

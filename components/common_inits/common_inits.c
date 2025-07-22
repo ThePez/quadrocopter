@@ -1,14 +1,14 @@
 /*
  *****************************************************************************
- * File: common.c
+ * File: common_inits.c
  * Author: Jack Cairns
- * Date: 13-07-2025
+ * Date: 23-07-2025
  * Brief:
  * REFERENCE: None
  *****************************************************************************
  */
 
-#include "common.h"
+#include "common_inits.h"
 
 static uint8_t spiVBusInitialised = 0;
 static uint8_t spiHBusInitialised = 0;

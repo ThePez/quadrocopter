@@ -15,6 +15,8 @@ static void adc_input_task(void* pvParams);
 TaskHandle_t adcInputTask = NULL;
 QueueHandle_t adcInputQueue = NULL;
 
+static const char* TAG = "JOYSTICK";
+
 /* adc_task_init ()
  * ----------------
  *
@@ -55,6 +57,8 @@ static void adc_input_task(void* pvParams) {
     xSemaphoreTake(spiMutex, portMAX_DELAY);
     mcp3208_init(host);
     xSemaphoreGive(spiMutex);
+
+    ESP_LOGI(TAG, "Task initialised");
 
     while (1) {
 

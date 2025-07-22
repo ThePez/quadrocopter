@@ -9,7 +9,7 @@
  */
 
 #include "remote.h"
-#include "common.h"
+#include "common_inits.h"
 #include "joystick_inputs.h"
 #include "radio.h"
 
