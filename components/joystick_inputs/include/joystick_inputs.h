@@ -30,9 +30,9 @@ typedef struct {
     spi_host_device_t host;
 } adcInputParams_t;
 
-void adc_task_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost);
+void joysticks_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost);
 
-extern TaskHandle_t adcInputTask;
-extern QueueHandle_t adcInputQueue;
+extern TaskHandle_t joysticksTaskHandle;
+extern QueueHandle_t joysticksQueue;
 
 #endif

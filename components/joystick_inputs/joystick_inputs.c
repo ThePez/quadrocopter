@@ -10,26 +10,26 @@
 
 #include "joystick_inputs.h"
 
-static void adc_input_task(void* pvParams);
+static void joysticks_task(void* pvParams);
 
-TaskHandle_t adcInputTask = NULL;
-QueueHandle_t adcInputQueue = NULL;
+TaskHandle_t joysticksTaskHandle = NULL;
+QueueHandle_t joysticksQueue = NULL;
 
 static const char* TAG = "JOYSTICK";
 
-/* adc_task_init ()
+/* joysticks_init ()
  * ----------------
  *
  */
-void adc_task_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost) {
+void joysticks_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost) {
 
     adcInputParams_t* params = pvPortMalloc(sizeof(adcInputParams_t*));
     params->host = spiHost; // VSPI_HOST;
     params->spiMutex = spiMutex;
-    xTaskCreate(&adc_input_task, "ADC_INPUTS", ADC_STACK, (void*) params, ADC_PRIORITY, &adcInputTask);
+    xTaskCreate(&joysticks_task, "ADC_INPUTS", ADC_STACK, (void*) params, ADC_PRIORITY, &joysticksTaskHandle);
 }
 
-/* adc_input_task()
+/* joysticks_task()
  * --------------------
  * Continuously reads analog joystick and slider inputs using the MCP3208 ADC.
  *
@@ -41,16 +41,16 @@ void adc_task_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost) {
  *
  * Runs continuously as a FreeRTOS task.
  */
-static void adc_input_task(void* pvParams) {
+static void joysticks_task(void* pvParams) {
 
     adcInputParams_t* params = (adcInputParams_t*) pvParams;
     SemaphoreHandle_t spiMutex = *(params->spiMutex);
     spi_host_device_t host = params->host;
 
     uint16_t adcValues[5];
-    while (!adcInputQueue) {
+    while (!joysticksQueue) {
         // Loop to ensure the input queue is created
-        adcInputQueue = xQueueCreate(5, sizeof(adcValues));
+        joysticksQueue = xQueueCreate(5, sizeof(adcValues));
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
@@ -72,8 +72,8 @@ static void adc_input_task(void* pvParams) {
             // Return spi mutex
             xSemaphoreGive(spiMutex);
 
-            if (adcInputQueue) {
-                xQueueSendToBack(adcInputQueue, adcValues, pdMS_TO_TICKS(5));
+            if (joysticksQueue) {
+                xQueueSendToBack(joysticksQueue, adcValues, pdMS_TO_TICKS(5));
             }
         }
 

@@ -25,7 +25,7 @@ TaskHandle_t remoteController = NULL;
  *
  * Creates and launches three FreeRTOS tasks:
  *   - remote_controller: Handles collecting ADC joystick data and forwarding it.
- *   - adc_input_task: Reads analog inputs from the MCP3208 ADC.
+ *   - joysticks_task: Reads analog inputs from the MCP3208 ADC.
  *   - radio_remote_task: Transmits encoded control packets via NRF24L01+.
  *
  * Runs once at boot.
@@ -35,7 +35,7 @@ void app_main(void) {
     spi_bus_setup(HSPI_HOST);
 
     radio_module_init(&spiHMutex, HSPI_HOST);
-    adc_task_init(&spiVMutex, VSPI_HOST);
+    joysticks_init(&spiVMutex, VSPI_HOST);
     xTaskCreate((void*) &remote_controller, "REMOTE_TASK", REMOTE_STACK, NULL, REMOTE_PRIO, &remoteController);
 }
 
@@ -59,7 +59,7 @@ void remote_controller(void) {
 
     uint16_t adcValues[5] = {0};
     uint8_t packet[32] = {0};
-    while (!adcInputQueue || !radioTransmitterQueue) {
+    while (!joysticksQueue || !radioTransmitterQueue) {
 
         // Idle until both queue's are created
         vTaskDelay(pdMS_TO_TICKS(20));
@@ -67,7 +67,7 @@ void remote_controller(void) {
 
     while (1) {
         // Get adc values from the input queue
-        if (xQueueReceive(adcInputQueue, adcValues, portMAX_DELAY) == pdTRUE) {
+        if (xQueueReceive(joysticksQueue, adcValues, portMAX_DELAY) == pdTRUE) {
 
             double inputs[4];
             // Throttle conversion
