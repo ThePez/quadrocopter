@@ -6,13 +6,11 @@
  * Brief:
  * REFERENCE:
  ******************************************************************************
- * EXTERNAL FUNCTIONS
- ******************************************************************************
- *
- ******************************************************************************
  */
 
 #include "terminal_monitor.h"
+
+#include "esp_console.h"
 
 TaskHandle_t terminalHandle = NULL;
 QueueHandle_t terminalQueue = NULL;
@@ -64,6 +62,10 @@ void uart_console_init(void) {
  * the string will be sent to the task's Queue for processing by other tasks.
  */
 void terminal_monitor_task(void* pvParams) {
+
+    esp_console_config_t config = {};
+
+    esp_console_init(&config);
 
     uint8_t recieved;
     char inputBuffer[INPUT_BUFFER_SIZE] = {0};
