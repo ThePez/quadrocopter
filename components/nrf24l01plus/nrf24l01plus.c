@@ -34,7 +34,7 @@ void nrf24l01plus_spi_init(spi_host_device_t spi_bus) {
 
     // Setup the SPI for the radio module
     spi_device_interface_config_t device_config = {
-        .clock_speed_hz = 1000000,           // 1 MHz Clock speed
+        .clock_speed_hz = 2000000,           // 1 MHz Clock speed
         .spics_io_num = NRF24L01PLUS_CS_PIN, // Chip Select pin for device
         .queue_size = 1,                     // Number of pending transactions allowed
         .mode = 0 /* SPI mode, representing a pair of (CPOL, CPHA). CPOL = 0 (clock idles low)
@@ -107,6 +107,9 @@ void nrf24l01plus_init(spi_host_device_t spi_bus, void* handler) {
     // Set CE low for idle state
     NRF_CE_LOW();
 
+    // Power on the IC
+    nrf24l01plus_write_register(NRF24L01PLUS_CONFIG, 0x7A);
+    esp_rom_delay_us(4500); // 4.5 ms spin delay
     // Writes TX_Address to nRF24L01
     nrf24l01plus_write_buffer(NRF24L01PLUS_TX_ADDR, default_addr, 5);
     // Writes RX_Address to nRF24L01
@@ -121,15 +124,7 @@ void nrf24l01plus_init(spi_host_device_t spi_bus, void* handler) {
     nrf24l01plus_write_register(NRF24L01PLUS_RF_CH, DEFAULT_RF_CHANNEL);
     // TX_PWR:0dBm, Datarate:1Mbps
     nrf24l01plus_write_register(NRF24L01PLUS_RF_SETUP, 0x06);
-
-    // // Power down
-    // nrf24l01plus_write_register(NRF24L01PLUS_CONFIG, 0x00);
-    // esp_rom_delay_us(2000); // 2 ms spin delay
-    // // Power up
-    // nrf24l01plus_write_register(NRF24L01PLUS_CONFIG, 0x02);
-    // esp_rom_delay_us(2000); // 2 ms spin delay
-
-    // Clear Any interrupt bits set
+    // Clear Any interrupt bits
     nrf24l01plus_write_register(NRF24L01PLUS_STATUS, 0x70);
     // Put device into receive mode
     nrf24l01plus_receive_mode();
@@ -283,7 +278,7 @@ void nrf24l01plus_send_packet(uint8_t* tx_buf) {
     NRF_CE_LOW();
     
     if (!useIQR) {
-        esp_rom_delay_us(4500); // Wait for TX -> Standby-I (~4.5 ms)
+        esp_rom_delay_us(200); // Wait for TX -> Standby-I (~4.5 ms)
         nrf24l01plus_receive_mode();
     }
 }

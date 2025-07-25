@@ -34,9 +34,7 @@
 
 // Input struct for setting up the radio module
 typedef struct {
-    spi_host_device_t spiHost;
     SemaphoreHandle_t* spiMutex;
-    SemaphoreHandle_t* setupMutex;
 } RadioParams_t;
 
 ///////////////////////////////// Prototypes /////////////////////////////////
