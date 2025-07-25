@@ -22,6 +22,7 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "freertos/event_groups.h"
 
 #include "hamming.h"
 #include "nrf24l01plus.h"
@@ -29,6 +30,9 @@
 #define RADIO_STACK (configMINIMAL_STACK_SIZE * 2)
 #define RADIO_PRIO (tskIDLE_PRIORITY + 4)
 #define RADIO_QUEUE_LENGTH 5
+
+#define RADIO_TX_READY (1 << 10)
+#define RADIO_RX_READY (1 << 11)
 
 ///////////////////////////// Structures & Enums /////////////////////////////
 

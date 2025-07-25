@@ -28,6 +28,10 @@ TaskHandle_t radioControlTask = NULL;
 // Queue Handles
 QueueHandle_t radioReceiverQueue = NULL;
 QueueHandle_t radioTransmitterQueue = NULL;
+
+// Event Group
+EventGroupHandle_t radioEventGroup = NULL;
+
 // Tag for log messages
 static const char* TAG = "RADIO";
 
@@ -46,10 +50,16 @@ void radio_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost) {
     nrf24l01plus_write_register(NRF24L01PLUS_STATUS, clearBoth);
     xSemaphoreGive(*spiMutex);
 
+    // Ensure the event group is created
+    while (!radioEventGroup) {
+        radioEventGroup = xEventGroupCreate();
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
     // Start the controlling Tasks
     RadioParams_t* radioTaskParams = pvPortMalloc(sizeof(RadioParams_t));
     radioTaskParams->spiMutex = spiMutex;
-    xTaskCreate(&control_task, "CON_RADIO", RADIO_STACK, radioTaskParams, RADIO_PRIO, &radioControlTask);
+    xTaskCreate(&control_task, "CTRL_RADIO", RADIO_STACK, radioTaskParams, RADIO_PRIO, &radioControlTask);
     xTaskCreate(&receiver_task, "RX_RADIO", RADIO_STACK, radioTaskParams, RADIO_PRIO + 1, &radioReceiverTask);
     xTaskCreate(&transmitter_task, "TX_RADIO", RADIO_STACK, radioTaskParams, RADIO_PRIO + 1, &radioTransmitterTask);
 }
@@ -106,18 +116,12 @@ static void control_task(void* pvParams) {
     RadioParams_t* params = (RadioParams_t*) pvParams;
     SemaphoreHandle_t spiMutex = *(params->spiMutex);
 
-    // Wait until transmitter task is alive
-    while (!radioTransmitterTask) {
-        vTaskDelay(pdMS_TO_TICKS(10));
-        // Initial signal to transmitter that sends are allowed
-        if (radioTransmitterTask) {
-            xTaskNotifyGive(radioTransmitterTask);
-        }
-    }
-    
+    // Set bit for TX ready
+    xEventGroupSetBits(radioEventGroup, RADIO_TX_READY);
     // Enable interrupts now that the controller task is setup
     gpio_intr_enable(NRF24L01PLUS_IQR_PIN);
     ESP_LOGI(TAG, "Control task initialised");
+    
     while (1) {
 
         // Wait for IQR interrupt handler signal
@@ -132,21 +136,18 @@ static void control_task(void* pvParams) {
             xSemaphoreGive(spiMutex);
             ESP_LOGI(TAG, "Radio: date available ISR");
             // Notify the Receiver Task
-            if (radioReceiverTask) {
-                xTaskNotifyGive(radioReceiverTask);
-            }
+            xEventGroupSetBits(radioEventGroup, RADIO_RX_READY);
+
 
         } else if (status & NRF24L01PLUS_TX_DS) {
-            
+
             // Data was sent
             nrf24l01plus_write_register(NRF24L01PLUS_STATUS, NRF24L01PLUS_TX_DS);
             nrf24l01plus_receive_mode();
             xSemaphoreGive(spiMutex);
-            ESP_LOGI(TAG, "Radio: data sent ISR");
+            ESP_LOGI(TAG, "Radio: data sent ISR");            
             // Notify the Transmitter Task that further sends are now allowed
-            if (radioTransmitterTask) {
-                xTaskNotifyGive(radioTransmitterTask);
-            }
+            xEventGroupSetBits(radioEventGroup, RADIO_TX_READY);
 
         } else {
 
@@ -191,18 +192,23 @@ static void receiver_task(void* pvParams) {
     }
 
     ESP_LOGI(TAG, "Reciever task initialised");
+    
     while (1) {
 
         // Wait for Control to signal a read is available
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        // Wait for the SPI to be available
-        xSemaphoreTake(spiMutex, portMAX_DELAY);
-        nrf24l01plus_recieve_packet(rxBuffer);
-        xSemaphoreGive(spiMutex);
-        // Decode packet
-        decode_packet((void*) rxBuffer, (void*) payload);
-        // Send input data to Queue for processing
-        xQueueSendToBack(radioReceiverQueue, payload, pdMS_TO_TICKS(5));
+        EventBits_t bits = xEventGroupWaitBits(radioEventGroup, RADIO_RX_READY, pdTRUE, pdFALSE, portMAX_DELAY);
+        if (bits & RADIO_RX_READY) {
+
+            // Wait for the SPI to be available
+            xSemaphoreTake(spiMutex, portMAX_DELAY);
+            nrf24l01plus_recieve_packet(rxBuffer);
+            xSemaphoreGive(spiMutex);
+            // Decode packet
+            decode_packet((void*) rxBuffer, (void*) payload);
+            // Send input data to Queue for processing
+            xQueueSendToBack(radioReceiverQueue, payload, pdMS_TO_TICKS(5));
+        }
+        
     }
 }
 
@@ -240,17 +246,21 @@ static void transmitter_task(void* pvParams) {
     }
 
     ESP_LOGI(TAG, "Transmitter task initialised");
+    
     while (1) {
 
         // Task waits until it recieves a message to send and the task was notified that sending is allowed
-        if (xQueueReceive(radioTransmitterQueue, payload, portMAX_DELAY) == pdTRUE &&
-            ulTaskNotifyTake(pdTRUE, portMAX_DELAY) > 0) {
+        if (xQueueReceive(radioTransmitterQueue, payload, portMAX_DELAY) == pdTRUE) { 
 
-            // Message has been recieved -> encode -> send it
-            encode_packet((void*) payload, (void*) packet);
-            xSemaphoreTake(spiMutex, portMAX_DELAY);
-            nrf24l01plus_send_packet(packet);
-            xSemaphoreGive(spiMutex);
+            EventBits_t bits = xEventGroupWaitBits(radioEventGroup, RADIO_TX_READY, pdTRUE, pdFALSE, portMAX_DELAY);
+            if (bits & RADIO_TX_READY) {
+
+                // Message has been recieved -> encode -> send it
+                encode_packet((void*) payload, (void*) packet);
+                xSemaphoreTake(spiMutex, portMAX_DELAY);
+                nrf24l01plus_send_packet(packet);
+                xSemaphoreGive(spiMutex);
+            }
         }
     }
 }
