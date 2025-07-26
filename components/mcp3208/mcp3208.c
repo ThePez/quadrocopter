@@ -61,7 +61,7 @@ void mcp3208_init(spi_host_device_t spi_bus) {
 
 /* mcp3208_read_adc_channel()
  * --------------------------
- * Signals the mcp3208 to perform a adc of the selected input channel.
+ * Signals the mcp3208 to perform an ADC read of the selected input channel.
  *
  * Parameters:
  *   channel - the input channel to be used for the conversion
