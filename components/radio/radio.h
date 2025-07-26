@@ -15,17 +15,12 @@
 #include <stdint.h>
 
 // ESP-IDF Prebuilts
-#include "driver/gpio.h"
 #include "driver/spi_master.h"
-#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "freertos/event_groups.h"
-
-#include "hamming.h"
-#include "nrf24l01plus.h"
 
 #define RADIO_STACK (configMINIMAL_STACK_SIZE * 2)
 #define RADIO_PRIO (tskIDLE_PRIORITY + 4)
@@ -34,18 +29,14 @@
 #define RADIO_TX_READY (1 << 10)
 #define RADIO_RX_READY (1 << 11)
 
-///////////////////////////// Structures & Enums /////////////////////////////
+#define RADIO_PAYLOAD_WIDTH 32
 
 // Input struct for setting up the radio module
 typedef struct {
     SemaphoreHandle_t* spiMutex;
 } RadioParams_t;
 
-///////////////////////////////// Prototypes /////////////////////////////////
-
 void radio_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost);
-void encode_packet(void* input, void* output);
-void decode_packet(void* input, void* output);
 
 // Task Handles
 extern TaskHandle_t radioReceiverTask;
