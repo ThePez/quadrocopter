@@ -9,6 +9,8 @@
  */
 
 #include "joystick_inputs.h"
+#include "esp_log.h"
+#include "mcp3208.h"
 
 static void joysticks_task(void* pvParams);
 
@@ -17,52 +19,58 @@ QueueHandle_t joysticksQueue = NULL;
 
 static const char* TAG = "JOYSTICK";
 
-/* joysticks_init ()
- * ----------------
+/**
+ * @brief Initializes the joystick input module.
  *
+ * Sets up the MCP3208 ADC over SPI and starts a FreeRTOS task
+ * to continuously read joystick and slider inputs.
+ *
+ * @param spiMutex Pointer to a mutex protecting SPI access.
+ * @param spiHost  SPI host connected to the MCP3208 chip.
  */
-void joysticks_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost) {
+void joysticks_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost) {
+
+    xSemaphoreTake(*spiMutex, portMAX_DELAY);
+    mcp3208_init(spiHost); // VSPI_HOST;
+    xSemaphoreGive(*spiMutex);
 
     adcInputParams_t* params = pvPortMalloc(sizeof(adcInputParams_t*));
-    params->host = spiHost; // VSPI_HOST;
     params->spiMutex = spiMutex;
-    xTaskCreate(&joysticks_task, "ADC_INPUTS", ADC_STACK, (void*) params, ADC_PRIORITY, &joysticksTaskHandle);
+    xTaskCreate(&joysticks_task, "JOYSTICKS", JOYSTICKS_STACK, (void*) params, JOYSTICKS_PRIORITY,
+                &joysticksTaskHandle);
 }
 
-/* joysticks_task()
- * --------------------
- * Continuously reads analog joystick and slider inputs using the MCP3208 ADC.
+/**
+ * @brief FreeRTOS task for sampling joystick and slider inputs.
  *
- * Initializes the SPI bus for the ADC and reads five channels:
- *   - Channels 1–4: Joystick axes
- *   - Channel 0: Slider or other analog input
+ * Reads five analog channels from the MCP3208 ADC:
+ *   - Channel 0: Slider or auxiliary analog input
+ *   - Channels 1 to 4: Joystick axes
  *
- * Collected data is sent to the remote_controller task via a queue.
+ * Sampled values are sent to the joysticksQueue for downstream processing.
  *
- * Runs continuously as a FreeRTOS task.
+ * @param pvParams Pointer to adcInputParams_t containing the SPI mutex.
+ *
+ * @note Uses SPI-protected access and MCP3208 driver functions.
+ * @note Designed to run indefinitely as a FreeRTOS task.
  */
 static void joysticks_task(void* pvParams) {
 
     adcInputParams_t* params = (adcInputParams_t*) pvParams;
     SemaphoreHandle_t spiMutex = *(params->spiMutex);
-    spi_host_device_t host = params->host;
 
     uint16_t adcValues[5];
     while (!joysticksQueue) {
         // Loop to ensure the input queue is created
-        joysticksQueue = xQueueCreate(5, sizeof(adcValues));
-        vTaskDelay(pdMS_TO_TICKS(20));
+        joysticksQueue = xQueueCreate(JOYSTICKS_QUEUE_LENGTH, sizeof(adcValues));
+        vTaskDelay(JOYSTICKS_DELAY);
     }
-
-    xSemaphoreTake(spiMutex, portMAX_DELAY);
-    mcp3208_init(host);
-    xSemaphoreGive(spiMutex);
 
     ESP_LOGI(TAG, "Task initialised");
 
     while (1) {
 
-        if (xSemaphoreTake(spiMutex, pdMS_TO_TICKS(1)) == pdTRUE) {
+        if (xSemaphoreTake(spiMutex, JOYSTICKS_DELAY) == pdTRUE) {
 
             for (uint8_t i = 0; i < 5; i++) {
                 // Channels 1 to 4 are joysticks, 0 is slider
@@ -71,12 +79,10 @@ static void joysticks_task(void* pvParams) {
 
             // Return spi mutex
             xSemaphoreGive(spiMutex);
-
-            if (joysticksQueue) {
-                xQueueSendToBack(joysticksQueue, adcValues, pdMS_TO_TICKS(5));
-            }
+            // Send recieved data to the queue for processing
+            xQueueSendToBack(joysticksQueue, adcValues, JOYSTICKS_DELAY);
         }
 
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(JOYSTICKS_DELAY);
     }
 }

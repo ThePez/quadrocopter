@@ -11,28 +11,32 @@
 #ifndef JOYSTICK_INPUTS_H
 #define JOYSTICK_INPUTS_H
 
+// STD C lib headers
 #include <stdint.h>
 
+// ESP-IDF Prebuilts
 #include "driver/spi_master.h"
-#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#include "mcp3208.h"
+#define JOYSTICKS_STACK (configMINIMAL_STACK_SIZE * 2)
+#define JOYSTICKS_PRIORITY (tskIDLE_PRIORITY + 4)
+#define JOYSTICKS_QUEUE_LENGTH 5
+#define JOYSTICKS_DELAY (pdMS_TO_TICKS(50))
 
-#define ADC_STACK (configMINIMAL_STACK_SIZE * 2)
-#define ADC_PRIORITY (tskIDLE_PRIORITY + 4)
-
+// Input struct for setting up the joystick module
 typedef struct {
     SemaphoreHandle_t* spiMutex;
-    spi_host_device_t host;
 } adcInputParams_t;
 
-void joysticks_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost);
+void joysticks_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost);
 
+// Task Handle
 extern TaskHandle_t joysticksTaskHandle;
+
+// Queue Handle
 extern QueueHandle_t joysticksQueue;
 
 #endif
