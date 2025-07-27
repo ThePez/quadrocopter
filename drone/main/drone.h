@@ -21,6 +21,7 @@
 // KConfig header
 #include "sdkconfig.h"
 
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -29,6 +30,9 @@
 
 #define SYS_STACK (configMINIMAL_STACK_SIZE * 2)
 #define SYS_PRIO (tskIDLE_PRIORITY + 2)
+
+#define RAD_2_DEG (180.0 / M_PI)
+#define DEG_2_RAD (M_PI / 180.0)
 
 ///////////////////////////// Structures & Enums /////////////////////////////
 

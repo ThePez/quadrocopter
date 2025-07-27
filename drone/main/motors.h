@@ -46,6 +46,4 @@ typedef enum { MOTOR_A, MOTOR_B, MOROT_C, MOTOR_D } MotorIndex;
 void esc_pwm_init(void);
 void esc_pwm_set_duty_cycle(MotorIndex motor, uint16_t duty_cycle);
 
-extern mcpwm_cmpr_handle_t esc_pwm_comparators[4];
-
 #endif

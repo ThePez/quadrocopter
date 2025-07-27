@@ -30,12 +30,17 @@ static void transmitter_task(void* pvParams);
 TaskHandle_t radioReceiverTask = NULL;
 TaskHandle_t radioTransmitterTask = NULL;
 TaskHandle_t radioControlTask = NULL;
+
 // Queue Handles
 QueueHandle_t radioReceiverQueue = NULL;
 QueueHandle_t radioTransmitterQueue = NULL;
 
 // Event Group used internally to signal the controlling tasks
 static EventGroupHandle_t radioEventGroup = NULL;
+
+// Buffers for the receiver & transmitter queue's
+static uint8_t rxBuffer[NRF24L01PLUS_TX_PLOAD_WIDTH];
+static uint8_t txBuffer[NRF24L01PLUS_TX_PLOAD_WIDTH];
 
 // Tag for log messages
 static const char* TAG = "RADIO";
@@ -57,14 +62,24 @@ void radio_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost) {
     // Setup the NRF24L01plus IC
     xSemaphoreTake(*spiMutex, portMAX_DELAY);
     nrf24l01plus_init(spiHost, &radio_isr_handler);
-    uint8_t clearBoth = NRF24L01PLUS_TX_DS | NRF24L01PLUS_RX_DR;
-    nrf24l01plus_write_register(NRF24L01PLUS_STATUS, clearBoth);
     xSemaphoreGive(*spiMutex);
 
     // Ensure the event group is created
     while (!radioEventGroup) {
         radioEventGroup = xEventGroupCreate();
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+
+    // Ensure the queue is created
+    while (!radioReceiverQueue) {
+        radioReceiverQueue = xQueueCreate(RADIO_QUEUE_LENGTH, sizeof(rxBuffer));
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+
+    // Ensure the queue is created
+    while (!radioTransmitterQueue) {
+        radioTransmitterQueue = xQueueCreate(RADIO_QUEUE_LENGTH, sizeof(txBuffer));
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 
     // Start the controlling Tasks
@@ -114,10 +129,18 @@ static void control_task(void* pvParams) {
     RadioParams_t* params = (RadioParams_t*) pvParams;
     SemaphoreHandle_t spiMutex = *(params->spiMutex);
 
-    // Set bit for TX ready
-    xEventGroupSetBits(radioEventGroup, RADIO_TX_READY);
+    xSemaphoreTake(spiMutex, portMAX_DELAY);
+    uint8_t clearBoth = NRF24L01PLUS_TX_DS | NRF24L01PLUS_RX_DR;
+    nrf24l01plus_write_register(NRF24L01PLUS_FLUSH_RX, 0);       // Flush RX FIFO
+    nrf24l01plus_write_register(NRF24L01PLUS_FLUSH_TX, 0);       // Flush TX FIFO
+    nrf24l01plus_write_register(NRF24L01PLUS_STATUS, clearBoth); // Clear interrupts
+    xSemaphoreGive(spiMutex);
+
     // Enable interrupts now that the controller task is setup
     gpio_intr_enable(NRF24L01PLUS_IQR_PIN);
+    // Set bit for TX ready
+    xEventGroupSetBits(radioEventGroup, RADIO_TX_READY);
+
     ESP_LOGI(TAG, "Control task initialised");
 
     while (1) {
@@ -176,14 +199,6 @@ static void receiver_task(void* pvParams) {
     RadioParams_t* params = (RadioParams_t*) pvParams;
     SemaphoreHandle_t spiMutex = *(params->spiMutex);
 
-    uint8_t rxBuffer[NRF24L01PLUS_TX_PLOAD_WIDTH];
-    while (!radioReceiverQueue) {
-
-        // Loop to ensure the queue is created
-        radioReceiverQueue = xQueueCreate(RADIO_QUEUE_LENGTH, sizeof(rxBuffer));
-        vTaskDelay(pdMS_TO_TICKS(5));
-    }
-
     ESP_LOGI(TAG, "Reciever task initialised");
 
     while (1) {
@@ -219,15 +234,6 @@ static void transmitter_task(void* pvParams) {
     // Deal with input parameters
     RadioParams_t* params = (RadioParams_t*) pvParams;
     SemaphoreHandle_t spiMutex = *(params->spiMutex);
-
-    // Message to send
-    uint8_t txBuffer[NRF24L01PLUS_TX_PLOAD_WIDTH];
-    while (!radioTransmitterQueue) {
-
-        // Loop to ensure the radio queue is created
-        radioTransmitterQueue = xQueueCreate(RADIO_QUEUE_LENGTH, sizeof(txBuffer));
-        vTaskDelay(pdMS_TO_TICKS(5));
-    }
 
     ESP_LOGI(TAG, "Transmitter task initialised");
 

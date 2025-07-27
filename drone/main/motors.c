@@ -10,7 +10,7 @@
 
 #include "motors.h"
 
-mcpwm_cmpr_handle_t esc_pwm_comparators[4] = {NULL};
+static mcpwm_cmpr_handle_t esc_pwm_comparators[4] = {NULL};
 
 /* esc_pwm_init()
  * ---------------
@@ -56,7 +56,7 @@ void esc_pwm_init(void) {
     }
 
     // Create and configure the Comparators
-    mcpwm_comparator_config_t cmpr_config = {};
+    mcpwm_comparator_config_t cmpr_config = {0};
     // Create and configure the Generators
     mcpwm_gen_handle_t generators[4] = {NULL};
     mcpwm_generator_config_t generator_configs[4] = {};
@@ -106,22 +106,6 @@ void esc_pwm_set_duty_cycle(MotorIndex motor, uint16_t duty_cycle) {
     duty_cycle = (duty_cycle > MOTOR_SPEED_MAX) ? MOTOR_SPEED_MAX
                  : duty_cycle < MOTOR_SPEED_MIN ? MOTOR_SPEED_MIN
                                                 : duty_cycle;
-    // switch (motor) {
-    // case 0:
-    //     duty_cycle -= MOTOR_A_OFFSET;
-    //     break;
-    // case 1:
-    //     duty_cycle -= MOTOR_B_OFFSET;
-    //     break;
-    // case 2:
-    //     duty_cycle -= MOTOR_C_OFFSET;
-    //     break;
-    // case 3:
-    //     duty_cycle -= MOTOR_D_OFFSET;
-
-    // default:
-    //     break;
-    // }
 
     // Update the comparitor used by the specified motor
     ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(esc_pwm_comparators[motor], duty_cycle));

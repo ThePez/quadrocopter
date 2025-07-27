@@ -10,7 +10,7 @@
 
 #include "drone.h"
 #include "bno085_task.h"
-#include "common_inits.h"
+#include "common_functions.h"
 #include "motors.h"
 #include "radio.h"
 
@@ -18,6 +18,8 @@
 
 // Task Handles
 TaskHandle_t flightController = NULL;
+
+static const char* TAG = "DRONE";
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -40,7 +42,7 @@ void app_main(void) {
     spi_bus_setup(HSPI_HOST);
     // Radio tasks Setup
     radio_module_init(&spiHMutex, HSPI_HOST);
-    
+
     // Allow the gpio_isr_install to happen from the Radio setup,
     // before the imu task begins
 
@@ -84,9 +86,9 @@ void flight_controller(void) {
         controlPIDs.pids[i].ki = 0;
     }
 
-    RemoteSetPoints_t remoteControlInputs = {.throttle = 1000};
+    RemoteSetPoints_t remoteControlInputs = {.throttle = 1300};
     Telemitry_t imuData = {0};
-    uint16_t payload[NRF24L01PLUS_TX_PLOAD_WIDTH / 4]; // 8 words
+    uint16_t payload[RADIO_PAYLOAD_WIDTH / 2]; // 16 words
 
     // Wait until both input queues are created
     while (!radioReceiverQueue || !radioTransmitterQueue || !bno085Queue) {
@@ -106,7 +108,7 @@ void flight_controller(void) {
     };
     esp_timer_handle_t timerHandle = NULL;
     esp_timer_create(&config, &timerHandle);
-    esp_timer_start_periodic(timerHandle, 100000); // 100,000us => 100ms
+    esp_timer_start_periodic(timerHandle, 1000000); // 1,000,000us -> 1000ms -> 1s
 
     while (1) {
 
@@ -126,6 +128,9 @@ void flight_controller(void) {
             // New position data arrived, run PID loop and update ESC's
             if (xActivatedMember == bno085Queue) {
                 xQueueReceive(bno085Queue, &imuData, 0);
+                imuData.pitchRate *= RAD_2_DEG;
+                imuData.rollRate *= RAD_2_DEG;
+                imuData.yawRate *= RAD_2_DEG;
                 // Run the PID loop
                 double errPitch = remoteControlInputs.pitch - imuData.pitchAngle;
                 if (fabs(errPitch) < 2.0) {
@@ -154,6 +159,8 @@ void flight_controller(void) {
                 double yawRateGoal = pid_update(&controlPIDs.pids[4], errYaw, time);
                 double errYawRate = yawRateGoal - imuData.yawRate;
                 double yawOutput = pid_update(&controlPIDs.pids[5], errYawRate, time);
+
+                ESP_LOGI(TAG, "Rates: %f, %f, %f", imuData.pitchRate, imuData.rollRate, imuData.yawRate);
 
                 // Then update the ESC's
                 update_escs(remoteControlInputs.throttle, pitchOutput, rollOutput, yawOutput);

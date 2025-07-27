@@ -9,7 +9,7 @@
  */
 
 #include "remote.h"
-#include "common_inits.h"
+#include "common_functions.h"
 #include "joystick_inputs.h"
 #include "radio.h"
 
@@ -35,7 +35,7 @@ void app_main(void) {
     spi_bus_setup(HSPI_HOST);
 
     radio_module_init(&spiHMutex, HSPI_HOST);
-    joysticks_init(&spiVMutex, VSPI_HOST);
+    joysticks_module_init(&spiVMutex, VSPI_HOST);
     xTaskCreate((void*) &remote_controller, "REMOTE_TASK", REMOTE_STACK, NULL, REMOTE_PRIO, &remoteController);
 }
 
@@ -58,10 +58,10 @@ void app_main(void) {
 void remote_controller(void) {
 
     uint16_t adcValues[5] = {0};
-    uint8_t packet[32] = {0};
-    while (!joysticksQueue || !radioTransmitterQueue) {
+    uint16_t adcPacket[16] = {0}; // normal packet is 32 uint8_t's -> as uint16_t's are used array is halvied
 
-        // Idle until both queue's are created
+    // Idle until all queue's are created
+    while (!joysticksQueue || !radioTransmitterQueue || !radioReceiverQueue) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
@@ -77,21 +77,25 @@ void remote_controller(void) {
                 inputs[i] = (adcValues[i] - 2048.0) / 68.267;
             }
 
-            printf("Throttle: %d, Pitch: %f, Roll: %f, Yaw: %f\r\n", (uint16_t) inputs[0], inputs[1], inputs[2],
-                   inputs[3]);
+            // printf("Throttle: %d, Pitch: %f, Roll: %f, Yaw: %f\r\n", (uint16_t) inputs[0], inputs[1], inputs[2],
+            //        inputs[3]);
 
-            uint16_t rawInput[16];
-            memset(rawInput, 0, sizeof(rawInput));
-            rawInput[0] = 1;
-            memcpy(rawInput + 1, adcValues, sizeof(adcValues));
+            memset(adcPacket, 0, sizeof(adcPacket));
+            adcPacket[0] = 1; // Setpoint update
+            memcpy(adcPacket + 1, adcValues, sizeof(adcValues));
 
-            // Encode the inputs via hamming
-            encode_packet((void*) rawInput, (void*) packet);
-
+            adcPacket[1] = 1300;
             // Send the resulting packet to the radio task
             if (radioTransmitterQueue) {
-                xQueueSendToFront(radioTransmitterQueue, packet, pdMS_TO_TICKS(5));
+                xQueueSendToFront(radioTransmitterQueue, adcPacket, pdMS_TO_TICKS(5));
             }
+        }
+
+        if (xQueueReceive(radioReceiverQueue, adcPacket, 0) == pdTRUE) {
+            for (int i = 0; i < 4; i++) {
+                printf("Motor %d: %d ", i + 1, adcPacket[i]);
+            }
+            printf("\r\n");
         }
     }
 }
