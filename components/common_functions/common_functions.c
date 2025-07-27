@@ -8,7 +8,7 @@
  *****************************************************************************
  */
 
-#include "common_inits.h"
+#include "common_functions.h"
 
 static uint8_t spiVBusInitialised = 0;
 static uint8_t spiHBusInitialised = 0;
@@ -114,4 +114,25 @@ void print_task_stats(void) {
     printf("%s\r\n", taskListBuffer);
     // Free memory
     vPortFree(taskListBuffer);
+}
+
+/**
+ * @brief Maps a floating-point number from one range to another.
+ *
+ * This function linearly transforms a value `x` from the input range
+ * [in_min, in_max] to the corresponding value in the output range
+ * [out_min, out_max].
+ *
+ * @param x        The input value to map.
+ * @param in_min   The lower bound of the input range.
+ * @param in_max   The upper bound of the input range.
+ * @param out_min  The lower bound of the output range.
+ * @param out_max  The upper bound of the output range.
+ *
+ * @return The mapped floating-point value in the output range.
+ */
+float mapf(float x, float in_min, float in_max, float out_min, float out_max) {
+
+    float value = (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+    return value;
 }
