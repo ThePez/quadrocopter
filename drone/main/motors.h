@@ -43,6 +43,11 @@
 
 typedef enum { MOTOR_A, MOTOR_B, MOROT_C, MOTOR_D } MotorIndex;
 
+typedef struct {
+    uint16_t values[4];
+} MotorSpeeds_t;
+
+MotorSpeeds_t get_compare_values(void);
 void esc_pwm_init(void);
 void esc_pwm_set_duty_cycle(MotorIndex motor, uint16_t duty_cycle);
 

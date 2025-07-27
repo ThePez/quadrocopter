@@ -65,7 +65,7 @@ static void bno08x_task(void* pvParameters) {
     }
 
     BNO08x imu; // create IMU object with default wiring scheme
-
+    
     imu.initialize(); // initialize IMU
     ESP_LOGI(TAG, "IC Initialised");
 
@@ -93,4 +93,7 @@ static void bno08x_task(void* pvParameters) {
  */
 void bno08x_start_task(void) {
     xTaskCreate(bno08x_task, "BNO08x Task", BNO085_STACK_SIZE, NULL, BNO085_PRIORITY, &bno085Task);
+}
+
+void bno085_kill(void) {
 }

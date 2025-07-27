@@ -57,7 +57,14 @@ void app_main(void) {
     bno08x_start_task(); // Start the C++ task
 
     // Flight Controller
-    xTaskCreate((void*) &flight_controller, "FC_Task", SYS_STACK, NULL, SYS_PRIO, &flightController);
+    xTaskCreate(&flight_controller, "FC_Task", SYS_STACK, NULL, SYS_PRIO, &flightController);
+}
+
+void emergancy_task(void* pvParams) {
+    // Kill all other tasks.
+    // Clean up all malloc'd data...
+    // Slowly turn off the motors...
+    // Then do nothing
 }
 
 /**
@@ -71,7 +78,7 @@ void app_main(void) {
  * @note Must be run as a FreeRTOS task.
  * @note Requires radioReceiverQueue, radioTransmitterQueue and bno085Queue to be created before running.
  */
-void flight_controller(void) {
+void flight_controller(void* pvParams) {
 
     RemoteSetPoints_t remoteControlInputs = {0};
     Telemitry_t imuData = {0};
@@ -149,6 +156,7 @@ void flight_controller(void) {
  * @param payload   Pointer to a (16-word or 32-byte) array received from the radio.
  */
 void process_remote_data(RemoteSetPoints_t* setPoints, uint16_t* payload) {
+
     uint8_t i = 0;
     uint8_t* buffer;
     switch (payload[0]) {

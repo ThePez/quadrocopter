@@ -34,6 +34,8 @@ typedef struct {
 } Telemitry_t;
 
 void bno08x_start_task(void);
+void bno085_kill(void);
+
 extern TaskHandle_t bno085Task;
 extern QueueHandle_t bno085Queue;
 

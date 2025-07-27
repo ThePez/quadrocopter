@@ -12,6 +12,12 @@
 #include "common_functions.h"
 
 static mcpwm_cmpr_handle_t esc_pwm_comparators[4] = {NULL};
+static uint16_t motorSpeeds[4] = {MOTOR_SPEED_MIN, MOTOR_SPEED_MIN, MOTOR_SPEED_MIN, MOTOR_SPEED_MIN};
+
+MotorSpeeds_t get_compare_values(void) {
+
+    return (MotorSpeeds_t) {.values = motorSpeeds};
+}
 
 /**
  * @brief Initializes the MCPWM hardware to drive four ESCs with PWM signals.
@@ -71,6 +77,7 @@ void esc_pwm_init(void) {
     }
 
     // On timer period (counter reaches zero): set output high
+    // On timer compare: set output low
     for (uint8_t i = 0; i < 4; i++) {
         ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(
             generators[i],
@@ -78,6 +85,9 @@ void esc_pwm_init(void) {
         ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(
             generators[i],
             MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, esc_pwm_comparators[i], MCPWM_GEN_ACTION_LOW)));
+
+        // Set the initial compare values to MOTOR_SPEED_MIN
+        esc_pwm_set_duty_cycle(i, MOTOR_SPEED_MIN);
     }
 
     for (uint8_t i = 0; i < 2; i++) {
@@ -109,7 +119,9 @@ void esc_pwm_set_duty_cycle(MotorIndex motor, uint16_t duty_cycle) {
 
     // Limit the requested motor speed between the min/max
     duty_cycle = (uint16_t) constrainf(duty_cycle, MOTOR_SPEED_MIN, MOTOR_SPEED_MAX);
-    
+
     // Update the comparitor used by the specified motor
     ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(esc_pwm_comparators[motor], duty_cycle));
+    // Store the new value
+    motorSpeeds[motor] = duty_cycle;
 }
