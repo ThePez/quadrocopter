@@ -15,20 +15,21 @@
 
 ////////////////////////////// Global Variables //////////////////////////////
 
+// Handle for the remote_controller FreeRTOS task
 TaskHandle_t remoteController = NULL;
 
 //////////////////////////////////////////////////////////////////////////////
 
-/* app_main()
- * ----------
- * Main entry point for the remote controller firmware.
+/**
+ * @brief Main entry point for the remote controller firmware.
  *
- * Creates and launches three FreeRTOS tasks:
- *   - remote_controller: Handles collecting ADC joystick data and forwarding it.
- *   - joysticks_task: Reads analog inputs from the MCP3208 ADC.
- *   - radio_remote_task: Transmits encoded control packets via NRF24L01+.
+ * Sets up SPI buses and initializes the radio and joystick modules.
+ * Creates and launches the main `remote_controller` task.
  *
- * Runs once at boot.
+ * Tasks launched:
+ *  - remote_controller: System controller.
+ *  - joysticks task: (started in `joysticks_module_init`) Reads analog inputs via MCP3208.
+ *  - radio tasks: (started in `radio_module_init`) Handles NRF24L01+ communication.
  */
 void app_main(void) {
     spi_bus_setup(VSPI_HOST);
@@ -39,26 +40,33 @@ void app_main(void) {
     xTaskCreate((void*) &remote_controller, "REMOTE_TASK", REMOTE_STACK, NULL, REMOTE_PRIO, &remoteController);
 }
 
-/* remote_controller()
- * --------------------
- * Main controller task for the remote unit.
+/**
+ * @brief FreeRTOS task that collect and transmits control data.
  *
- * Waits for new ADC input data from the input queue, encodes it using
- * Hamming code for error detection, then forwards the resulting packet
- * to the radio queue for transmission.
+ * Waits for incoming joystick ADC data from the joystick input queue,
+ * forms a control packet, and sends it to the radio transmitter queue.
+ * It can also receive and print feedback from the radio receiver queue.
  *
- * Responsibilities:
- *   - Blocks until both input and radio queues are ready.
- *   - Receives raw ADC channel data.
- *   - Encodes the data with Hamming codes for robust transmission.
- *   - Sends encoded packets to the radio task.
+ * Behavior:
+ * - Waits until all required queues (joystick, transmitter, receiver) are ready.
+ * - Receives 5 ADC values (throttle, pitch, roll, yaw, slider) from `joysticksQueue`.
+ * - Builds a 16-element packet:
+ *     - Index 0: Command ID (currently fixed to 1 for "setpoint update").
+ *     - Index 1–5: Control values. These are currently manually overridden.
+ *     - Index 6-15: '0', Filler values.
+ * - Sends the packet to `radioTransmitterQueue` for NRF24L01+ transmission.
+ * - Optionally receives and prints debug values from `radioReceiverQueue`.
  *
- * Runs continuously as a FreeRTOS task.
+ * Notes:
+ * - ADC values received from joystick task are replaced by hardcoded midpoint values (2048),
+ *   likely for testing.
+ *
+ * This task runs indefinitely.
  */
 void remote_controller(void) {
 
     uint16_t adcValues[5] = {0};
-    uint16_t adcPacket[16] = {0}; // normal packet is 32 uint8_t's -> as uint16_t's are used array is halvied
+    uint16_t adcPacket[16] = {0};
 
     // Idle until all queue's are created
     while (!joysticksQueue || !radioTransmitterQueue || !radioReceiverQueue) {

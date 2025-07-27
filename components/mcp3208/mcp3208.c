@@ -14,39 +14,39 @@
 #include <stdio.h>
 
 // SPI device handle
-spi_device_handle_t mcp3208_spi_handle = NULL;
+spi_device_handle_t mcp3208SpiHandle = NULL;
 
-/* mcp3208_spi_init()
- * -----------------------
- * Initializes the SPI device handle for the MCP3208.
- * Configures the clock speed, SPI mode (CPOL=0, CPHA=0), chip select pin,
- * and adds the device to the specified SPI bus.
+/**
+ * @brief Initializes the SPI interface for the MCP3208 ADC.
  *
- * Parameters:
- *   spi_bus - The SPI bus to use (e.g., HSPI_HOST).
+ * Sets the SPI configuration including clock speed, chip select pin,
+ * SPI mode (CPOL = 0, CPHA = 0), and queue size. Registers the device
+ * on the specified SPI bus.
+ *
+ * @param spiBus SPI bus to which the MCP3208 is connected (e.g., HSPI_HOST).
  */
-void mcp3208_spi_init(spi_host_device_t spi_bus) {
+void mcp3208_spi_init(spi_host_device_t spiBus) {
 
     // Setup the SPI for the radio module
-    spi_device_interface_config_t device_config = {
+    spi_device_interface_config_t deviceConfig = {
         .clock_speed_hz = 1000000,      // 1 MHz Clock speed
         .spics_io_num = MCP3208_CS_PIN, // Chip Select pin for device
         .queue_size = 1,                // Number of pending transactions allowed
         .mode = 0                       // SPI mode, representing a pair of (CPOL, CPHA). CPOL = 1 CPHA = 1
     };
 
-    ESP_ERROR_CHECK(spi_bus_add_device(spi_bus, &device_config, &mcp3208_spi_handle));
+    ESP_ERROR_CHECK(spi_bus_add_device(spiBus, &deviceConfig, &mcp3208SpiHandle));
 }
 
-/* mcp3208_init()
- * --------------
- * Power cycles the MCP3208 using the SPI CS pin. Then initialises the device
- * for SPI coms by calling the spi setup function.
+/**
+ * @brief Performs MCP3208 startup procedure and initializes SPI communication.
  *
- * Parameters:
- *   spi_bus - The SPI bus to use (e.g., HSPI_HOST).
+ * Cycles the chip select (CS) pin to reset the MCP3208 and calls
+ * the SPI initialization function to prepare for communication.
+ *
+ * @param spiBus SPI bus to which the MCP3208 is connected.
  */
-void mcp3208_init(spi_host_device_t spi_bus) {
+void mcp3208_init(spi_host_device_t spiBus) {
 
     gpio_set_direction(MCP3208_CS_PIN, GPIO_MODE_OUTPUT);
     // Cycle the CS pin upon startup
@@ -56,15 +56,19 @@ void mcp3208_init(spi_host_device_t spi_bus) {
     esp_rom_delay_us(50);
     gpio_set_level(MCP3208_CS_PIN, 0);
 
-    mcp3208_spi_init(spi_bus);
+    mcp3208_spi_init(spiBus);
 }
 
-/* mcp3208_read_adc_channel()
- * --------------------------
- * Signals the mcp3208 to perform an ADC read of the selected input channel.
+/**
+ * @brief Reads an analog value from the specified MCP3208 channel.
  *
- * Parameters:
- *   channel - the input channel to be used for the conversion
+ * Constructs and sends a read command to the MCP3208 over SPI, then
+ * receives and parses the 12-bit ADC result.
+ *
+ * @param channel ADC channel to read (0–7).
+ * @param type Conversion type: 1 for single-ended, 0 for differential.
+ *
+ * @return 12-bit ADC result from the specified channel.
  */
 uint16_t mcp3208_read_adc_channel(uint8_t channel, uint8_t type) {
 
@@ -78,18 +82,18 @@ uint16_t mcp3208_read_adc_channel(uint8_t channel, uint8_t type) {
     }
     
     // Store the request as 2 bytes
-    uint8_t tx_buffer[3] = {(uint8_t) (channelMask >> 8), (uint8_t) (channelMask & 0xFF), 0x00};
-    uint8_t rx_buffer[3];
+    uint8_t txBuffer[3] = {(uint8_t) (channelMask >> 8), (uint8_t) (channelMask & 0xFF), 0x00};
+    uint8_t rxBuffer[3];
 
     spi_transaction_t transaction = {
         .length = 24,           // Transaction length in bits
-        .tx_buffer = tx_buffer, // Pointer to transmit buffer
-        .rx_buffer = rx_buffer, // Pointer to receive buffer
+        .tx_buffer = txBuffer, // Pointer to transmit buffer
+        .rx_buffer = rxBuffer, // Pointer to receive buffer
     };
 
-    ESP_ERROR_CHECK(spi_device_transmit(mcp3208_spi_handle, &transaction));
+    ESP_ERROR_CHECK(spi_device_transmit(mcp3208SpiHandle, &transaction));
 
     // Format the output to only include the final 12 bits.
-    uint16_t output = rx_buffer[2] | ((rx_buffer[1] & 0x0F) << 8);
+    uint16_t output = rxBuffer[2] | ((rxBuffer[1] & 0x0F) << 8);
     return output;
 }

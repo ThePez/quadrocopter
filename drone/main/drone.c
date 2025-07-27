@@ -30,16 +30,16 @@ static PID_t angleRollPid = {.kp = 5, .ki = 0, .kd = 0};
 
 //////////////////////////////////////////////////////////////////////////////
 
-/* app_main()
- * ----------
- * Main entry point for the application.
+/**
+ * @brief Main entry point of the application.
  *
- * Creates and launches the three main FreeRTOS tasks:
- *   - flight_controller: Handles the main flight PID loop and motor control.
- *   - radio_receiver_task: Handles receiving radio packets from the NRF24L01+.
- *   - imu_task: Reads IMU sensor data (accelerometer + gyro) and fuses it.
+ * Initializes all subsystems and creates the main FreeRTOS tasks:
+ * - Initializes PWM for motor control.
+ * - Sets up SPI and radio communication.
+ * - Starts the IMU processing task.
+ * - Launches the flight controller task.
  *
- * This function runs once at boot.
+ * This function is called once at boot by the ESP32 framework.
  */
 void app_main(void) {
     // Setup PWM
@@ -60,20 +60,16 @@ void app_main(void) {
     xTaskCreate((void*) &flight_controller, "FC_Task", SYS_STACK, NULL, SYS_PRIO, &flightController);
 }
 
-/* flight_controller()
- * -------------------
- * The main control loop for the quadcopter.
+/**
+ * @brief Main PID control loop for the quadcopter.
  *
- * This task waits for new telemetry and radio control data using a QueueSet,
- * then calculates the pitch, roll, and yaw errors, runs the PID control loops,
- * and updates the motor ESC signals accordingly.
+ * Waits for new telemetry (IMU) or radio control data using a FreeRTOS QueueSet.
+ * Calculates pitch, roll, and yaw errors, runs PID loops, and updates ESC signals.
  *
- * This ensures the drone maintains its desired attitude and throttle based
- * on remote control inputs and sensor feedback.
+ * Maintains stable flight by adjusting motor speeds based on sensor and user input.
  *
- * Dependencies:
- *   - Requires both radioReceiverQueue and imuQueue to be created before running.
- *   - Must be run as a FreeRTOS task.
+ * @note Must be run as a FreeRTOS task.
+ * @note Requires radioReceiverQueue, radioTransmitterQueue and bno085Queue to be created before running.
  */
 void flight_controller(void) {
 
@@ -117,7 +113,7 @@ void flight_controller(void) {
                 imuData.rollRate *= RAD_2_DEG;
                 imuData.yawRate *= RAD_2_DEG;
                 uint64_t time = esp_timer_get_time();
-                
+
                 // Run the PID loop
                 double errPitchRate = remoteControlInputs.pitch - imuData.pitchRate;
                 double errRollRate = remoteControlInputs.roll - imuData.rollRate;
@@ -133,8 +129,8 @@ void flight_controller(void) {
                 // double errRollAngle = rollAngleGoal - imuData.rollAngle;
                 // double rollOutput = pid_update(&angleRollPid, errRollAngle, time);
 
-                ESP_LOGI(TAG, "Throttle %f PID's: %f, %f, %f", remoteControlInputs.throttle, pitchOutput, rollOutput,
-                         yawOutput);
+                // ESP_LOGI(TAG, "Throttle %f PID's: %f, %f, %f", remoteControlInputs.throttle, pitchOutput, rollOutput,
+                //          yawOutput);
 
                 // Then update the ESC's
                 update_escs(remoteControlInputs.throttle, pitchOutput, rollOutput, yawOutput);
@@ -143,6 +139,15 @@ void flight_controller(void) {
     }
 }
 
+/**
+ * @brief Decodes a payload of radio data into control setpoints or PID tuning values.
+ *
+ * Interprets incoming data as either setpoint updates or PID modifier packets.
+ * Updates global PID parameters or control targets based on message type.
+ *
+ * @param setPoints Pointer to the control structure to be updated.
+ * @param payload   Pointer to a (16-word or 32-byte) array received from the radio.
+ */
 void process_remote_data(RemoteSetPoints_t* setPoints, uint16_t* payload) {
     uint8_t i = 0;
     uint8_t* buffer;
@@ -181,22 +186,20 @@ void process_remote_data(RemoteSetPoints_t* setPoints, uint16_t* payload) {
     }
 }
 
-/* update_escs()
- * -------------
- * Function to update the PWM duty cycles for all four ESCs based on
- * throttle and the outputs of the pitch, roll, and yaw PID controllers.
+/**
+ * @brief Updates ESC PWM signals based on control inputs and PID outputs.
  *
- * The mixing formula adjusts each motor’s throttle to achieve the desired
- * pitch, roll, and yaw simultaneously.
+ * Applies a mixing algorithm to compute motor-specific throttle values that
+ * reflect the desired pitch, roll, and yaw behavior, and writes the result
+ * to all four ESCs using esc_pwm_set_duty_cycle().
  *
- * Parameters:
- *   throttle - Base throttle level (1000–2000 us)
- *   pitchPID - Output of the pitch PID controller
- *   rollPID  - Output of the roll PID controller
- *   yawPID   - Output of the yaw PID controller
+ * If a notification from a remote data timer is pending, sends motor state
+ * back via the radioTransmitterQueue.
  *
- * Globals:
- *   Uses esc_pwm_set_duty_cycle() to update each motor’s PWM.
+ * @param throttle Base throttle input (1000–2000 µs).
+ * @param pitchPID Output from pitch PID controller.
+ * @param rollPID  Output from roll PID controller.
+ * @param yawPID   Output from yaw PID controller.
  */
 void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawPID) {
 
@@ -210,10 +213,14 @@ void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawP
         }
     } else {
 
-        motorSpeeds[0] = constrainf(throttle - pitchPID + rollPID - yawPID, MIN_THROTTLE, MAX_THROTTLE); // - MOTOR_A_OFFSET; // Front left
-        motorSpeeds[1] = constrainf(throttle + pitchPID + rollPID + yawPID, MIN_THROTTLE, MAX_THROTTLE); // - MOTOR_B_OFFSET; // Rear left
-        motorSpeeds[2] = constrainf(throttle + pitchPID - rollPID - yawPID, MIN_THROTTLE, MAX_THROTTLE); // - MOTOR_C_OFFSET; // Rear right
-        motorSpeeds[3] = constrainf(throttle - pitchPID - rollPID + yawPID, MIN_THROTTLE, MAX_THROTTLE); // - MOTOR_D_OFFSET; // Front right
+        motorSpeeds[0] = constrainf(throttle - pitchPID + rollPID - yawPID, MIN_THROTTLE,
+                                    MAX_THROTTLE); // - MOTOR_A_OFFSET; // Front left
+        motorSpeeds[1] = constrainf(throttle + pitchPID + rollPID + yawPID, MIN_THROTTLE,
+                                    MAX_THROTTLE); // - MOTOR_B_OFFSET; // Rear left
+        motorSpeeds[2] = constrainf(throttle + pitchPID - rollPID - yawPID, MIN_THROTTLE,
+                                    MAX_THROTTLE); // - MOTOR_C_OFFSET; // Rear right
+        motorSpeeds[3] = constrainf(throttle - pitchPID - rollPID + yawPID, MIN_THROTTLE,
+                                    MAX_THROTTLE); // - MOTOR_D_OFFSET; // Front right
     }
 
     for (uint8_t i = 0; i < NUMBER_OF_MOTORS; i++) {
@@ -234,22 +241,18 @@ void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawP
     }
 }
 
-/* pid_update()
- * ------------
- * Runs a single update step of a PID controller.
+/**
+ * @brief Performs a single PID control step.
  *
- * Calculates the proportional, integral, and derivative terms based on the
- * current error and time elapsed since the last update.
+ * Computes the control signal based on the current error, elapsed time,
+ * and PID configuration parameters (kp, ki, kd).
  *
- * Parameters:
- *   pid   - Pointer to a PID_t structure with the PID state and constants.
- *   error - Current control error value.
+ * @param pid   Pointer to the PID_t structure.
+ * @param error Current error value.
+ * @param now   Current time in microseconds.
+ * @return      Control output from the PID calculation.
  *
- * Returns:
- *   The calculated control output for the PID loop.
- *
- * Side effects:
- *   Updates the PID's stored previous error, integral sum, and previous timestamp.
+ * @note Updates the internal state of the PID structure (integral, derivative, etc.).
  */
 double pid_update(PID_t* pid, double error, uint64_t now) {
     if (pid->prevTimeUS == 0) {
@@ -268,6 +271,14 @@ double pid_update(PID_t* pid, double error, uint64_t now) {
     return output;
 }
 
+/**
+ * @brief Initializes a periodic timer to signal that remote data can be returned.
+ *
+ * Creates and starts an ESP timer that periodically triggers a notification
+ * to the flight controller task, allowing it to send motor state over radio.
+ *
+ * @param periodUS The timer period in microseconds.
+ */
 void remote_data_return_init(int periodUS) {
 
     esp_timer_create_args_t config = {
@@ -279,10 +290,13 @@ void remote_data_return_init(int periodUS) {
     esp_timer_start_periodic(timerHandle, periodUS); // 500,000us -> 500ms -> 0.5s
 }
 
-/* remote_data_callback()
- * ----------------------
- * Timer callback function to notify the flight controller task that is can send
- * info to the radio transmitter task.
+/**
+ * @brief Timer callback to notify the flight controller for radio data transmission.
+ *
+ * Sends a direct task notification to the flight controller to allow it
+ * to transmit updated motor state back to the remote controller.
+ *
+ * @param args Unused (can be NULL).
  */
 void remote_data_callback(void* args) {
     xTaskNotifyGive(flightController);

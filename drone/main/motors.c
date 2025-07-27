@@ -9,26 +9,26 @@
  */
 
 #include "motors.h"
+#include "common_functions.h"
 
 static mcpwm_cmpr_handle_t esc_pwm_comparators[4] = {NULL};
 
-/* esc_pwm_init()
- * ---------------
- * Function to initialize the MCPWM peripheral for driving four ESC signals.
+/**
+ * @brief Initializes the MCPWM hardware to drive four ESCs with PWM signals.
  *
- * This sets up:
- *   - One MCPWM timer to generate a 50 Hz PWM base (20 ms period) with 1 us resolution.
- *   - Two MCPWM operators connected to the timer.
- *   - Four MCPWM comparators (one per ESC signal) distributed across the operators.
- *   - Four MCPWM generators attached to GPIO pins, each outputting a PWM waveform.
- *   - Each generator is configured to set its output HIGH at the start of the period
- *     and LOW when its comparator value is reached.
+ * This function configures:
+ * - Two MCPWM timers (one per operator group), each running at 50 Hz (20 ms period).
+ * - Four MCPWM operators (two per group), each attached to a timer.
+ * - Four comparators (one per ESC) to control when the PWM signal goes LOW.
+ * - Four generators mapped to GPIOs to output the PWM waveform to each ESC.
  *
- * The function must be called once during system initialization before using
- * esc_pwm_set_duty_cycle() to control the throttle of each ESC.
+ * The PWM waveform goes HIGH at the beginning of each timer cycle and LOW when
+ * the comparator value is reached. This simulates RC-style PWM used by most ESCs.
  *
- * Globals:
- *   esc_pwm_comparators[] - The array of comparator handles used by esc_pwm_set_duty_cycle().
+ * @note Must be called once during startup before using esc_pwm_set_duty_cycle().
+ * @note Assumes MOTOR_* constants define valid GPIO pins.
+ *
+ * @global esc_pwm_comparators[] Will be populated with comparator handles.
  */
 void esc_pwm_init(void) {
 
@@ -86,14 +86,19 @@ void esc_pwm_init(void) {
     }
 }
 
-/* esc_pwm_set_duty_cycle()
- * ------------------------
- * Function to control the duty cycle of each of the 4 PWM signal needed
- * for the motor's ESC's.
+/**
+ * @brief Updates the duty cycle (pulse width) of the selected motor's ESC.
  *
- * Parameters:
- *    motor - Which of the comparators to adjust
- *    duty_cycle - The value in us after which the PWM signal will go low
+ * Sets the comparator value for the specified ESC's MCPWM generator,
+ * controlling when the PWM signal transitions from HIGH to LOW.
+ *
+ * The input duty cycle is clamped between MOTOR_SPEED_MIN and MOTOR_SPEED_MAX.
+ *
+ * @param motor      Index of the motor (0 to NUMBER_OF_MOTORS - 1).
+ * @param duty_cycle Desired pulse width in microseconds (typically 1000–2000 µs).
+ *
+ * @note Has no effect if motor index is invalid.
+ * @note Requires esc_pwm_init() to be called first.
  */
 void esc_pwm_set_duty_cycle(MotorIndex motor, uint16_t duty_cycle) {
 
@@ -103,10 +108,8 @@ void esc_pwm_set_duty_cycle(MotorIndex motor, uint16_t duty_cycle) {
     }
 
     // Limit the requested motor speed between the min/max
-    duty_cycle = (duty_cycle > MOTOR_SPEED_MAX) ? MOTOR_SPEED_MAX
-                 : duty_cycle < MOTOR_SPEED_MIN ? MOTOR_SPEED_MIN
-                                                : duty_cycle;
-
+    duty_cycle = (uint16_t) constrainf(duty_cycle, MOTOR_SPEED_MIN, MOTOR_SPEED_MAX);
+    
     // Update the comparitor used by the specified motor
     ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(esc_pwm_comparators[motor], duty_cycle));
 }

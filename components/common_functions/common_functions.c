@@ -17,19 +17,16 @@ SemaphoreHandle_t spiHMutex = NULL;
 SemaphoreHandle_t spiVMutex = NULL;
 SemaphoreHandle_t i2cMutex = NULL;
 
-/* spi_bus_setup()
- * ----------------
- * Configures and initializes the specified SPI bus (HSPI or VSPI).
+/**
+ * @brief Initializes the specified SPI bus (HSPI or VSPI).
  *
- * Each bus is initialized only once per boot. Pins are configured
- * depending on which host is requested.
+ * Configures and initializes the SPI bus pins based on the selected host.
+ * Ensures that each bus is only initialized once per boot. Also creates a
+ * mutex for synchronizing access to the SPI bus.
  *
- * Parameters:
- *   host - The SPI bus to initialize (HSPI_HOST or VSPI_HOST).
+ * @param host The SPI host to initialize (e.g., HSPI_HOST or VSPI_HOST).
  *
- * Dependencies:
- *   - Uses ESP-IDF SPI Master driver.
- *   - Updates global flags spiHBusInitialised and spiVBusInitialised.
+ * @note Relies on the ESP-IDF SPI Master driver.
  */
 void spi_bus_setup(spi_host_device_t host) {
 
@@ -37,7 +34,7 @@ void spi_bus_setup(spi_host_device_t host) {
         return;
     }
 
-    spi_bus_config_t bus_config = {
+    spi_bus_config_t busConfig = {
         .miso_io_num = (host == HSPI_HOST) ? HSPI_MISO : VSPI_MISO,
         .mosi_io_num = (host == HSPI_HOST) ? HSPI_MOSI : VSPI_MOSI,
         .sclk_io_num = (host == HSPI_HOST) ? HSPI_CLK : VSPI_CLK,
@@ -45,7 +42,7 @@ void spi_bus_setup(spi_host_device_t host) {
         .quadwp_io_num = -1,
     };
 
-    ESP_ERROR_CHECK(spi_bus_initialize(host, &bus_config, SPI_DMA_CH_AUTO));
+    ESP_ERROR_CHECK(spi_bus_initialize(host, &busConfig, SPI_DMA_CH_AUTO));
 
     if (host == HSPI_HOST) {
         spiHBusInitialised = 1;
@@ -56,24 +53,20 @@ void spi_bus_setup(spi_host_device_t host) {
     }
 }
 
-/* i2c_bus_setup()
- * ---------------
- * Configures and initializes the I2C master bus with default parameters.
+/**
+ * @brief Initializes the I2C master bus with default settings.
  *
- * The I2C port is auto-selected, and default GPIO pins for SDA and SCL
- * are used (GPIO 21 and GPIO 22). Internal pull-ups are enabled.
+ * Sets up the I2C master interface using GPIO 21 for SDA and GPIO 22 for SCL.
+ * Pull-up resistors are enabled. The function allocates and returns a pointer
+ * to the bus handle, and creates a mutex for synchronized access.
  *
- * Returns:
- *   Pointer to a malloc'ed handle for the initialized I2C master bus.
+ * @return Pointer to a dynamically allocated I2C master bus handle.
  *
- * Dependencies:
- *   - Uses ESP-IDF I2C Master driver.
- *   - Allocates memory for and returns the bus handle pointer.
- *   - Creates a mutex (i2cMutex) for I2C bus access synchronization.
+ * @note Uses the ESP-IDF I2C Master driver.
  */
 i2c_master_bus_handle_t* i2c_bus_setup(void) {
 
-    i2c_master_bus_config_t i2c_mst_config = {
+    i2c_master_bus_config_t i2cMasterConfig = {
         .clk_source = I2C_CLK_SRC_DEFAULT,    // Default
         .i2c_port = -1,                       // Auto select
         .scl_io_num = GPIO_NUM_22,            // Default
@@ -83,21 +76,21 @@ i2c_master_bus_handle_t* i2c_bus_setup(void) {
     };
 
     i2c_master_bus_handle_t busHandle;
-    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &busHandle));
-    i2c_master_bus_handle_t* handle = malloc(sizeof(i2c_master_bus_handle_t));
+    ESP_ERROR_CHECK(i2c_new_master_bus(&i2cMasterConfig, &busHandle));
+    i2c_master_bus_handle_t* handle = pvPortMalloc(sizeof(i2c_master_bus_handle_t));
     *handle = busHandle;
     i2cMutex = xSemaphoreCreateMutex();
     return handle;
 }
 
-/* print_task_stats()
- * ------------------
- * Prints a formatted list of all currently running FreeRTOS tasks,
- * including their state, priority, stack usage, and task ID.
+/**
+ * @brief Prints a table of current FreeRTOS task statistics.
  *
- * Helpful for debugging stack usage and system health.
+ * Outputs task name, state, priority, stack high-water mark, and task ID
+ * to the standard output using `vTaskList()`. Useful for debugging and
+ * monitoring task resource usage.
  *
- * Uses vTaskList() from FreeRTOS and outputs to standard printf().
+ * @note Dynamically allocates memory for the task list buffer.
  */
 void print_task_stats(void) {
 
