@@ -21,6 +21,13 @@ TaskHandle_t flightController = NULL;
 
 static const char* TAG = "DRONE";
 
+// Set default Scalers for the PID structs
+static PID_t ratePitchPid = {.kp = 5, .ki = 0, .kd = 0};
+static PID_t rateRollPid = {.kp = 5, .ki = 0, .kd = 0};
+static PID_t rateYawPid = {.kp = 5, .ki = 0, .kd = 0};
+static PID_t anglePitchPid = {.kp = 5, .ki = 0, .kd = 0};
+static PID_t angleRollPid = {.kp = 5, .ki = 0, .kd = 0};
+
 //////////////////////////////////////////////////////////////////////////////
 
 /* app_main()
@@ -70,23 +77,7 @@ void app_main(void) {
  */
 void flight_controller(void) {
 
-    ControlSystem_t controlPIDs = {0};
-    // Set default Scalers for the PID structs
-    // Angle Outer PID's
-    for (uint8_t i = 0; i < 3; i++) {
-        controlPIDs.pids[i].kp = 5;
-        controlPIDs.pids[i].kd = 0;
-        controlPIDs.pids[i].ki = 0;
-    }
-
-    // Rate Inner PID's
-    for (uint8_t i = 3; i < 6; i++) {
-        controlPIDs.pids[i].kp = 5;
-        controlPIDs.pids[i].kd = 0;
-        controlPIDs.pids[i].ki = 0;
-    }
-
-    RemoteSetPoints_t remoteControlInputs = {.throttle = 1300};
+    RemoteSetPoints_t remoteControlInputs = {0};
     Telemitry_t imuData = {0};
     uint16_t payload[RADIO_PAYLOAD_WIDTH / 2]; // 16 words
 
@@ -102,13 +93,7 @@ void flight_controller(void) {
     xQueueAddToSet(bno085Queue, controlLoopSet);
     QueueSetMemberHandle_t xActivatedMember;
 
-    esp_timer_create_args_t config = {
-        .callback = remote_data_callback,
-        .dispatch_method = ESP_TIMER_TASK,
-    };
-    esp_timer_handle_t timerHandle = NULL;
-    esp_timer_create(&config, &timerHandle);
-    esp_timer_start_periodic(timerHandle, 1000000); // 1,000,000us -> 1000ms -> 1s
+    remote_data_return_init(100000);
 
     while (1) {
 
@@ -122,7 +107,7 @@ void flight_controller(void) {
             // Update remote inputs
             if (xActivatedMember == radioReceiverQueue) {
                 xQueueReceive(radioReceiverQueue, payload, 0);
-                process_remote_data(&remoteControlInputs, &controlPIDs, payload);
+                process_remote_data(&remoteControlInputs, payload);
             }
 
             // New position data arrived, run PID loop and update ESC's
@@ -131,36 +116,25 @@ void flight_controller(void) {
                 imuData.pitchRate *= RAD_2_DEG;
                 imuData.rollRate *= RAD_2_DEG;
                 imuData.yawRate *= RAD_2_DEG;
-                // Run the PID loop
-                double errPitch = remoteControlInputs.pitch - imuData.pitchAngle;
-                if (fabs(errPitch) < 2.0) {
-                    errPitch = 0;
-                }
-
-                double errRoll = remoteControlInputs.roll - imuData.rollAngle;
-                if (fabs(errRoll) < 2.0) {
-                    errRoll = 0;
-                }
-
-                double errYaw = remoteControlInputs.yaw - imuData.yawAngle;
-                if (fabs(errYaw) < 2.0) {
-                    errYaw = 0;
-                }
-
                 uint64_t time = esp_timer_get_time();
-                double pitchRateGoal = pid_update(&controlPIDs.pids[0], errPitch, time);
-                double errPitchRate = pitchRateGoal - imuData.pitchRate;
-                double pitchOutput = pid_update(&controlPIDs.pids[1], errPitchRate, time);
+                
+                // Run the PID loop
+                double errPitchRate = remoteControlInputs.pitch - imuData.pitchRate;
+                double errRollRate = remoteControlInputs.roll - imuData.rollRate;
+                double errYawRate = remoteControlInputs.yaw - imuData.yawRate;
+                // Rate PID loop
+                double pitchOutput = pid_update(&ratePitchPid, errPitchRate, time);
+                double rollOutput = pid_update(&rateRollPid, errRollRate, time);
+                double yawOutput = pid_update(&rateYawPid, errYawRate, time);
 
-                double rollRateGoal = pid_update(&controlPIDs.pids[2], errRoll, time);
-                double errRollRate = rollRateGoal - imuData.rollRate;
-                double rollOutput = pid_update(&controlPIDs.pids[3], errRollRate, time);
+                // Angle PID loop
+                // double errPitchAngle = pitchAngleGoal - imuData.pitchAngle;
+                // double pitchOutput = pid_update(&anglePitchPid, errPitchAngle, time);
+                // double errRollAngle = rollAngleGoal - imuData.rollAngle;
+                // double rollOutput = pid_update(&angleRollPid, errRollAngle, time);
 
-                double yawRateGoal = pid_update(&controlPIDs.pids[4], errYaw, time);
-                double errYawRate = yawRateGoal - imuData.yawRate;
-                double yawOutput = pid_update(&controlPIDs.pids[5], errYawRate, time);
-
-                ESP_LOGI(TAG, "Rates: %f, %f, %f", imuData.pitchRate, imuData.rollRate, imuData.yawRate);
+                ESP_LOGI(TAG, "Throttle %f PID's: %f, %f, %f", remoteControlInputs.throttle, pitchOutput, rollOutput,
+                         yawOutput);
 
                 // Then update the ESC's
                 update_escs(remoteControlInputs.throttle, pitchOutput, rollOutput, yawOutput);
@@ -169,66 +143,42 @@ void flight_controller(void) {
     }
 }
 
-void process_remote_data(RemoteSetPoints_t* setPoints, ControlSystem_t* system, uint16_t* payload) {
+void process_remote_data(RemoteSetPoints_t* setPoints, uint16_t* payload) {
+    uint8_t i = 0;
     uint8_t* buffer;
     switch (payload[0]) {
     case PID_MODIFIERS:
         buffer = (uint8_t*) (payload + 1);
-        for (uint8_t i = 0; i < 6; i++) {
-            system->pids[i].kp = buffer[0];
-            system->pids[i].kd = buffer[1];
-            system->pids[i].ki = buffer[2];
-            buffer += 3; // Move pointer along 3 bytes
-        }
+        // Rates
+        ratePitchPid.kp = buffer[i++]; // buffer[0]
+        ratePitchPid.ki = buffer[i++];
+        ratePitchPid.kd = buffer[i++];
+
+        rateRollPid.kp = buffer[i++];
+        rateRollPid.ki = buffer[i++];
+        rateRollPid.kd = buffer[i++];
+
+        rateYawPid.kp = buffer[i++];
+        rateYawPid.ki = buffer[i++];
+        rateYawPid.kd = buffer[i++];
+        // Angles
+        anglePitchPid.kp = buffer[i++];
+        anglePitchPid.ki = buffer[i++];
+        anglePitchPid.kd = buffer[i++];
+
+        angleRollPid.kp = buffer[i++];
+        angleRollPid.ki = buffer[i++];
+        angleRollPid.kd = buffer[i++]; // buffer[14]
 
         break;
 
     case SETPOINT_UPDATE:
-        setPoints->throttle = throttle_adc_convert(payload[1]);
-        // setPoints->pitch = round((payload[2] - 2048.0) / 68.267);
-        // setPoints->roll = round((payload[3] - 2048.0) / 68.267);
-        // setPoints->yaw = round((payload[4] - 2048.0) / 68.267);
+        setPoints->throttle = mapf(payload[1], ADC_MIN, ADC_MAX, MIN_THROTTLE, MAX_THROTTLE);
+        setPoints->pitch = mapf(payload[2], ADC_MIN, ADC_MAX, MIN_RATE, MAX_RATE);
+        setPoints->roll = mapf(payload[3], ADC_MIN, ADC_MAX, MIN_RATE, MAX_RATE);
+        setPoints->yaw = mapf(payload[4], ADC_MIN, ADC_MAX, MIN_RATE, MAX_RATE);
         break;
     }
-}
-
-/* throttle_adc_convert()
- * ----------------------
- * Converts a raw 12-bit ADC value (0 to 4095) into a throttle signal range
- * from 1000 to 2000.
- *
- * This maps the ADC input proportionally to the expected PWM microsecond
- * range for standard ESCs.
- *
- * Dependencies:
- *   - Assumes the ADC provides an unsigned 12-bit value.
- *   - No external dependencies.
- */
-double throttle_adc_convert(uint16_t value) {
-    return ((double) value) / 4.095 + 1000;
-}
-
-/* angle_adc_convert()
- * -------------------
- * Converts a raw 12-bit ADC value (0 to 4095) into an angle measurement
- * ranging approximately from -30 to +30 degrees.
- *
- * The conversion recenters the input to a signed range (-2048 to 2047)
- * and scales it by a fixed factor to produce a meaningful angle.
- * A dead zone is applied: any value within ±2 degrees is set to 0
- * to filter out small noise near the neutral point.
- *
- * Dependencies:
- *   - Assumes the ADC provides an unsigned 12-bit value centered at 2048.
- *   - Uses fabs() from math.h.
- */
-double angle_adc_convert(uint16_t value) {
-    double angle = ((double) value - 2048.0) / 68.267;
-    if (fabs(angle) < 2) {
-        angle = 0.0;
-    }
-
-    return angle;
 }
 
 /* update_escs()
@@ -256,24 +206,18 @@ void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawP
     if (throttle < 1020) {
 
         for (uint8_t i = 0; i < 4; i++) {
-            motorSpeeds[i] = MOTOR_SPEED_MIN;
+            motorSpeeds[i] = MIN_THROTTLE;
         }
     } else {
 
-        motorSpeeds[0] = throttle - pitchPID + rollPID - yawPID - MOTOR_A_OFFSET; // Front left
-        motorSpeeds[1] = throttle + pitchPID + rollPID + yawPID - MOTOR_B_OFFSET; // Rear left
-        motorSpeeds[2] = throttle + pitchPID - rollPID - yawPID - MOTOR_C_OFFSET; // Rear right
-        motorSpeeds[3] = throttle - pitchPID - rollPID + yawPID - MOTOR_D_OFFSET; // Front right
+        motorSpeeds[0] = constrainf(throttle - pitchPID + rollPID - yawPID, MIN_THROTTLE, MAX_THROTTLE); // - MOTOR_A_OFFSET; // Front left
+        motorSpeeds[1] = constrainf(throttle + pitchPID + rollPID + yawPID, MIN_THROTTLE, MAX_THROTTLE); // - MOTOR_B_OFFSET; // Rear left
+        motorSpeeds[2] = constrainf(throttle + pitchPID - rollPID - yawPID, MIN_THROTTLE, MAX_THROTTLE); // - MOTOR_C_OFFSET; // Rear right
+        motorSpeeds[3] = constrainf(throttle - pitchPID - rollPID + yawPID, MIN_THROTTLE, MAX_THROTTLE); // - MOTOR_D_OFFSET; // Front right
     }
 
     for (uint8_t i = 0; i < NUMBER_OF_MOTORS; i++) {
-
         esc_pwm_set_duty_cycle(i, (uint16_t) motorSpeeds[i]);
-        // if (i == 3) {
-        //     printf("Motor %d: %d\r\n", i + 1, (uint16_t) motorSpeeds[i]);
-        // } else {
-        //     printf("Motor %d: %d\t", i + 1, (uint16_t) motorSpeeds[i]);
-        // }
     }
 
     // No waits on these calls. If there hasn't been a signal to send it will be skipped
@@ -322,6 +266,17 @@ double pid_update(PID_t* pid, double error, uint64_t now) {
 
     double output = pid->kp * error + pid->ki * pid->intergral + pid->kd * derivative;
     return output;
+}
+
+void remote_data_return_init(int periodUS) {
+
+    esp_timer_create_args_t config = {
+        .callback = remote_data_callback,
+        .dispatch_method = ESP_TIMER_TASK,
+    };
+    esp_timer_handle_t timerHandle = NULL;
+    esp_timer_create(&config, &timerHandle);
+    esp_timer_start_periodic(timerHandle, periodUS); // 500,000us -> 500ms -> 0.5s
 }
 
 /* remote_data_callback()

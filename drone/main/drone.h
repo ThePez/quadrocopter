@@ -34,6 +34,18 @@
 #define RAD_2_DEG (180.0 / M_PI)
 #define DEG_2_RAD (M_PI / 180.0)
 
+#define ADC_MIN 0
+#define ADC_MAX 4095
+
+#define MIN_RATE -200.0
+#define MAX_RATE 200.0
+
+#define MAX_ANGLE 30.0
+#define MIN_ANGLE -30.0
+
+#define MIN_THROTTLE 1000.0
+#define MAX_THROTTLE 2000.0
+
 ///////////////////////////// Structures & Enums /////////////////////////////
 
 enum { PID_MODIFIERS, SETPOINT_UPDATE } MessageType_t;
@@ -54,20 +66,14 @@ typedef struct {
     uint64_t prevTimeUS; // Last update time in us
 } PID_t;
 
-typedef struct {
-    PID_t pids[6];
-    double errors[6];
-} ControlSystem_t;
-
 ///////////////////////////////// Prototypes /////////////////////////////////
 
 // Task Function Prototypes
 void flight_controller(void);
-void process_remote_data(RemoteSetPoints_t* setPoints, ControlSystem_t* system, uint16_t* payload);
-double throttle_adc_convert(uint16_t value);
-double angle_adc_convert(uint16_t value);
+void process_remote_data(RemoteSetPoints_t* setPoints, uint16_t* payload);
 void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawPID);
 double pid_update(PID_t* pid, double error, uint64_t now);
+void remote_data_return_init(int periodUS);
 void remote_data_callback(void* args);
 
 #endif

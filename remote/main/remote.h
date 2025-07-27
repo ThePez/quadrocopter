@@ -25,9 +25,17 @@
 #define REMOTE_STACK (configMINIMAL_STACK_SIZE * 2)
 #define REMOTE_PRIO (tskIDLE_PRIORITY + 2)
 
-#define MAX_ANGLE (30.0)
-#define MIN_ANGLE (-30.0)
-#define ANGLE_RANGE (60.0)
+#define ADC_MIN 0
+#define ADC_MAX 4095
+
+#define MIN_RATE -200.0
+#define MAX_RATE 200.0
+
+#define MAX_ANGLE 30.0
+#define MIN_ANGLE -30.0
+
+#define MIN_THROTTLE 1000.0
+#define MAX_THROTTLE 2000.0
 
 void remote_controller(void);
 

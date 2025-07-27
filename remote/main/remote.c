@@ -69,22 +69,24 @@ void remote_controller(void) {
         // Get adc values from the input queue
         if (xQueueReceive(joysticksQueue, adcValues, portMAX_DELAY) == pdTRUE) {
 
-            double inputs[4];
-            // Throttle conversion
-            inputs[0] = ((double) adcValues[0] / 4.095 + 1000.0);
-            // Pitch, Roll & Yaw conversion
-            for (int i = 1; i < 4; i++) {
-                inputs[i] = (adcValues[i] - 2048.0) / 68.267;
-            }
-
-            // printf("Throttle: %d, Pitch: %f, Roll: %f, Yaw: %f\r\n", (uint16_t) inputs[0], inputs[1], inputs[2],
+            // float inputs[4];
+            // // Throttle conversion
+            // inputs[0] = mapf(adcValues[0], ADC_MIN, ADC_MAX, MIN_THROTTLE, MAX_THROTTLE);
+            // // Pitch, Roll & Yaw conversion
+            // for (int i = 1; i < 4; i++) {
+            //     inputs[i] = mapf(adcValues[i], ADC_MIN, ADC_MAX, MIN_RATE, MAX_RATE);
+            // }
+            // printf("Throttle: %f, Pitch: %f, Roll: %f, Yaw: %f\r\n", inputs[0], inputs[1], inputs[2],
             //        inputs[3]);
 
             memset(adcPacket, 0, sizeof(adcPacket));
             adcPacket[0] = 1; // Setpoint update
             memcpy(adcPacket + 1, adcValues, sizeof(adcValues));
 
-            adcPacket[1] = 1300;
+            adcPacket[1] = 2048; // manual throttle set
+            adcPacket[2] = 2048; // manual pitch set
+            adcPacket[3] = 2048; // manual roll set
+            adcPacket[4] = 2048; // manual yaw set
             // Send the resulting packet to the radio task
             if (radioTransmitterQueue) {
                 xQueueSendToFront(radioTransmitterQueue, adcPacket, pdMS_TO_TICKS(5));
@@ -92,10 +94,7 @@ void remote_controller(void) {
         }
 
         if (xQueueReceive(radioReceiverQueue, adcPacket, 0) == pdTRUE) {
-            for (int i = 0; i < 4; i++) {
-                printf("Motor %d: %d ", i + 1, adcPacket[i]);
-            }
-            printf("\r\n");
+            printf("Motors: %d %d %d %d\r\n", adcPacket[0], adcPacket[1], adcPacket[2], adcPacket[3]);
         }
     }
 }

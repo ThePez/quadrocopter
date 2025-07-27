@@ -136,3 +136,29 @@ float mapf(float x, float in_min, float in_max, float out_min, float out_max) {
     float value = (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
     return value;
 }
+
+/**
+ * @brief Constrains a floating-point value to lie within a specified range.
+ *
+ * This function limits the input value to be within the range [min, max].
+ * If the value is greater than max, it returns max.
+ * If the value is less than min, it returns min.
+ * Otherwise, it returns the original value.
+ *
+ * @param value  The input value to constrain.
+ * @param min    The lower bound of the range.
+ * @param max    The upper bound of the range.
+ *
+ * @return The constrained value within [min, max].
+ */
+float constrainf(float value, float min, float max) {
+    if (value > max) {
+        value = max;
+    }
+
+    if (value < min) {
+        value = min;
+    }
+
+    return value;
+}
