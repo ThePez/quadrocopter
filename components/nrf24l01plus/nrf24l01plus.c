@@ -130,6 +130,21 @@ void nrf24l01plus_init(spi_host_device_t spiBus, void* handler) {
 }
 
 /**
+ * @brief Sends a single-byte command to the NRF24L01+
+ *
+ * @param command Command byte to send
+ */
+void nrf24l01plus_send_command(uint8_t command) {
+    spi_transaction_t transation = {
+        .length = 8,           // Transation length in bits
+        .tx_buffer = &command, // Pointer to transmit buffer
+        .rx_buffer = NULL,     // Pointer to receive buffer
+    };
+
+    ESP_ERROR_CHECK(spi_device_transmit(nrf24l01SpiHandle, &transation));
+}
+
+/**
  * @brief Writes a single byte to an NRF24L01+ register.
  *
  * @param regAddress Address of the register to write to.
@@ -235,7 +250,7 @@ int nrf24l01plus_recieve_packet(uint8_t* rxBuffer) {
         esp_rom_delay_us(10);
         nrf24l01plus_read_buffer(NRF24L01PLUS_RD_RX_PLOAD, rxBuffer, NRF24L01PLUS_TX_PLOAD_WIDTH);
         esp_rom_delay_us(10);
-        nrf24l01plus_write_register(NRF24L01PLUS_FLUSH_RX, 0); // Flush RX FIFO
+        nrf24l01plus_flush_rx();
         esp_rom_delay_us(10);
         nrf24l01plus_write_register(NRF24L01PLUS_STATUS, NRF24L01PLUS_RX_DR); // Clear RX_DR
         esp_rom_delay_us(10);
@@ -264,7 +279,7 @@ void nrf24l01plus_send_packet(uint8_t* txBuffer) {
     NRF_CE_LOW();
 
     if (!useIQR) {
-        esp_rom_delay_us(200); // Wait for TX -> Standby-I (~4.5 ms)
+        esp_rom_delay_us(200); // Wait for TX -> Standby-I (~200 us)
         nrf24l01plus_receive_mode();
     }
 }
@@ -325,4 +340,18 @@ int nrf24l01plus_rxFifoEmpty(void) {
     uint8_t fifoStatus;
     fifoStatus = nrf24l01plus_read_register(NRF24L01PLUS_FIFO_STATUS);
     return !!(fifoStatus & NRF24L01PLUS_FIFO_RX_EMPTY);
+}
+
+/**
+ * @brief Clears the tx FIFO.
+ */
+void nrf24l01plus_flush_tx(void) {
+    nrf24l01plus_send_command(NRF24L01PLUS_FLUSH_TX);
+}
+
+/**
+ * @brief Clears the rx FIFO.
+ */
+void nrf24l01plus_flush_rx(void) {
+    nrf24l01plus_send_command(NRF24L01PLUS_FLUSH_RX);
 }

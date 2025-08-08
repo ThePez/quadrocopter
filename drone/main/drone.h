@@ -69,7 +69,7 @@ typedef struct {
 ///////////////////////////////// Prototypes /////////////////////////////////
 
 // Task Function Prototypes
-void flight_controller(void);
+void flight_controller(void* pvParams);
 void process_remote_data(RemoteSetPoints_t* setPoints, uint16_t* payload);
 void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawPID);
 double pid_update(PID_t* pid, double error, uint64_t now);

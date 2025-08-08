@@ -131,8 +131,8 @@ static void control_task(void* pvParams) {
 
     xSemaphoreTake(spiMutex, portMAX_DELAY);
     uint8_t clearBoth = NRF24L01PLUS_TX_DS | NRF24L01PLUS_RX_DR;
-    nrf24l01plus_write_register(NRF24L01PLUS_FLUSH_RX, 0);       // Flush RX FIFO
-    nrf24l01plus_write_register(NRF24L01PLUS_FLUSH_TX, 0);       // Flush TX FIFO
+    nrf24l01plus_flush_rx();
+    nrf24l01plus_flush_tx();
     nrf24l01plus_write_register(NRF24L01PLUS_STATUS, clearBoth); // Clear interrupts
     xSemaphoreGive(spiMutex);
 
@@ -165,7 +165,7 @@ static void control_task(void* pvParams) {
             nrf24l01plus_write_register(NRF24L01PLUS_STATUS, NRF24L01PLUS_TX_DS);
             nrf24l01plus_receive_mode();
             xSemaphoreGive(spiMutex);
-            // ESP_LOGI(TAG, "Radio: data sent ISR");
+            ESP_LOGI(TAG, "Radio: data sent ISR");
             // Notify the Transmitter Task that further sends are now allowed
             xEventGroupSetBits(radioEventGroup, RADIO_TX_READY);
 

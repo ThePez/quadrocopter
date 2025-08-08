@@ -89,6 +89,7 @@
 void nrf24l01plus_spi_init(spi_host_device_t spi_bus);
 void nrf24l01plus_interrupt_init(void* handler);
 void nrf24l01plus_init(spi_host_device_t spi_bus, void* handler);
+void nrf24l01plus_send_command(uint8_t command);
 void nrf24l01plus_write_register(uint8_t reg_addr, uint8_t val);
 uint8_t nrf24l01plus_read_register(uint8_t reg_addr);
 void nrf24l01plus_write_buffer(uint8_t reg_addr, uint8_t* buffer, int buffer_len);
@@ -99,5 +100,7 @@ void nrf24l01plus_receive_mode(void);
 void nrf24l01plus_send_mode(void);
 int nrf24l01plus_txFifoEmpty(void);
 int nrf24l01plus_rxFifoEmpty(void);
+void nrf24l01plus_flush_tx(void);
+void nrf24l01plus_flush_rx(void);
 
 #endif

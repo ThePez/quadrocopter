@@ -15,8 +15,12 @@ static mcpwm_cmpr_handle_t esc_pwm_comparators[4] = {NULL};
 static uint16_t motorSpeeds[4] = {MOTOR_SPEED_MIN, MOTOR_SPEED_MIN, MOTOR_SPEED_MIN, MOTOR_SPEED_MIN};
 
 MotorSpeeds_t get_compare_values(void) {
-
-    return (MotorSpeeds_t) {.values = motorSpeeds};
+    MotorSpeeds_t speeds = {0};
+    for (uint8_t i = 0; i < 4; i++) {
+        speeds.values[i] = motorSpeeds[i];
+    }
+    
+    return speeds;
 }
 
 /**
