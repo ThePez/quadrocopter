@@ -19,25 +19,27 @@ QueueHandle_t joysticksQueue = NULL;
 
 static const char* TAG = "JOYSTICK";
 
-/**
- * @brief Initializes the joystick input module.
- *
- * Sets up the MCP3208 ADC over SPI and starts a FreeRTOS task
- * to continuously read joystick and slider inputs.
- *
- * @param spiMutex Pointer to a mutex protecting SPI access.
- * @param spiHost  SPI host connected to the MCP3208 chip.
- */
-void joysticks_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost) {
+esp_err_t joysticks_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost) {
 
     xSemaphoreTake(*spiMutex, portMAX_DELAY);
     mcp3208_init(spiHost); // VSPI_HOST;
     xSemaphoreGive(*spiMutex);
 
     adcInputParams_t* params = pvPortMalloc(sizeof(adcInputParams_t*));
+    if (params == NULL) {
+        // malloc fails
+        ESP_LOGE(TAG, "Paramater setup failed");
+        return ESP_FAIL;
+    }
     params->spiMutex = spiMutex;
-    xTaskCreate(&joysticks_task, "JOYSTICKS", JOYSTICKS_STACK, (void*) params, JOYSTICKS_PRIORITY,
-                &joysticksTaskHandle);
+    BaseType_t err = xTaskCreate(&joysticks_task, "JOYSTICKS", JOYSTICKS_STACK, (void*) params, JOYSTICKS_PRIORITY,
+                                 &joysticksTaskHandle);
+    if (err != pdTRUE) {
+        ESP_LOGE(TAG, "Task setup failed");
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
 }
 
 /**
@@ -71,7 +73,6 @@ static void joysticks_task(void* pvParams) {
     while (1) {
 
         if (xSemaphoreTake(spiMutex, JOYSTICKS_DELAY) == pdTRUE) {
-
             for (uint8_t i = 0; i < 5; i++) {
                 // Channels 1 to 4 are joysticks, 0 is slider
                 adcValues[i] = mcp3208_read_adc_channel(i, MCP3208_SINGLE);

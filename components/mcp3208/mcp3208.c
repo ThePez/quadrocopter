@@ -10,22 +10,17 @@
 
 #include "mcp3208.h"
 
+#include "esp_log.h"
+
 #include <math.h>
 #include <stdio.h>
+
+static const char* TAG = "MCP32085";
 
 // SPI device handle
 spi_device_handle_t mcp3208SpiHandle = NULL;
 
-/**
- * @brief Initializes the SPI interface for the MCP3208 ADC.
- *
- * Sets the SPI configuration including clock speed, chip select pin,
- * SPI mode (CPOL = 0, CPHA = 0), and queue size. Registers the device
- * on the specified SPI bus.
- *
- * @param spiBus SPI bus to which the MCP3208 is connected (e.g., HSPI_HOST).
- */
-void mcp3208_spi_init(spi_host_device_t spiBus) {
+esp_err_t mcp3208_spi_init(spi_host_device_t spiBus) {
 
     // Setup the SPI for the radio module
     spi_device_interface_config_t deviceConfig = {
@@ -35,41 +30,33 @@ void mcp3208_spi_init(spi_host_device_t spiBus) {
         .mode = 0                       // SPI mode, representing a pair of (CPOL, CPHA). CPOL = 1 CPHA = 1
     };
 
-    ESP_ERROR_CHECK(spi_bus_add_device(spiBus, &deviceConfig, &mcp3208SpiHandle));
+    esp_err_t err = spi_bus_add_device(spiBus, &deviceConfig, &mcp3208SpiHandle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "SPI setip failed");
+    }
+
+    return err;
 }
 
-/**
- * @brief Performs MCP3208 startup procedure and initializes SPI communication.
- *
- * Cycles the chip select (CS) pin to reset the MCP3208 and calls
- * the SPI initialization function to prepare for communication.
- *
- * @param spiBus SPI bus to which the MCP3208 is connected.
- */
-void mcp3208_init(spi_host_device_t spiBus) {
+esp_err_t mcp3208_init(spi_host_device_t spiBus) {
 
-    gpio_set_direction(MCP3208_CS_PIN, GPIO_MODE_OUTPUT);
-    // Cycle the CS pin upon startup
+    esp_err_t err = gpio_set_direction(MCP3208_CS_PIN, GPIO_MODE_OUTPUT);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "SPI Pin CE failed");
+        return err;
+    }
+
+    // Cycle the CS pin upon startup, for ~50us
     gpio_set_level(MCP3208_CS_PIN, 0);
     esp_rom_delay_us(50);
     gpio_set_level(MCP3208_CS_PIN, 1);
     esp_rom_delay_us(50);
     gpio_set_level(MCP3208_CS_PIN, 0);
 
-    mcp3208_spi_init(spiBus);
+    err = mcp3208_spi_init(spiBus);
+    return err;
 }
 
-/**
- * @brief Reads an analog value from the specified MCP3208 channel.
- *
- * Constructs and sends a read command to the MCP3208 over SPI, then
- * receives and parses the 12-bit ADC result.
- *
- * @param channel ADC channel to read (0–7).
- * @param type Conversion type: 1 for single-ended, 0 for differential.
- *
- * @return 12-bit ADC result from the specified channel.
- */
 uint16_t mcp3208_read_adc_channel(uint8_t channel, uint8_t type) {
 
     uint16_t channelMask;
@@ -91,7 +78,11 @@ uint16_t mcp3208_read_adc_channel(uint8_t channel, uint8_t type) {
         .rx_buffer = rxBuffer, // Pointer to receive buffer
     };
 
-    ESP_ERROR_CHECK(spi_device_transmit(mcp3208SpiHandle, &transaction));
+    esp_err_t err = spi_device_transmit(mcp3208SpiHandle, &transaction);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "SPI read failed");
+        return 0;
+    }
 
     // Format the output to only include the final 12 bits.
     uint16_t output = rxBuffer[2] | ((rxBuffer[1] & 0x0F) << 8);

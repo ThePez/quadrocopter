@@ -31,7 +31,16 @@ typedef struct {
     SemaphoreHandle_t* spiMutex;
 } adcInputParams_t;
 
-void joysticks_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost);
+/**
+ * @brief Initializes the joystick input module.
+ *
+ * Sets up the MCP3208 ADC over SPI and starts a FreeRTOS task
+ * to continuously read joystick and slider inputs.
+ *
+ * @param spiMutex Pointer to a mutex protecting SPI access.
+ * @param spiHost  SPI host connected to the MCP3208 chip.
+ */
+esp_err_t joysticks_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost);
 
 // Task Handle
 extern TaskHandle_t joysticksTaskHandle;
