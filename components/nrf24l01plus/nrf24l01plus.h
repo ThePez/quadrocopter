@@ -86,21 +86,142 @@
 #define NRF_CE_HIGH() gpio_set_level(NRF24L01PLUS_CE_PIN, 1)
 #define NRF_CE_LOW() gpio_set_level(NRF24L01PLUS_CE_PIN, 0)
 
-void nrf24l01plus_spi_init(spi_host_device_t spi_bus);
-void nrf24l01plus_interrupt_init(void* handler);
-void nrf24l01plus_init(spi_host_device_t spi_bus, void* handler);
-void nrf24l01plus_send_command(uint8_t command);
-void nrf24l01plus_write_register(uint8_t reg_addr, uint8_t val);
+/**
+ * @brief Initializes the SPI device interface for the NRF24L01+ module.
+ *
+ * Configures SPI parameters such as clock speed, SPI mode (CPOL=0, CPHA=0),
+ * and chip select pin. Adds the device to the specified SPI bus.
+ *
+ * @param spiBus The SPI bus (e.g., HSPI_HOST) to which the device is attached.
+ */
+esp_err_t nrf24l01plus_spi_init(spi_host_device_t spi_bus);
+
+/**
+ * @brief Sets up an external interrupt on the NRF24L01+ IRQ pin.
+ *
+ * Configures the GPIO pin as input with pull-up and attaches an interrupt
+ * handler to trigger on falling edge. Installs the ISR service if not already installed.
+ *
+ * @param handler Pointer to the ISR handler function to call on interrupt.
+ */
+esp_err_t nrf24l01plus_interrupt_init(void* handler);
+
+/**
+ * @brief Fully initializes the NRF24L01+ module.
+ *
+ * Sets CE pin, configures optional IRQ interrupt, initializes SPI,
+ * sets addresses, disables auto acknowledgment, enables Pipe 0,
+ * sets payload size, channel, power and data rate, and enters RX mode.
+ *
+ * @param spiBus SPI bus to use for communication.
+ * @param handler Optional ISR handler function for IRQ pin (can be NULL).
+ */
+esp_err_t nrf24l01plus_init(spi_host_device_t spi_bus, void* handler);
+
+/**
+ * @brief Sends a single-byte command to the NRF24L01+
+ *
+ * @param command Command byte to send
+ */
+esp_err_t nrf24l01plus_send_command(uint8_t command);
+
+/**
+ * @brief Writes a single byte to an NRF24L01+ register.
+ *
+ * @param regAddress Address of the register to write to.
+ * @param val Value to write into the register.
+ */
+esp_err_t nrf24l01plus_write_register(uint8_t reg_addr, uint8_t val);
+
+/**
+ * @brief Reads a single byte from an NRF24L01+ register.
+ *
+ * @param regAddress Address of the register to read.
+ * @return Value read from the register.
+ */
 uint8_t nrf24l01plus_read_register(uint8_t reg_addr);
-void nrf24l01plus_write_buffer(uint8_t reg_addr, uint8_t* buffer, int buffer_len);
-void nrf24l01plus_read_buffer(uint8_t reg_addr, uint8_t* buffer, int buffer_len);
+
+/**
+ * @brief Writes a buffer of bytes to an NRF24L01+ register.
+ *
+ * Typically used for writing TX/RX addresses or payload data.
+ *
+ * @param regAddress Register address to start writing at.
+ * @param buffer Pointer to the data buffer to send.
+ * @param bufferLength Number of bytes to write.
+ */
+esp_err_t nrf24l01plus_write_buffer(uint8_t reg_addr, uint8_t* buffer, int buffer_len);
+
+/**
+ * @brief Reads multiple bytes from an NRF24L01+ register.
+ *
+ * Typically used for reading payload data from RX FIFO.
+ *
+ * @param regAddress Register address to read from.
+ * @param buffer Buffer to store the received data.
+ * @param bufferLength Number of bytes to read.
+ */
+esp_err_t nrf24l01plus_read_buffer(uint8_t reg_addr, uint8_t* buffer, int buffer_len);
+
+/**
+ * @brief Attempts to receive a packet from the NRF24L01+ RX FIFO.
+ *
+ * If a packet is available, reads it into the provided buffer,
+ * flushes the RX FIFO, and clears the RX_DR interrupt flag.
+ *
+ * @param rxBuffer Buffer to store the received payload.
+ * @return 1 if a packet was received, 0 otherwise.
+ */
 int nrf24l01plus_recieve_packet(uint8_t* rx_buf);
-void nrf24l01plus_send_packet(uint8_t* tx_buf);
-void nrf24l01plus_receive_mode(void);
-void nrf24l01plus_send_mode(void);
+
+/**
+ * @brief Sends a data packet using the NRF24L01+.
+ *
+ * Switches to TX mode, writes the payload, pulses CE to transmit,
+ * and returns to RX mode if not using IRQ interrupts.
+ *
+ * @param txBuffer Pointer to the data buffer to transmit.
+ */
+esp_err_t nrf24l01plus_send_packet(uint8_t* tx_buf);
+
+/**
+ * @brief Puts the NRF24L01+ module into receive (RX) mode.
+ *
+ * Sets PRIM_RX and PWR_UP bits in CONFIG register and enables CE.
+ * Behavior may vary depending on whether IRQs are enabled.
+ */
+esp_err_t nrf24l01plus_receive_mode(void);
+
+/**
+ * @brief Puts the NRF24L01+ module into transmit (TX) mode.
+ *
+ * Clears PRIM_RX bit, keeps CE low until data is sent.
+ * Behavior may vary depending on whether IRQs are enabled.
+ */
+esp_err_t nrf24l01plus_send_mode(void);
+
+/**
+ * @brief Checks whether the TX FIFO is empty.
+ *
+ * @return 1 if empty, 0 if it contains data.
+ */
 int nrf24l01plus_txFifoEmpty(void);
+
+/**
+ * @brief Checks whether the RX FIFO is empty.
+ *
+ * @return 1 if empty, 0 if it contains unread data.
+ */
 int nrf24l01plus_rxFifoEmpty(void);
-void nrf24l01plus_flush_tx(void);
-void nrf24l01plus_flush_rx(void);
+
+/**
+ * @brief Clears the tx FIFO.
+ */
+esp_err_t nrf24l01plus_flush_tx(void);
+
+/**
+ * @brief Clears the rx FIFO.
+ */
+esp_err_t nrf24l01plus_flush_rx(void);
 
 #endif
