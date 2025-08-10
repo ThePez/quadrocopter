@@ -77,6 +77,8 @@ void remote_controller(void) {
         // Get adc values from the input queue
         if (xQueueReceive(joysticksQueue, adcValues, portMAX_DELAY) == pdTRUE) {
 
+            // Printing of inputs for Debugging
+            
             // float inputs[4];
             // // Throttle conversion
             // inputs[0] = mapf(adcValues[0], ADC_MIN, ADC_MAX, MIN_THROTTLE, MAX_THROTTLE);
@@ -88,13 +90,12 @@ void remote_controller(void) {
             //        inputs[3]);
 
             memset(adcPacket, 0, sizeof(adcPacket));
-            adcPacket[0] = 1; // Setpoint update
-            memcpy(adcPacket + 1, adcValues, sizeof(adcValues));
+            adcPacket[0] = 1;            // Setpoint update
+            adcPacket[1] = adcValues[0]; // Throttle
+            adcPacket[2] = adcValues[1]; // Pitch
+            adcPacket[3] = adcValues[2]; // Roll
+            adcPacket[4] = adcValues[3]; // Yaw
 
-            adcPacket[1] = 2048; // manual throttle set
-            adcPacket[2] = 2048; // manual pitch set
-            adcPacket[3] = 2048; // manual roll set
-            adcPacket[4] = 2048; // manual yaw set
             // Send the resulting packet to the radio task
             if (radioTransmitterQueue) {
                 xQueueSendToFront(radioTransmitterQueue, adcPacket, pdMS_TO_TICKS(5));
