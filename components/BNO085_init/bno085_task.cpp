@@ -80,6 +80,13 @@ static void bno08x_task(void* pvParameters) {
     while (1) {
         ESP_LOGI(TAG, "Task suspended");
         vTaskSuspend(NULL); // Susspend task as callback functions handle the data.
+
+        // This code will run if the task is re-enabled by the emergancy shutdown
+
+        // Turn off the bno085
+        imu.~BNO08x();
+        // Delete the setup task
+        vTaskDelete(NULL);        
     }
 }
 
@@ -95,5 +102,9 @@ void bno08x_start_task(void) {
     xTaskCreate(bno08x_task, "BNO08x Task", BNO085_STACK_SIZE, NULL, BNO085_PRIORITY, &bno085Task);
 }
 
+/**
+ * @brief Resumes the setup task for the bno085 so that it can shutdown
+ */
 void bno085_kill(void) {
+    vTaskResume(bno085Task);
 }

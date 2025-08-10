@@ -95,6 +95,7 @@ void remote_controller(void) {
             adcPacket[2] = adcValues[1]; // Pitch
             adcPacket[3] = adcValues[2]; // Roll
             adcPacket[4] = adcValues[3]; // Yaw
+            adcPacket[5] = adcValues[4]; // Mode
 
             // Send the resulting packet to the radio task
             if (radioTransmitterQueue) {

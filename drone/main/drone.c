@@ -22,11 +22,14 @@ TaskHandle_t flightController = NULL;
 static const char* TAG = "DRONE";
 
 // Set default Scalers for the PID structs
-static PID_t ratePitchPid = {.kp = 5, .ki = 0, .kd = 0};
-static PID_t rateRollPid = {.kp = 5, .ki = 0, .kd = 0};
-static PID_t rateYawPid = {.kp = 5, .ki = 0, .kd = 0};
-static PID_t anglePitchPid = {.kp = 5, .ki = 0, .kd = 0};
-static PID_t angleRollPid = {.kp = 5, .ki = 0, .kd = 0};
+static PID_t ratePitchPid = {.kp = 1, .ki = 0.00, .kd = 0.00};
+static PID_t rateRollPid = {.kp = 0.7, .ki = 0.00, .kd = 0.00};
+static PID_t rateYawPid = {.kp = 0.5, .ki = 0.00, .kd = 0.00};
+static PID_t anglePitchPid = {.kp = 3, .ki = 0, .kd = 0};
+static PID_t angleRollPid = {.kp = 3, .ki = 0, .kd = 0};
+
+// Start in angle mode for leveling
+static FlightMode_t current_flight_mode = FLIGHT_MODE_ANGLE;
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -60,27 +63,27 @@ void app_main(void) {
     xTaskCreate(&flight_controller, "FC_Task", SYS_STACK, NULL, SYS_PRIO, &flightController);
 }
 
-void emergancy_task(void* pvParams) {
-    // Kill all other tasks.
-    // Clean up all malloc'd data...
-    // Slowly turn off the motors...
-    // Then do nothing
+void set_flight_mode(FlightMode_t mode) {
+    if (mode != current_flight_mode) {
+        current_flight_mode = mode;
+
+        // Reset PID integrators when switching modes to prevent windup
+        pid_reset(&ratePitchPid);
+        pid_reset(&rateRollPid);
+        pid_reset(&rateYawPid);
+
+        if (mode == FLIGHT_MODE_ANGLE) {
+            pid_reset(&anglePitchPid);
+            pid_reset(&angleRollPid);
+        }
+
+        ESP_LOGI(TAG, "Switched to %s mode", mode == FLIGHT_MODE_ANGLE ? "ANGLE" : "RATE");
+    }
 }
 
-/**
- * @brief Main PID control loop for the quadcopter.
- *
- * Waits for new telemetry (IMU) or radio control data using a FreeRTOS QueueSet.
- * Calculates pitch, roll, and yaw errors, runs PID loops, and updates ESC signals.
- *
- * Maintains stable flight by adjusting motor speeds based on sensor and user input.
- *
- * @note Must be run as a FreeRTOS task.
- * @note Requires radioReceiverQueue, radioTransmitterQueue and bno085Queue to be created before running.
- */
 void flight_controller(void* pvParams) {
 
-    RemoteSetPoints_t remoteControlInputs = {0};
+    RemoteSetPoints_t remoteControlInputs = {.throttle = 1000};
     Telemitry_t imuData = {0};
     uint16_t payload[RADIO_PAYLOAD_WIDTH / 2]; // 16 words
 
@@ -121,44 +124,67 @@ void flight_controller(void* pvParams) {
                 imuData.yawRate *= RAD_2_DEG;
                 uint64_t time = esp_timer_get_time();
 
-                // Run the PID loop
-                double errPitchRate = remoteControlInputs.pitch - imuData.pitchRate;
-                double errRollRate = remoteControlInputs.roll - imuData.rollRate;
-                double errYawRate = remoteControlInputs.yaw - imuData.yawRate;
-                // Rate PID loop
+                double pitchRateSetpoint, rollRateSetpoint, yawRateSetpoint;
+
+                if (current_flight_mode == FLIGHT_MODE_ANGLE) {
+                    // ANGLE MODE: Cascaded control with outer angle loop
+
+                    // Map remote control inputs to angle setpoints
+                    double pitchAngleSetpoint = mapf(remoteControlInputs.pitch, -200.0, 200.0, -MAX_ANGLE, MAX_ANGLE);
+                    double rollAngleSetpoint = mapf(remoteControlInputs.roll, -200.0, 200.0, -MAX_ANGLE, MAX_ANGLE);
+
+                    // Outer loop: Angle PID controllers output desired rates
+                    double errPitchAngle = pitchAngleSetpoint - imuData.pitchAngle;
+                    double errRollAngle = rollAngleSetpoint - imuData.rollAngle;
+
+                    pitchRateSetpoint = pid_update(&anglePitchPid, errPitchAngle, time);
+                    rollRateSetpoint = pid_update(&angleRollPid, errRollAngle, time);
+
+                    // Limit the rate setpoints from angle controllers
+                    const double MAX_RATE_FROM_ANGLE = 200.0; // Match your remote input range
+                    pitchRateSetpoint = constrainf(pitchRateSetpoint, -MAX_RATE_FROM_ANGLE, MAX_RATE_FROM_ANGLE);
+                    rollRateSetpoint = constrainf(rollRateSetpoint, -MAX_RATE_FROM_ANGLE, MAX_RATE_FROM_ANGLE);
+
+                    // Yaw is still direct rate control in angle mode
+                    yawRateSetpoint = remoteControlInputs.yaw;
+
+                } else {
+                    // RATE MODE: Direct rate control (your original setup)
+                    pitchRateSetpoint = remoteControlInputs.pitch;
+                    rollRateSetpoint = remoteControlInputs.roll;
+                    yawRateSetpoint = remoteControlInputs.yaw;
+                }
+
+                // Inner loop: Rate PID controllers (always runs)
+                double errPitchRate = pitchRateSetpoint - imuData.pitchRate;
+                double errRollRate = rollRateSetpoint - imuData.rollRate;
+                double errYawRate = yawRateSetpoint - imuData.yawRate;
+
                 double pitchOutput = pid_update(&ratePitchPid, errPitchRate, time);
                 double rollOutput = pid_update(&rateRollPid, errRollRate, time);
                 double yawOutput = pid_update(&rateYawPid, errYawRate, time);
 
-                // Angle PID loop
-                // double errPitchAngle = pitchAngleGoal - imuData.pitchAngle;
-                // double pitchOutput = pid_update(&anglePitchPid, errPitchAngle, time);
-                // double errRollAngle = rollAngleGoal - imuData.rollAngle;
-                // double rollOutput = pid_update(&angleRollPid, errRollAngle, time);
+                // Debug logging
+                static uint32_t log_counter = 0;
+                if (++log_counter % 10 == 0) { // Log every ~100ms
+                    ESP_LOGI(
+                        TAG, "Mode: %s, Angles: P=%.02f R=%.02f, Rates: P=%.02f R=%.02f, PID: P=%.02f R=%.02f Y=%.02f",
+                        current_flight_mode == FLIGHT_MODE_ANGLE ? "ANGLE" : "RATE", imuData.pitchAngle,
+                        imuData.rollAngle, imuData.pitchRate, imuData.rollRate, pitchOutput, rollOutput, yawOutput);
+                }
 
-                // ESP_LOGI(TAG, "Throttle %f PID's: %f, %f, %f", remoteControlInputs.throttle, pitchOutput, rollOutput,
-                //          yawOutput);
-
-                // Then update the ESC's
+                // Update ESCs
                 update_escs(remoteControlInputs.throttle, pitchOutput, rollOutput, yawOutput);
             }
         }
     }
 }
 
-/**
- * @brief Decodes a payload of radio data into control setpoints or PID tuning values.
- *
- * Interprets incoming data as either setpoint updates or PID modifier packets.
- * Updates global PID parameters or control targets based on message type.
- *
- * @param setPoints Pointer to the control structure to be updated.
- * @param payload   Pointer to a (16-word or 32-byte) array received from the radio.
- */
 void process_remote_data(RemoteSetPoints_t* setPoints, uint16_t* payload) {
 
     uint8_t i = 0;
     uint8_t* buffer;
+    float value;
     switch (payload[0]) {
     case PID_MODIFIERS:
         buffer = (uint8_t*) (payload + 1);
@@ -187,28 +213,26 @@ void process_remote_data(RemoteSetPoints_t* setPoints, uint16_t* payload) {
 
     case SETPOINT_UPDATE:
         setPoints->throttle = mapf(payload[1], ADC_MIN, ADC_MAX, MIN_THROTTLE, MAX_THROTTLE);
-        setPoints->pitch = mapf(payload[2], ADC_MIN, ADC_MAX, MIN_RATE, MAX_RATE);
-        setPoints->roll = mapf(payload[3], ADC_MIN, ADC_MAX, MIN_RATE, MAX_RATE);
-        setPoints->yaw = mapf(payload[4], ADC_MIN, ADC_MAX, MIN_RATE, MAX_RATE);
+        // ADC values are inverted, all 3 settings are * -1
+        // Pitch rate
+        value = -mapf(payload[2], ADC_MIN, ADC_MAX, MIN_RATE, MAX_RATE);
+        setPoints->pitch = (fabsf(value) < 5) ? 0 : value;
+        // Roll rate
+        value = -mapf(payload[3], ADC_MIN, ADC_MAX, MIN_RATE, MAX_RATE);
+        setPoints->roll = (fabsf(value) < 5) ? 0 : value;
+        // Yaw rate
+        value = -mapf(payload[4], ADC_MIN, ADC_MAX, MIN_RATE, MAX_RATE);
+        setPoints->yaw = (fabsf(value) < 5) ? 0 : value;
+        // Flight mode
+        set_flight_mode((payload[5] == FLIGHT_MODE_RATE) ? FLIGHT_MODE_RATE : FLIGHT_MODE_ANGLE);
+        // Print setpoints
+        // printf("Throttle: %f, Pitch: %f, Roll: %f, Yaw: %f\r\n", setPoints->throttle, setPoints->pitch,
+        // setPoints->roll,
+        //        setPoints->yaw);
         break;
     }
 }
 
-/**
- * @brief Updates ESC PWM signals based on control inputs and PID outputs.
- *
- * Applies a mixing algorithm to compute motor-specific throttle values that
- * reflect the desired pitch, roll, and yaw behavior, and writes the result
- * to all four ESCs using esc_pwm_set_duty_cycle().
- *
- * If a notification from a remote data timer is pending, sends motor state
- * back via the radioTransmitterQueue.
- *
- * @param throttle Base throttle input (1000–2000 µs).
- * @param pitchPID Output from pitch PID controller.
- * @param rollPID  Output from roll PID controller.
- * @param yawPID   Output from yaw PID controller.
- */
 void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawPID) {
 
     double motorSpeeds[NUMBER_OF_MOTORS];
@@ -222,13 +246,13 @@ void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawP
     } else {
 
         motorSpeeds[0] = constrainf(throttle - pitchPID + rollPID - yawPID, MIN_THROTTLE,
-                                    MAX_THROTTLE); // - MOTOR_A_OFFSET; // Front left
+                                    MAX_THROTTLE); // Front left
         motorSpeeds[1] = constrainf(throttle + pitchPID + rollPID + yawPID, MIN_THROTTLE,
-                                    MAX_THROTTLE); // - MOTOR_B_OFFSET; // Rear left
+                                    MAX_THROTTLE); // Rear left
         motorSpeeds[2] = constrainf(throttle + pitchPID - rollPID - yawPID, MIN_THROTTLE,
-                                    MAX_THROTTLE); // - MOTOR_C_OFFSET; // Rear right
+                                    MAX_THROTTLE); // Rear right
         motorSpeeds[3] = constrainf(throttle - pitchPID - rollPID + yawPID, MIN_THROTTLE,
-                                    MAX_THROTTLE); // - MOTOR_D_OFFSET; // Front right
+                                    MAX_THROTTLE); // Front right
     }
 
     for (uint8_t i = 0; i < NUMBER_OF_MOTORS; i++) {
@@ -249,19 +273,6 @@ void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawP
     }
 }
 
-/**
- * @brief Performs a single PID control step.
- *
- * Computes the control signal based on the current error, elapsed time,
- * and PID configuration parameters (kp, ki, kd).
- *
- * @param pid   Pointer to the PID_t structure.
- * @param error Current error value.
- * @param now   Current time in microseconds.
- * @return      Control output from the PID calculation.
- *
- * @note Updates the internal state of the PID structure (integral, derivative, etc.).
- */
 double pid_update(PID_t* pid, double error, uint64_t now) {
     if (pid->prevTimeUS == 0) {
         pid->prevTimeUS = now;
@@ -279,14 +290,14 @@ double pid_update(PID_t* pid, double error, uint64_t now) {
     return output;
 }
 
-/**
- * @brief Initializes a periodic timer to signal that remote data can be returned.
- *
- * Creates and starts an ESP timer that periodically triggers a notification
- * to the flight controller task, allowing it to send motor state over radio.
- *
- * @param periodUS The timer period in microseconds.
- */
+void pid_reset(PID_t* pid) {
+    if (pid) {
+        pid->intergral = 0.0;
+        pid->prevError = 0.0;
+        pid->prevTimeUS = 0; // Reset timing if your PID structure has this field
+    }
+}
+
 void remote_data_return_init(int periodUS) {
 
     esp_timer_create_args_t config = {
@@ -298,14 +309,6 @@ void remote_data_return_init(int periodUS) {
     esp_timer_start_periodic(timerHandle, periodUS); // 500,000us -> 500ms -> 0.5s
 }
 
-/**
- * @brief Timer callback to notify the flight controller for radio data transmission.
- *
- * Sends a direct task notification to the flight controller to allow it
- * to transmit updated motor state back to the remote controller.
- *
- * @param args Unused (can be NULL).
- */
 void remote_data_callback(void* args) {
     xTaskNotifyGive(flightController);
 }

@@ -165,7 +165,7 @@ static void control_task(void* pvParams) {
             nrf24l01plus_write_register(NRF24L01PLUS_STATUS, NRF24L01PLUS_TX_DS);
             nrf24l01plus_receive_mode();
             xSemaphoreGive(spiMutex);
-            ESP_LOGI(TAG, "Radio: data sent ISR");
+            // ESP_LOGI(TAG, "Radio: data sent ISR");
             // Notify the Transmitter Task that further sends are now allowed
             xEventGroupSetBits(radioEventGroup, RADIO_TX_READY);
 
