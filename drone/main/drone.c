@@ -261,7 +261,6 @@ void process_remote_data(BlackBox_t* box, uint16_t* payload) {
 
     case SETPOINT_UPDATE:
         box->setPoints->throttle = mapf(payload[1], ADC_MIN, ADC_MAX, MIN_THROTTLE, MAX_THROTTLE);
-        // ADC values are inverted, all 3 settings are * -1
         // Pitch rate
         value = -mapf(payload[2], ADC_MIN, ADC_MAX, MIN_RATE, MAX_RATE);
         box->setPoints->pitch = (fabsf(value) < 5) ? 0 : value;
@@ -269,7 +268,7 @@ void process_remote_data(BlackBox_t* box, uint16_t* payload) {
         value = -mapf(payload[3], ADC_MIN, ADC_MAX, MIN_RATE, MAX_RATE);
         box->setPoints->roll = (fabsf(value) < 5) ? 0 : value;
         // Yaw rate
-        value = -mapf(payload[4], ADC_MIN, ADC_MAX, MIN_RATE, MAX_RATE);
+        value = mapf(payload[4], ADC_MIN, ADC_MAX, MIN_RATE, MAX_RATE);
         box->setPoints->yaw = (fabsf(value) < 5) ? 0 : value;
         // Flight mode
         set_flight_mode((payload[5] == FLIGHT_MODE_RATE) ? FLIGHT_MODE_RATE : FLIGHT_MODE_ANGLE, box);
@@ -287,7 +286,10 @@ void update_escs(BlackBox_t* box) {
     // This ensure the drone's motors stay off when the throttle is off
     if (throttle < 1020) {
 
-        memset(box->motorOutputs, MIN_THROTTLE, sizeof(MotorPeriods_t));
+        box->motorOutputs->motorA = MIN_THROTTLE;
+        box->motorOutputs->motorB = MIN_THROTTLE;
+        box->motorOutputs->motorC = MIN_THROTTLE;
+        box->motorOutputs->motorD = MIN_THROTTLE;
     } else {
 
         box->motorOutputs->motorA = constrainf(throttle - pitchPID + rollPID - yawPID, MIN_THROTTLE,
