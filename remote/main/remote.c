@@ -13,10 +13,14 @@
 #include "joystick_inputs.h"
 #include "radio.h"
 
+#include "esp_log.h"
+
 ////////////////////////////// Global Variables //////////////////////////////
 
 // Handle for the remote_controller FreeRTOS task
 TaskHandle_t remoteController = NULL;
+
+static const char* TAG = "REMOTE";
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -77,18 +81,6 @@ void remote_controller(void) {
         // Get adc values from the input queue
         if (xQueueReceive(joysticksQueue, adcValues, portMAX_DELAY) == pdTRUE) {
 
-            // Printing of inputs for Debugging
-            
-            // float inputs[4];
-            // // Throttle conversion
-            // inputs[0] = mapf(adcValues[0], ADC_MIN, ADC_MAX, MIN_THROTTLE, MAX_THROTTLE);
-            // // Pitch, Roll & Yaw conversion
-            // for (int i = 1; i < 4; i++) {
-            //     inputs[i] = mapf(adcValues[i], ADC_MIN, ADC_MAX, MIN_RATE, MAX_RATE);
-            // }
-            // printf("Throttle: %f, Pitch: %f, Roll: %f, Yaw: %f\r\n", inputs[0], inputs[1], inputs[2],
-            //        inputs[3]);
-
             memset(adcPacket, 0, sizeof(adcPacket));
             adcPacket[0] = 1;            // Setpoint update
             adcPacket[1] = adcValues[0]; // Throttle
@@ -104,7 +96,11 @@ void remote_controller(void) {
         }
 
         if (xQueueReceive(radioReceiverQueue, adcPacket, 0) == pdTRUE) {
-            printf("Motors: %d %d %d %d\r\n", adcPacket[0], adcPacket[1], adcPacket[2], adcPacket[3]);
+            int16_t* data = (int16_t*) adcPacket;
+            printf("Mode: %s, Angles: P=%d R=%d Y=%d, Rates: P=%d R=%d Y=%d, PID: P=%d R=%d Y=%d, Motors: FL=%d "
+                   "BL=%d BR=%d FR=%d\r\n",
+                   data[6] ? "ANGLE" : "RATE", data[0], data[1], data[2], data[3], data[4], data[5], data[7], data[8],
+                   data[9], adcPacket[10], adcPacket[11], adcPacket[12], adcPacket[13]);
         }
     }
 }

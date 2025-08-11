@@ -29,7 +29,7 @@
 #define MAX_MOTOR_ADJUSTMENT 150
 #define NUMBER_OF_MOTORS 4
 
-typedef enum { MOTOR_A, MOTOR_B, MOROT_C, MOTOR_D } MotorIndex;
+typedef enum { MOTOR_A, MOTOR_B, MOTOR_C, MOTOR_D } MotorIndex;
 
 /**
  * @brief Initializes the MCPWM hardware to drive four ESCs with PWM signals.

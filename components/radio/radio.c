@@ -155,7 +155,7 @@ static void control_task(void* pvParams) {
 
             // Data available
             xSemaphoreGive(spiMutex);
-            ESP_LOGI(TAG, "Radio: date available ISR");
+            // ESP_LOGI(TAG, "Radio: date available ISR");
             // Notify the Receiver Task
             xEventGroupSetBits(radioEventGroup, RADIO_RX_READY);
 

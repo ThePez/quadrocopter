@@ -11,6 +11,8 @@
 #ifndef DRONE_H
 #define DRONE_H
 
+#include "bno085_task.h"
+
 // STD C lib headers
 #include <math.h>
 #include <stdint.h>
@@ -66,10 +68,31 @@ typedef struct {
     uint64_t prevTimeUS; // Last update time in us
 } PID_t;
 
+typedef struct {
+    double pitchPID;
+    double rollPID;
+    double yawPID;
+} PIDOutputs_t;
+
 typedef enum {
     FLIGHT_MODE_RATE, // Direct rate control
     FLIGHT_MODE_ANGLE // Angle stabilization mode
 } FlightMode_t;
+
+typedef struct {
+    uint16_t motorA;
+    uint16_t motorB;
+    uint16_t motorC;
+    uint16_t motorD;
+} MotorPeriods_t;
+
+typedef struct {
+    RemoteSetPoints_t* setPoints;
+    Telemitry_t* imuData;
+    PIDOutputs_t* motorInputs;
+    MotorPeriods_t* motorOutputs;
+    FlightMode_t mode;
+} BlackBox_t;
 
 ///////////////////////////////// Prototypes /////////////////////////////////
 
@@ -88,7 +111,7 @@ typedef enum {
  * @note Angle PIDs (pitch, roll) are reset only when entering angle mode.
  * @note Logs the mode change for debugging and monitoring purposes.
  */
-void set_flight_mode(FlightMode_t mode);
+void set_flight_mode(FlightMode_t mode, BlackBox_t* box);
 
 /**
  * @brief Main PID control loop for the quadcopter.
@@ -114,7 +137,7 @@ void flight_controller(void* pvParams);
  * @param setPoints Pointer to the control structure to be updated.
  * @param payload   Pointer to a (16-word or 32-byte) array received from the radio.
  */
-void process_remote_data(RemoteSetPoints_t* setPoints, uint16_t* payload);
+void process_remote_data(BlackBox_t* box, uint16_t* payload);
 
 /**
  * @brief Updates ESC PWM signals based on control inputs and PID outputs.
@@ -131,7 +154,7 @@ void process_remote_data(RemoteSetPoints_t* setPoints, uint16_t* payload);
  * @param rollPID  Output from roll PID controller.
  * @param yawPID   Output from yaw PID controller.
  */
-void update_escs(uint16_t throttle, double pitchPID, double rollPID, double yawPID);
+void update_escs(BlackBox_t* box);
 
 /**
  * @brief Performs a single PID control step.
@@ -166,7 +189,7 @@ void pid_reset(PID_t* pid);
  *
  * @param periodUS The timer period in microseconds.
  */
-void remote_data_return_init(int periodUS);
+void remote_data_return_init(int periodUS, BlackBox_t* box);
 
 /**
  * @brief Timer callback to notify the flight controller for radio data transmission.
