@@ -54,7 +54,7 @@ void app_main(void) {
     // before the imu task begins
 
     // IMU task Setup
-    bno08x_start_task(); // Start the C++ task
+    imu_init(); // Start the C++ task
 
     // Flight Controller
     xTaskCreate(&flight_controller, "FC_Task", SYS_STACK, NULL, SYS_PRIO, &flightController);
@@ -91,8 +91,7 @@ BlackBox_t* black_box_init(void) {
         memset(box->imuData, 0, sizeof(Telemitry_t));
     } else {
         ESP_LOGE(TAG, "IMU Data init failed");
-        vPortFree(box);
-        return NULL;
+        goto free_box;
     }
 
     box->setPoints = pvPortMalloc(sizeof(RemoteSetPoints_t));
@@ -101,9 +100,7 @@ BlackBox_t* black_box_init(void) {
         box->setPoints->throttle = MIN_THROTTLE;
     } else {
         ESP_LOGE(TAG, "Remote Setpoint data failed");
-        vPortFree(box->imuData);
-        vPortFree(box);
-        return NULL;
+        goto free_imu;
     }
 
     box->motorInputs = pvPortMalloc(sizeof(PIDOutputs_t));
@@ -111,10 +108,7 @@ BlackBox_t* black_box_init(void) {
         memset(box->motorInputs, 0, sizeof(PIDOutputs_t));
     } else {
         ESP_LOGE(TAG, "Motor input data failed");
-        vPortFree(box->imuData);
-        vPortFree(box->setPoints);
-        vPortFree(box);
-        return NULL;
+        goto free_setpoint;
     }
 
     box->motorOutputs = pvPortMalloc(sizeof(MotorPeriods_t));
@@ -122,15 +116,22 @@ BlackBox_t* black_box_init(void) {
         memset(box->motorOutputs, 0, sizeof(MotorPeriods_t));
     } else {
         ESP_LOGE(TAG, "Motor Period data failed");
-        vPortFree(box->imuData);
-        vPortFree(box->setPoints);
-        vPortFree(box->motorInputs);
-        vPortFree(box);
-        return NULL;
+        goto free_motor;
     }
 
     box->mode = FLIGHT_MODE_ANGLE;
     return box;
+
+    /* Clean up paths */
+free_motor:
+    vPortFree(box->motorInputs);
+free_setpoint:
+    vPortFree(box->setPoints);
+free_imu:
+    vPortFree(box->imuData);
+free_box:
+    vPortFree(box);
+    return NULL;
 }
 
 void flight_controller(void* pvParams) {
@@ -282,24 +283,29 @@ void update_escs(BlackBox_t* box) {
     double pitchPID = box->motorInputs->pitchPID;
     double rollPID = box->motorInputs->rollPID;
     double yawPID = box->motorInputs->yawPID;
+    double speed = MIN_THROTTLE;
 
-    // This ensure the drone's motors stay off when the throttle is off
+    // Ensure the motors are off on low throttle inputs
     if (throttle < 1020) {
 
-        box->motorOutputs->motorA = MIN_THROTTLE;
-        box->motorOutputs->motorB = MIN_THROTTLE;
-        box->motorOutputs->motorC = MIN_THROTTLE;
-        box->motorOutputs->motorD = MIN_THROTTLE;
+        box->motorOutputs->motorA = speed;
+        box->motorOutputs->motorB = speed;
+        box->motorOutputs->motorC = speed;
+        box->motorOutputs->motorD = speed;
     } else {
 
-        box->motorOutputs->motorA = constrainf(throttle - pitchPID + rollPID - yawPID, MIN_THROTTLE,
-                                               MAX_THROTTLE); // Front left
-        box->motorOutputs->motorB = constrainf(throttle + pitchPID + rollPID + yawPID, MIN_THROTTLE,
-                                               MAX_THROTTLE); // Rear left
-        box->motorOutputs->motorC = constrainf(throttle + pitchPID - rollPID - yawPID, MIN_THROTTLE,
-                                               MAX_THROTTLE); // Rear right
-        box->motorOutputs->motorD = constrainf(throttle - pitchPID - rollPID + yawPID, MIN_THROTTLE,
-                                               MAX_THROTTLE); // Front right
+        // Front left
+        speed = throttle - pitchPID + rollPID - yawPID;
+        box->motorOutputs->motorA = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
+        // Rear left
+        speed = throttle + pitchPID + rollPID + yawPID;
+        box->motorOutputs->motorB = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
+        // Rear right
+        speed = throttle + pitchPID - rollPID - yawPID;
+        box->motorOutputs->motorC = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
+        // Front right
+        speed = throttle - pitchPID - rollPID + yawPID;
+        box->motorOutputs->motorD = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
     }
 
     esc_pwm_set_duty_cycle(MOTOR_A, (uint16_t) box->motorOutputs->motorA);

@@ -2,4 +2,5 @@
 **/build
 .clang-format
 *.old
-
+components/un-used/*
+components/esp32_BNO08x/*

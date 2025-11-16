@@ -11,7 +11,7 @@
 #ifndef DRONE_H
 #define DRONE_H
 
-#include "bno085_task.h"
+#include "imu.h"
 
 // STD C lib headers
 #include <math.h>

@@ -99,7 +99,7 @@ void remote_controller(void) {
             int16_t* data = (int16_t*) adcPacket;
             ESP_LOGI(TAG,
                      "Mode: %s, Angles: P=%d R=%d Y=%d, Rates: P=%d R=%d Y=%d, PID: P=%d R=%d Y=%d, Motors: FL=%u "
-                     "BL=%u BR=%u FR=%u\r\n",
+                     "BL=%u BR=%u FR=%u",
                      data[6] ? "ANGLE" : "RATE", data[0], data[1], data[2], data[3], data[4], data[5], data[7], data[8],
                      data[9], adcPacket[10], adcPacket[11], adcPacket[12], adcPacket[13]);
         }
