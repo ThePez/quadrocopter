@@ -39,11 +39,8 @@
 #define ADC_MIN 0
 #define ADC_MAX 4095
 
-#define MIN_RATE -200.0
 #define MAX_RATE 200.0
-
 #define MAX_ANGLE 30.0
-#define MIN_ANGLE -30.0
 
 #define MIN_THROTTLE 1000.0
 #define MAX_THROTTLE 2000.0
@@ -65,6 +62,7 @@ typedef struct {
     double kd;           // Derivative scaler
     double intergral;    // running average total of the error
     double prevError;    // previous error
+    double intLimit;     // Intergral limiting term
     uint64_t prevTimeUS; // Last update time in us
 } PID_t;
 
@@ -127,6 +125,8 @@ void set_flight_mode(FlightMode_t mode, BlackBox_t* box);
  * @note Requires radioReceiverQueue, radioTransmitterQueue and bno085Queue to be created before running.
  */
 void flight_controller(void* pvParams);
+
+void process_positional_data(BlackBox_t* box);
 
 /**
  * @brief Decodes a payload of radio data into control setpoints or PID tuning values.

@@ -1,8 +1,8 @@
 /*
  *****************************************************************************
- * File: bno085_task.c
+ * File: imu.cpp
  * Author: Jack Cairns
- * Date: 20-07-2025
+ * Date: 20-11-2025
  * Brief:
  * REFERENCE: None
  *****************************************************************************
@@ -47,7 +47,7 @@ static void imu_data_callback(BNO08x* imu) {
     data.yawAngle = euler.z;   // Z-axis -> Yaw
 
     if (bno085Queue) {
-        xQueueSendToBack(bno085Queue, &data, pdMS_TO_TICKS(1));
+        xQueueSendToBack(bno085Queue, &data, 0);
     }
 }
 
@@ -88,16 +88,17 @@ static void bno08x_task(void* pvParameters) {
     
     // Register a callback function
     imu.register_cb([&imu]() { imu_data_callback(&imu); });
-
     ESP_LOGI(TAG, "Callback registered");
+    
     while (1) {
         ESP_LOGI(TAG, "Task suspended");
         vTaskSuspend(NULL); // Susspend task as callback functions handle the data.
 
-        // This code will run if the task is re-enabled by the emergancy shutdown
+        // Emergency shutdown path
+        imu.rpt.rv_ARVR_stabilized_game.disable();
+        imu.rpt.cal_gyro.disable();
 
-        // Turn off the bno085
-        imu.~BNO08x();
+        ESP_LOGW(TAG, "IMU reports disabled, shutting down");
         // Delete the setup task
         vTaskDelete(NULL);
     }
