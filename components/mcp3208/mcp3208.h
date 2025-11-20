@@ -15,6 +15,15 @@
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
+
+#define MCPx_STACK (configMINIMAL_STACK_SIZE * 2)
+#define MCPx_PRIORITY (tskIDLE_PRIORITY + 4)
+#define MCPx_QUEUE_LENGTH 5
+#define MCPx_DELAY (pdMS_TO_TICKS(50))
 
 #define MCP3208_CS_PIN 25
 
@@ -31,42 +40,22 @@
 #define MCP3208_CHANNEL_5 0x5
 #define MCP3208_CHANNEL_6 0x6
 #define MCP3208_CHANNEL_7 0x7
+#define MCP3208_MAX_CHANNELS 8
 
 #define MCP3208_SINGLE_CHANNEL_MASK(channel) (0x0600 | ((channel & 0x0007) << 6))
 #define MCP3208_DIFFERENTIAL_CHANNEL_MASK(channel) (0x0400 | ((channel & 0x0007) << 6))
 
 /**
- * @brief Initializes the SPI interface for the MCP3208 ADC.
- *
- * Sets the SPI configuration including clock speed, chip select pin,
- * SPI mode (CPOL = 0, CPHA = 0), and queue size. Registers the device
- * on the specified SPI bus.
- *
- * @param spiBus SPI bus to which the MCP3208 is connected (e.g., HSPI_HOST).
+ * @brief Initialiser function for the controller task of the MCPx.
+ * 
+ * Task init function that sets up the task that runs the MCPx chip.
+ * 
+ * @param spiMutex mutext used for ensuring exculsive access to spi
+ * @param channels the active channels to read from
  */
-esp_err_t mcp3208_spi_init(spi_host_device_t spi_bus);
+void mcpx_task_init(SemaphoreHandle_t* spiMutex, uint8_t channels, spi_host_device_t spiHost);
 
-/**
- * @brief Performs MCP3208 startup procedure and initializes SPI communication.
- *
- * Cycles the chip select (CS) pin to reset the MCP3208 and calls
- * the SPI initialization function to prepare for communication.
- *
- * @param spiBus SPI bus to which the MCP3208 is connected.
- */
-esp_err_t mcp3208_init(spi_host_device_t spi_bus);
-
-/**
- * @brief Reads an analog value from the specified MCP3208 channel.
- *
- * Constructs and sends a read command to the MCP3208 over SPI, then
- * receives and parses the 12-bit ADC result.
- *
- * @param channel ADC channel to read (0–7).
- * @param type Conversion type: 1 for single-ended, 0 for differential.
- *
- * @return 12-bit ADC result from the specified channel.
- */
-uint16_t mcp3208_read_adc_channel(uint8_t channel, uint8_t type);
+extern TaskHandle_t mcpxTaskHandle;
+extern QueueHandle_t mcpxQueue;
 
 #endif
