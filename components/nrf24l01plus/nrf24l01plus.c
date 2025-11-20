@@ -17,9 +17,6 @@
 #include <stdio.h>
 #include <string.h>
 
-// Default radio channel (0–125 range on NRF24L01+)
-#define DEFAULT_RF_CHANNEL 40
-
 #define CHECK_ERR(code, msg)                                                                                           \
     do {                                                                                                               \
         esp_err_t err = (code);                                                                                        \
@@ -37,14 +34,235 @@
         }                                                                                                              \
     } while (0)
 
+//////////////////////////// Function Prototypes /////////////////////////////
+
+// ISR Handler function
+static void radio_isr_handler(void);
+// Task Function Prototypes
+static void control_task(void* pvParams);
+static void receiver_task(void* pvParams);
+static void transmitter_task(void* pvParams);
+
+////////////////////////////// Global Variables //////////////////////////////
+
+// Task Handles
+TaskHandle_t radioReceiverTask = NULL;
+TaskHandle_t radioTransmitterTask = NULL;
+TaskHandle_t radioControlTask = NULL;
+// Queue Handles
+QueueHandle_t radioReceiverQueue = NULL;
+QueueHandle_t radioTransmitterQueue = NULL;
+// Event Group used internally to signal the controlling tasks
+static EventGroupHandle_t radioEventGroup = NULL;
+// Buffers for the receiver & transmitter queue's
+static uint8_t rxBuffer[NRF24L01PLUS_TX_PLOAD_WIDTH];
+static uint8_t txBuffer[NRF24L01PLUS_TX_PLOAD_WIDTH];
+
+// Tag for log messages
+#define TAG "NRF24L01plus"
+// Default radio channel (0–125 range on NRF24L01+)
+#define DEFAULT_RF_CHANNEL 40
 // Default 5-byte address (MSB first)
-static uint8_t defaultAddress[] = {0x12, 0x34, 0x56, 0x78, 0x90};
+static uint8_t defaultAddress[] = {0x32, 0x04, 0x62, 0x45, 0x22};
 // SPI handle for the NRF24L01+ device
 static spi_device_handle_t nrf24l01SpiHandle;
 // Flag to indicate if IRQ pin and interrupts are used (0 = no IRQ)
 static uint8_t useIQR = 0;
-// Tag used for ESP log messages
-static const char* TAG = "NRF24L01plus";
+
+////////////////////////////// FreeRTOS Functions /////////////////////////////
+
+void radio_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost) {
+
+    // Setup the NRF24L01plus IC
+    xSemaphoreTake(*spiMutex, portMAX_DELAY);
+    nrf24l01plus_init(spiHost, &radio_isr_handler);
+    xSemaphoreGive(*spiMutex);
+
+    // Ensure the event group is created
+    while (!radioEventGroup) {
+        radioEventGroup = xEventGroupCreate();
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+
+    // Ensure the queue is created
+    while (!radioReceiverQueue) {
+        radioReceiverQueue = xQueueCreate(RADIO_QUEUE_LENGTH, sizeof(rxBuffer));
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+
+    // Ensure the queue is created
+    while (!radioTransmitterQueue) {
+        radioTransmitterQueue = xQueueCreate(RADIO_QUEUE_LENGTH, sizeof(txBuffer));
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+
+    // Start the controlling Tasks
+    xTaskCreate(&control_task, "CTRL_RADIO", RADIO_STACK, spiMutex, RADIO_PRIO, &radioControlTask);
+    xTaskCreate(&receiver_task, "RX_RADIO", RADIO_STACK, spiMutex, RADIO_PRIO + 1, &radioReceiverTask);
+    xTaskCreate(&transmitter_task, "TX_RADIO", RADIO_STACK, spiMutex, RADIO_PRIO + 1, &radioTransmitterTask);
+}
+
+/**
+ * @brief ISR handler for the NRF24L01+ IRQ pin.
+ *
+ * Triggered on a falling edge when the radio signals that
+ * data has been received or a transmission is complete.
+ * Notifies the control task using a direct task notification
+ * so SPI work can run outside the interrupt context.// ESP_LOGIESP_LOGI(TAG, "Radio: data sent ISR");
+ *
+ * @note Must reside in IRAM. Keep minimal and fast.
+ */
+static void IRAM_ATTR radio_isr_handler(void) {
+
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    if (radioControlTask) {
+        vTaskNotifyGiveFromISR(radioControlTask, &xHigherPriorityTaskWoken);
+    }
+
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+/**
+ * @brief FreeRTOS task for handling NRF24L01+ status events.
+ *
+ * Waits for notifications from the ISR. When triggered,
+ * reads the radio status register, clears flags, and
+ * signals the receiver or transmitter task as needed.
+ *
+ * Runs continuously while the system is active.
+ *
+ * @param pvParams Pointer to the task parameters (RadioParams_t).
+ *
+ * @note Uses NRF24L01+ driver functions.
+ */
+static void control_task(void* pvParams) {
+
+    // Deal with input parameters
+    SemaphoreHandle_t spiMutex = *((SemaphoreHandle_t*) pvParams);
+
+    xSemaphoreTake(spiMutex, portMAX_DELAY);
+    uint8_t clearBoth = NRF24L01PLUS_TX_DS | NRF24L01PLUS_RX_DR;
+    nrf24l01plus_flush_rx();
+    nrf24l01plus_flush_tx();
+    nrf24l01plus_write_register(NRF24L01PLUS_STATUS, clearBoth); // Clear interrupts
+    xSemaphoreGive(spiMutex);
+
+    // Enable interrupts now that the controller task is setup
+    gpio_intr_enable(NRF24L01PLUS_IQR_PIN);
+    // Set bit for TX ready
+    xEventGroupSetBits(radioEventGroup, RADIO_TX_READY);
+
+    ESP_LOGI(TAG, "Control task initialised");
+
+    while (1) {
+
+        // Wait for IQR interrupt handler signal
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        // Wait for SPI to be available
+        xSemaphoreTake(spiMutex, portMAX_DELAY);
+        // Read status register
+        uint8_t status = nrf24l01plus_read_register(NRF24L01PLUS_STATUS);
+        if (status & NRF24L01PLUS_RX_DR) {
+
+            // Data available
+            xSemaphoreGive(spiMutex);
+            // Notify the Receiver Task
+            xEventGroupSetBits(radioEventGroup, RADIO_RX_READY);
+
+        } else if (status & NRF24L01PLUS_TX_DS) {
+
+            // Data was sent
+            nrf24l01plus_write_register(NRF24L01PLUS_STATUS, NRF24L01PLUS_TX_DS);
+            nrf24l01plus_receive_mode();
+            xSemaphoreGive(spiMutex);
+            // Notify the Transmitter Task that further sends are now allowed
+            xEventGroupSetBits(radioEventGroup, RADIO_TX_READY);
+
+        } else {
+
+            // Failsafe to ensure SPI is allowed again, this shouldn't ever happen
+            uint8_t clearBoth = NRF24L01PLUS_TX_DS | NRF24L01PLUS_RX_DR;
+            nrf24l01plus_write_register(NRF24L01PLUS_STATUS, clearBoth);
+            xSemaphoreGive(spiMutex);
+            ESP_LOGI(TAG, "Radio: Failsafe ISR");
+        }
+    }
+}
+
+/**
+ * @brief FreeRTOS task for handling incoming radio packets.
+ *
+ * Waits for a signal from the control task that a new packet is ready.
+ * Receives the packet over SPI and places the decoded data onto
+ * the radioReceiverQueue for processing.
+ *
+ * Runs continuously while the system is active.
+ *
+ * @param pvParams Pointer to the task parameters (RadioParams_t).
+ *
+ * @note Uses NRF24L01+ driver functions.
+ */
+static void receiver_task(void* pvParams) {
+
+    // Deal with input parameters
+    SemaphoreHandle_t spiMutex = *((SemaphoreHandle_t*) pvParams);
+
+    ESP_LOGI(TAG, "Reciever task initialised");
+
+    while (1) {
+
+        // Wait for Control to signal a read is available
+        EventBits_t bits = xEventGroupWaitBits(radioEventGroup, RADIO_RX_READY, pdTRUE, pdFALSE, portMAX_DELAY);
+        if (bits & RADIO_RX_READY) {
+
+            // Wait for the SPI to be available
+            xSemaphoreTake(spiMutex, portMAX_DELAY);
+            nrf24l01plus_recieve_packet(rxBuffer);
+            xSemaphoreGive(spiMutex);
+            xQueueSendToBack(radioReceiverQueue, rxBuffer, pdMS_TO_TICKS(5));
+        }
+    }
+}
+
+/**
+ * @brief FreeRTOS task for sending outgoing radio packets.
+ *
+ * Waits for a message on radioTransmitterQueue and for permission
+ * to transmit. When both are ready, sends the packet to the radio
+ * module over SPI.
+ *
+ * Runs continuously while the system is active.
+ *
+ * @param pvParams Pointer to the task parameters (RadioParams_t).
+ *
+ * @note Uses NRF24L01+ driver functions.
+ */
+static void transmitter_task(void* pvParams) {
+
+    // Deal with input parameters
+    SemaphoreHandle_t spiMutex = *((SemaphoreHandle_t*) pvParams);
+
+    ESP_LOGI(TAG, "Transmitter task initialised");
+
+    while (1) {
+
+        // Task waits until it recieves a message to send
+        if (xQueueReceive(radioTransmitterQueue, txBuffer, portMAX_DELAY) == pdTRUE) {
+
+            // Task checks the Event bits that sending is ready
+            EventBits_t bits = xEventGroupWaitBits(radioEventGroup, RADIO_TX_READY, pdTRUE, pdFALSE, portMAX_DELAY);
+            if (bits & RADIO_TX_READY) {
+
+                // Send message
+                xSemaphoreTake(spiMutex, portMAX_DELAY);
+                nrf24l01plus_send_packet(txBuffer);
+                xSemaphoreGive(spiMutex);
+            }
+        }
+    }
+}
+
+////////////////////////////// Chipset functions //////////////////////////////
 
 esp_err_t nrf24l01plus_spi_init(spi_host_device_t spiBus) {
 

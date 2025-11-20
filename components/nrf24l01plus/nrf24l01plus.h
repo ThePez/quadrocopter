@@ -11,10 +11,34 @@
 #ifndef NRF24L01PLUS_H
 #define NRF24L01PLUS_H
 
+// STD C lib headers
 #include <stdint.h>
 
+// ESP-IDF Prebuilts
 #include "driver/spi_master.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 
+// Task Handles
+extern TaskHandle_t radioReceiverTask;
+extern TaskHandle_t radioTransmitterTask;
+extern TaskHandle_t radioControlTask;
+// Queue Handles
+extern QueueHandle_t radioReceiverQueue;
+extern QueueHandle_t radioTransmitterQueue;
+
+// Free-RTOS defines
+#define RADIO_STACK (configMINIMAL_STACK_SIZE * 2)
+#define RADIO_PRIO (tskIDLE_PRIORITY + 4)
+#define RADIO_QUEUE_LENGTH 5
+#define RADIO_TX_READY (1 << 10)
+#define RADIO_RX_READY (1 << 11)
+#define RADIO_PAYLOAD_WIDTH 32
+
+// Actual Pins numbers used on the ESP chip
 #define NRF24L01PLUS_CS_PIN 26
 #define NRF24L01PLUS_CE_PIN 27
 #define NRF24L01PLUS_IQR_PIN 35
@@ -85,6 +109,18 @@
 // Set/Reset CE pin
 #define NRF_CE_HIGH() gpio_set_level(NRF24L01PLUS_CE_PIN, 1)
 #define NRF_CE_LOW() gpio_set_level(NRF24L01PLUS_CE_PIN, 0)
+
+/**
+ * @brief Initialize the radio module and start all related tasks.
+ *
+ * Sets up the NRF24L01+ radio module by initializing the hardware,
+ * clearing its status flags, creating the shared event group,
+ * and launching the control, receiver, and transmitter tasks.
+ *
+ * @param spiMutex Pointer to the SPI bus mutex for safe SPI access.
+ * @param spiHost  The SPI host device connected to the radio.
+ */
+void radio_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost);
 
 /**
  * @brief Initializes the SPI device interface for the NRF24L01+ module.
