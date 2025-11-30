@@ -47,7 +47,9 @@
 
 ///////////////////////////// Structures & Enums /////////////////////////////
 
-enum { PID_MODIFIERS, SETPOINT_UPDATE } MessageType_t;
+typedef enum { PID_MODIFIERS, SETPOINT_UPDATE } MessageType_t;
+
+typedef enum { FLIGHT_MODE_RATE, FLIGHT_MODE_ANGLE } FlightMode_t;
 
 typedef struct {
     double pitch;
@@ -72,11 +74,6 @@ typedef struct {
     double yawPID;
 } PIDOutputs_t;
 
-typedef enum {
-    FLIGHT_MODE_RATE, // Direct rate control
-    FLIGHT_MODE_ANGLE // Angle stabilization mode
-} FlightMode_t;
-
 typedef struct {
     uint16_t motorA;
     uint16_t motorB;
@@ -90,6 +87,9 @@ typedef struct {
     PIDOutputs_t* motorInputs;
     MotorPeriods_t* motorOutputs;
     FlightMode_t mode;
+    uint8_t failsafeActive;
+    uint8_t connectedToRemote;
+    uint16_t battery;
 } BlackBox_t;
 
 ///////////////////////////////// Prototypes /////////////////////////////////
@@ -122,9 +122,11 @@ void set_flight_mode(FlightMode_t mode, BlackBox_t* box);
  * Maintains stable flight by adjusting motor speeds based on sensor and user input.
  *
  * @note Must be run as a FreeRTOS task.
- * @note Requires radioReceiverQueue, radioTransmitterQueue and bno085Queue to be created before running.
+ * @note Requires radioReceiverQueue, radioTransmitterQueue and imuQueue to be created before running.
  */
 void flight_controller(void* pvParams);
+
+void failsafe(BlackBox_t* box);
 
 void process_positional_data(BlackBox_t* box);
 
@@ -189,7 +191,9 @@ void pid_reset(PID_t* pid);
  *
  * @param periodUS The timer period in microseconds.
  */
-void remote_data_return_init(int periodUS, BlackBox_t* box);
+void timer_task_callback_init(int periodUS, BlackBox_t* box, void (*cb)(void*));
+
+void battery_callback(void* args);
 
 /**
  * @brief Timer callback to notify the flight controller for radio data transmission.

@@ -95,7 +95,7 @@ void app_main(void) {
     spi_bus_setup(HSPI_HOST);
 
     radio_module_init(&spiHMutex, HSPI_HOST);
-    mcpx_task_init(&spiVMutex, 0x1F, VSPI_HOST);
+    mcpx_task_init(&spiVMutex, 0x1F, VSPI_HOST, 25); // Remote MCP3208 cs pin is 25
 
     mode_swap_interrupt_init();
     emergancy_interrupt_init();
@@ -141,7 +141,6 @@ static void remote_controller(void) {
                         emergencyPressed = 0;
                         emergencyShutdown = 1;
                         modePressed = 0;
-                        armed = 0;
                         ESP_LOGE(TAG, "Emergancy");
                     }
 
@@ -157,25 +156,25 @@ static void remote_controller(void) {
                 } else if (adcValues[0] < 50) {
                     emergencyShutdown = 0;
                     armed = 1;
-                    ESP_LOGW(TAG, "REMOTE ARMED — communication is now enabled.");
+                    ESP_LOGW(TAG, "REMOTE REARMED — communication is now enabled.");
                 }
             }
 
             memset(adcPacket, 0, sizeof(adcPacket));
-            adcPacket[0] = 1;                           // Setpoint update
-            adcPacket[1] = (!armed) ? 0 : adcValues[0]; // Throttle
-            adcPacket[2] = adcValues[1];                // Pitch
-            adcPacket[3] = adcValues[2];                // Roll
-            adcPacket[4] = adcValues[3];                // Yaw
-            adcPacket[5] = (uint16_t) flightMode;       // Mode
+            adcPacket[0] = 1;                                      // Setpoint update
+            adcPacket[1] = (emergencyShutdown) ? 0 : adcValues[0]; // Throttle
+            adcPacket[2] = adcValues[1];                           // Pitch
+            adcPacket[3] = adcValues[2];                           // Roll
+            adcPacket[4] = adcValues[3];                           // Yaw
+            adcPacket[5] = (uint16_t) flightMode;                  // Mode
 
             // Send the resulting packet to the radio task
-            if (!armed) {
-                continue;
+            if (radioTransmitterQueue && armed) {
+                xQueueSendToFront(radioTransmitterQueue, adcPacket, pdMS_TO_TICKS(5));
             }
 
-            if (radioTransmitterQueue) {
-                xQueueSendToFront(radioTransmitterQueue, adcPacket, pdMS_TO_TICKS(5));
+            if (emergencyShutdown) {
+                armed = 0;
             }
         }
 
@@ -189,9 +188,10 @@ static void remote_controller(void) {
 
             ESP_LOGI(TAG,
                      "Mode: %s, Angles: P=%d R=%d Y=%d, Rates: P=%d R=%d Y=%d, PID: P=%d R=%d Y=%d, Motors: FL=%u "
-                     "BL=%u BR=%u FR=%u",
+                     "BL=%u BR=%u FR=%u BAT=%f",
                      data[6] ? "ANGLE" : "RATE", data[0], data[1], data[2], data[3], data[4], data[5], data[7], data[8],
-                     data[9], adcPacket[10], adcPacket[11], adcPacket[12], adcPacket[13]);
+                     data[9], adcPacket[10], adcPacket[11], adcPacket[12], adcPacket[13], 
+                     mapf(adcPacket[14], 0, 4096, 0, 16.8));
         }
     }
 }

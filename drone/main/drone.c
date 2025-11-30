@@ -11,9 +11,11 @@
 #include "drone.h"
 #include "common_functions.h"
 #include "nrf24l01plus.h"
+#include "mcp3208.h"
 #include "motors.h"
 
-static const char* TAG = "DRONE";
+#define TAG "DRONE"
+#define FAILSAFE_TIMEOUT_US 2000000 // 2 seconds
 
 ////////////////////////////// Global Variables //////////////////////////////
 
@@ -21,11 +23,11 @@ static const char* TAG = "DRONE";
 TaskHandle_t flightController = NULL;
 
 // Set default Scalers for the PID structs
-static PID_t ratePitchPid = {.kp = 1, .ki = 0.005, .kd = 0.08, .intLimit = 50.0};
-static PID_t rateRollPid = {.kp = 1, .ki = 0.005, .kd = 0.08, .intLimit = 50.0};
-static PID_t rateYawPid = {.kp = 0.3, .ki = 0.001, .kd = 0.01, .intLimit = 50.0};
-static PID_t anglePitchPid = {.kp = 2, .ki = 0, .kd = 0, .intLimit = 20.0};
-static PID_t angleRollPid = {.kp = 2, .ki = 0, .kd = 0, .intLimit = 20.0};
+static PID_t ratePitchPid = {.kp = 1.8, .ki = 0.00, .kd = 0.0000, .intLimit = 15.0};
+static PID_t rateRollPid = {.kp = 0, .ki = 0.00, .kd = 0.0000, .intLimit = 15.0};
+static PID_t rateYawPid = {.kp = 0, .ki = 0.00, .kd = 0.0000, .intLimit = 10.0};
+static PID_t anglePitchPid = {.kp = 1, .ki = 0.00, .kd = 0.0000, .intLimit = 5.0};
+static PID_t angleRollPid = {.kp = 1, .ki = 0.00, .kd = 0.0000, .intLimit = 5.0};
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -44,11 +46,13 @@ void app_main(void) {
     /* Physical Hardware setup */
     // Setup PWM
     esc_pwm_init();
-    // SPI Bus Setup
+    // SPI Bus Setup for radio and mcp3208
     spi_bus_setup(HSPI_HOST);
 
     /* Helper tasks */
     radio_module_init(&spiHMutex, HSPI_HOST);
+    mcpx_task_init(&spiHMutex, 0x02, HSPI_HOST, 33); // DRONE MCP3208 CS pin is 33
+
     // the gpio_isr_install happens in radio setup -> it has been disabled in the BNO085x driver init
     imu_init(); // Start the C++ task
 
@@ -112,14 +116,16 @@ BlackBox_t* black_box_init(void) {
         memset(box->motorOutputs, 0, sizeof(MotorPeriods_t));
     } else {
         ESP_LOGE(TAG, "Motor Period data failed");
-        goto free_motor;
+        goto free_pid;
     }
 
     box->mode = FLIGHT_MODE_RATE;
+    box->connectedToRemote = 0;
+    box->failsafeActive = 1;
     return box;
 
     /* Clean up paths */
-free_motor:
+free_pid:
     vPortFree(box->motorInputs);
 free_setpoint:
     vPortFree(box->setPoints);
@@ -130,24 +136,52 @@ free_box:
     return NULL;
 }
 
+void black_box_destroy(BlackBox_t* box) {
+    // Free the motor speed container
+    vPortFree(box->motorOutputs);
+    // Free the PID inputs
+    vPortFree(box->motorInputs);
+    // Free the remote setpoints
+    vPortFree(box->setPoints);
+    // Free the imu container
+    vPortFree(box->imuData);
+    // Free the container
+    vPortFree(box);
+}
+
 void flight_controller(void* pvParams) {
 
+    // Setup the container
     BlackBox_t* box = black_box_init();
-    uint16_t payload[RADIO_PAYLOAD_WIDTH / 2]; // 16 words
+    if (box == NULL) {
+        vTaskDelete(NULL);
+    }
+
+    // Radio payload container
+    uint16_t* payload = pvPortMalloc(sizeof(uint16_t) * (RADIO_PAYLOAD_WIDTH / 2));
+    if (payload == NULL) {
+        black_box_destroy(box);
+        vTaskDelete(NULL);
+    }
 
     // Wait until both input queues are created
-    while (!radioReceiverQueue || !radioTransmitterQueue || !bno085Queue) {
+    while (!radioReceiverQueue || !radioTransmitterQueue || !imuQueue) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
+    // Failsafe tracking - last time we got a SETPOINT_UPDATE
+    uint64_t lastRemoteUpdateTime = esp_timer_get_time();
+    
     // Create QueueSet
     uint8_t setLength = RADIO_QUEUE_LENGTH + BNO085_QUEUE_LENGTH;
     QueueSetHandle_t controlLoopSet = xQueueCreateSet(setLength);
     xQueueAddToSet(radioReceiverQueue, controlLoopSet);
-    xQueueAddToSet(bno085Queue, controlLoopSet);
+    xQueueAddToSet(imuQueue, controlLoopSet);
     QueueSetMemberHandle_t xActivatedMember;
 
-    remote_data_return_init(100000, box); // Send data back every 100ms
+    // Initialise a callback task for returning info back to the remote
+    timer_task_callback_init(100000, box, remote_data_callback); // Interval of 100ms
+    timer_task_callback_init(50000, box, battery_callback); // Interval of 50ms
 
     while (1) {
 
@@ -157,26 +191,62 @@ void flight_controller(void* pvParams) {
         if (controlLoopSet) {
 
             xActivatedMember = xQueueSelectFromSet(controlLoopSet, portMAX_DELAY);
+            uint64_t now = esp_timer_get_time();
 
             // Update remote inputs
             if (xActivatedMember == radioReceiverQueue) {
+                // Get remote set point data
                 xQueueReceive(radioReceiverQueue, payload, 0);
+                // Process it
                 process_remote_data(box, payload);
+                // Update flags
+                lastRemoteUpdateTime = now;
+                box->connectedToRemote = 1;
+                box->failsafeActive = 0;
             }
 
             // New position data arrived, run PID loop and update ESC's
-            if (xActivatedMember == bno085Queue) {
-                xQueueReceive(bno085Queue, box->imuData, 0);
+            if (xActivatedMember == imuQueue) {
+                // Get telemitry data from IMU
+                xQueueReceive(imuQueue, box->imuData, 0);
+
+                // Is the remote armed / connected?
+                if(now - lastRemoteUpdateTime > FAILSAFE_TIMEOUT_US) {
+                    failsafe(box);
+                    continue;
+                }
+                
+                // Normal PID update
                 process_positional_data(box);
             }
-
         }
     }
 }
 
+void failsafe(BlackBox_t* box) {
+    if (box->failsafeActive) {
+        return;
+    }
+
+    ESP_LOGE(TAG, "FAILSAFE TRIGGERED: No radio link for at least 2s");
+    box->failsafeActive = 1;
+    box->connectedToRemote = 0;
+
+    // Force motors to MIN_THROTTLE and skip PID update
+    box->motorOutputs->motorA = MIN_THROTTLE;
+    box->motorOutputs->motorB = MIN_THROTTLE;
+    box->motorOutputs->motorC = MIN_THROTTLE;
+    box->motorOutputs->motorD = MIN_THROTTLE;
+
+    esc_pwm_set_duty_cycle(MOTOR_A, (uint16_t) box->motorOutputs->motorA);
+    esc_pwm_set_duty_cycle(MOTOR_B, (uint16_t) box->motorOutputs->motorB);
+    esc_pwm_set_duty_cycle(MOTOR_C, (uint16_t) box->motorOutputs->motorC);
+    esc_pwm_set_duty_cycle(MOTOR_D, (uint16_t) box->motorOutputs->motorD);
+}
+
 void process_positional_data(BlackBox_t* box) {
 
-    uint64_t time = esp_timer_get_time();
+    uint64_t time = box->imuData->prevTime;
     double pitchRateSetpoint, rollRateSetpoint, yawRateSetpoint;
 
     if (box->mode == FLIGHT_MODE_ANGLE) {
@@ -217,11 +287,11 @@ void process_positional_data(BlackBox_t* box) {
     box->motorInputs->yawPID = pid_update(&rateYawPid, errYawRate, time);
 
     // Debug logging
-    static uint32_t log_counter = 0;
-    if (++log_counter % 10 == 0) { // Log every ~100ms
-        ESP_LOGI(TAG, "Mode: %s, PID: P=%.02f R=%.02f Y=%.02f", box->mode ? "ANGLE" : "RATE",
-                 box->motorInputs->pitchPID, box->motorInputs->rollPID, box->motorInputs->yawPID);
-    }
+    // static uint32_t log_counter = 0;
+    // if (++log_counter % 10 == 0) { // Log every ~100ms
+    //     ESP_LOGI(TAG, "Mode: %s, PID: P=%.02f R=%.02f Y=%.02f", box->mode ? "ANGLE" : "RATE",
+    //              box->motorInputs->pitchPID, box->motorInputs->rollPID, box->motorInputs->yawPID);
+    // }
 
     // Update ESCs
     update_escs(box);
@@ -354,10 +424,10 @@ void pid_reset(PID_t* pid) {
     }
 }
 
-void remote_data_return_init(int periodUS, BlackBox_t* box) {
+void timer_task_callback_init(int periodUS, BlackBox_t* box, void (*cb)(void*)) {
 
     esp_timer_create_args_t config = {
-        .callback = remote_data_callback,  // Function to execute
+        .callback = cb,  // Function to execute
         .dispatch_method = ESP_TIMER_TASK, // Where the function is called from
         .arg = box                         // Input argument
     };
@@ -367,8 +437,35 @@ void remote_data_return_init(int periodUS, BlackBox_t* box) {
     esp_timer_start_periodic(timerHandle, periodUS);
 }
 
+void battery_callback(void* args) {
+    
+    BlackBox_t* box = (BlackBox_t*) args;
+    if (!box) {
+        return;
+    }
+
+    if (!mcpxQueue) {
+        return;
+    }
+
+    uint16_t battery;
+    if (xQueueReceive(mcpxQueue, &battery, pdMS_TO_TICKS(MCPx_DELAY)) == pdTRUE) {
+        box->battery = battery;
+        // ESP_LOGI(TAG, "Battery: %d", box->battery);
+    }
+}
+
 void remote_data_callback(void* args) {
     BlackBox_t* box = (BlackBox_t*) args;
+
+    if (!box) {
+        return;
+    }
+
+    // Only send telemetry when we have a valid, active link
+    if (!box->connectedToRemote || box->failsafeActive) {
+        return;
+    }
 
     int16_t package[RADIO_PAYLOAD_WIDTH / 2]; // 16 words
 
@@ -377,7 +474,8 @@ void remote_data_callback(void* args) {
     // Flight mode                  = 1
     // PID outputs pitch, roll, yaw = 3
     // Motor periods A, B, C, D     = 4
-    // Total                       = 14
+    // Battery percentage           = 1
+    // Total                       = 15
 
     // Angles
     package[0] = (int16_t) box->imuData->pitchAngle;
@@ -398,6 +496,7 @@ void remote_data_callback(void* args) {
     package[11] = box->motorOutputs->motorB;
     package[12] = box->motorOutputs->motorC;
     package[13] = box->motorOutputs->motorD;
+    package[14] = box->battery;
 
     xQueueSendToBack(radioTransmitterQueue, package, 0);
 }
