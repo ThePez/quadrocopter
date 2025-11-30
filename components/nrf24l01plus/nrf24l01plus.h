@@ -111,152 +111,174 @@ extern QueueHandle_t radioTransmitterQueue;
 #define NRF_CE_LOW() gpio_set_level(NRF24L01PLUS_CE_PIN, 0)
 
 /**
- * @brief Initialize the radio module and start all related tasks.
+ * Initializes the NRF24L01+ radio driver and starts all radio-related FreeRTOS tasks.
  *
- * Sets up the NRF24L01+ radio module by initializing the hardware,
- * clearing its status flags, creating the shared event group,
- * and launching the control, receiver, and transmitter tasks.
+ * This function performs the full radio bring-up sequence, including:
+ * - Initializing the NRF24L01+ hardware over SPI
+ * - Ensuring the radio event group is created
+ * - Creating the receiver and transmitter queues
+ * - Launching the control, receiver, and transmitter tasks
  *
- * @param spiMutex Pointer to the SPI bus mutex for safe SPI access.
- * @param spiHost  The SPI host device connected to the radio.
+ * The SPI mutex must be held during initial hardware configuration to avoid
+ * bus contention with other peripherals.
+ *
+ * @param spiMutex Pointer to the SPI bus mutex for synchronized SPI access.
+ * @param spiHost  The SPI host device connected to the NRF24L01+ module.
  */
 void radio_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost);
 
 /**
- * @brief Initializes the SPI device interface for the NRF24L01+ module.
+ * Initializes the SPI interface for the NRF24L01+ module.
  *
- * Configures SPI parameters such as clock speed, SPI mode (CPOL=0, CPHA=0),
- * and chip select pin. Adds the device to the specified SPI bus.
+ * Sets clock speed, SPI mode (CPOL=0, CPHA=0), chip select pin,
+ * and registers the device on the SPI bus.
  *
- * @param spiBus The SPI bus (e.g., HSPI_HOST) to which the device is attached.
+ * @param spi_bus SPI host bus to attach the device to.
+ * @return ESP_OK on success, ESP_FAIL on configuration error.
  */
 esp_err_t nrf24l01plus_spi_init(spi_host_device_t spi_bus);
 
 /**
- * @brief Sets up an external interrupt on the NRF24L01+ IRQ pin.
+ * Configures the IRQ pin for falling-edge interrupts and installs the ISR.
  *
- * Configures the GPIO pin as input with pull-up and attaches an interrupt
- * handler to trigger on falling edge. Installs the ISR service if not already installed.
- *
- * @param handler Pointer to the ISR handler function to call on interrupt.
+ * @param handler ISR function to attach to the IRQ line.
+ * @return ESP_OK on success,
+ *         ESP_ERR_INVALID_STATE if ISR service already installed,
+ *         or other ESP error codes on failure.
  */
 esp_err_t nrf24l01plus_interrupt_init(void* handler);
 
 /**
- * @brief Fully initializes the NRF24L01+ module.
+ * Fully initializes the NRF24L01+ transceiver.
  *
- * Sets CE pin, configures optional IRQ interrupt, initializes SPI,
- * sets addresses, disables auto acknowledgment, enables Pipe 0,
- * sets payload size, channel, power and data rate, and enters RX mode.
+ * Sets CE pin direction, installs IRQ handler if provided, initializes SPI,
+ * powers up the radio, writes TX/RX addresses, configures channel, data rate,
+ * payload size, RF power, and enters RX mode.
  *
- * @param spiBus SPI bus to use for communication.
- * @param handler Optional ISR handler function for IRQ pin (can be NULL).
+ * @param spiBus SPI host device.
+ * @param handler Optional IRQ handler (NULL if unused).
+ * @return ESP_OK on success, ESP_FAIL on initialization failure.
  */
 esp_err_t nrf24l01plus_init(spi_host_device_t spi_bus, void* handler);
 
 /**
- * @brief Sends a single-byte command to the NRF24L01+
+ * Sends an 8-bit instruction command to the NRF24L01+ by SPI.
  *
- * @param command Command byte to send
+ * @param command Command byte to transmit.
+ * @return ESP_OK on success, ESP_FAIL on SPI transmission error.
  */
 esp_err_t nrf24l01plus_send_command(uint8_t command);
 
 /**
- * @brief Writes a single byte to an NRF24L01+ register.
+ * Writes a single byte to an NRF24L01+ register.
  *
- * @param regAddress Address of the register to write to.
- * @param val Value to write into the register.
+ * @param reg_addr Register address.
+ * @param val Value to write.
+ * @return ESP_OK on success, ESP_FAIL on SPI error.
  */
 esp_err_t nrf24l01plus_write_register(uint8_t reg_addr, uint8_t val);
 
 /**
- * @brief Reads a single byte from an NRF24L01+ register.
+ * Reads a single byte from an NRF24L01+ register.
  *
- * @param regAddress Address of the register to read.
- * @return Value read from the register.
+ * @param reg_addr Register address to read.
+ * @return The register value, or 0 on SPI error.
  */
 uint8_t nrf24l01plus_read_register(uint8_t reg_addr);
 
 /**
- * @brief Writes a buffer of bytes to an NRF24L01+ register.
+ * Writes multiple bytes to an NRF24L01+ register.
  *
- * Typically used for writing TX/RX addresses or payload data.
+ * Commonly used for writing TX/RX addresses or payload data.
  *
- * @param regAddress Register address to start writing at.
- * @param buffer Pointer to the data buffer to send.
- * @param bufferLength Number of bytes to write.
+ * @param reg_addr Register address to write to.
+ * @param buffer Pointer to the data buffer.
+ * @param buffer_len Number of bytes to write.
+ * @return ESP_OK on success, ESP_FAIL on SPI error.
  */
 esp_err_t nrf24l01plus_write_buffer(uint8_t reg_addr, uint8_t* buffer, int buffer_len);
 
 /**
- * @brief Reads multiple bytes from an NRF24L01+ register.
+ * Reads multiple bytes from an NRF24L01+ register and copies them into a buffer.
  *
- * Typically used for reading payload data from RX FIFO.
+ * The first received byte is the STATUS register and is skipped.
  *
  * @param regAddress Register address to read from.
- * @param buffer Buffer to store the received data.
+ * @param buffer Destination buffer to store received bytes.
  * @param bufferLength Number of bytes to read.
+ * @return ESP_OK on success, ESP_FAIL on SPI communication error.
  */
 esp_err_t nrf24l01plus_read_buffer(uint8_t reg_addr, uint8_t* buffer, int buffer_len);
 
 /**
- * @brief Attempts to receive a packet from the NRF24L01+ RX FIFO.
+ * Attempts to read a received packet from the RX FIFO.
  *
- * If a packet is available, reads it into the provided buffer,
- * flushes the RX FIFO, and clears the RX_DR interrupt flag.
+ * Reads STATUS to check for RX_DR, retrieves the packet if available,
+ * flushes the RX FIFO, and clears the RX_DR flag.
  *
  * @param rxBuffer Buffer to store the received payload.
- * @return 1 if a packet was received, 0 otherwise.
+ * @return ESP_OK + 1 when a packet is received,
+ *         ESP_OK when no packet is available,
+ *         ESP_FAIL on error.
  */
 int nrf24l01plus_recieve_packet(uint8_t* rx_buf);
 
 /**
- * @brief Sends a data packet using the NRF24L01+.
+ * Sends a TX payload through the NRF24L01+.
  *
- * Switches to TX mode, writes the payload, pulses CE to transmit,
- * and returns to RX mode if not using IRQ interrupts.
+ * Switches to TX mode, loads payload, pulses CE for transmission,
+ * and returns to RX mode when interrupts are not used.
  *
- * @param txBuffer Pointer to the data buffer to transmit.
+ * @param txBuffer Payload data to send.
+ * @return ESP_OK on success, ESP_FAIL if transmission fails.
  */
 esp_err_t nrf24l01plus_send_packet(uint8_t* tx_buf);
 
 /**
- * @brief Puts the NRF24L01+ module into receive (RX) mode.
+ * Sets the NRF24L01+ module to RX mode.
  *
- * Sets PRIM_RX and PWR_UP bits in CONFIG register and enables CE.
- * Behavior may vary depending on whether IRQs are enabled.
+ * Updates the CONFIG register based on IRQ configuration,
+ * asserts CE high to start listening.
+ *
+ * @return ESP_OK on success, ESP_FAIL on register write error.
  */
 esp_err_t nrf24l01plus_receive_mode(void);
 
 /**
- * @brief Puts the NRF24L01+ module into transmit (TX) mode.
+ * Sets the NRF24L01+ module to TX mode.
  *
- * Clears PRIM_RX bit, keeps CE low until data is sent.
- * Behavior may vary depending on whether IRQs are enabled.
+ * Clears PRIM_RX, updates CONFIG register, leaves CE low
+ * until the caller triggers a CE pulse for transmission.
+ *
+ * @return ESP_OK on success, ESP_FAIL on register write error.
  */
 esp_err_t nrf24l01plus_send_mode(void);
 
 /**
- * @brief Checks whether the TX FIFO is empty.
+ * Returns whether the TX FIFO is empty by reading FIFO_STATUS.
  *
- * @return 1 if empty, 0 if it contains data.
+ * @return 1 if empty, 0 otherwise.
  */
 int nrf24l01plus_txFifoEmpty(void);
 
 /**
- * @brief Checks whether the RX FIFO is empty.
+ * Returns whether the RX FIFO is empty by reading FIFO_STATUS.
  *
- * @return 1 if empty, 0 if it contains unread data.
+ * @return 1 if empty, 0 otherwise.
  */
 int nrf24l01plus_rxFifoEmpty(void);
 
 /**
- * @brief Clears the tx FIFO.
+ * Sends the FLUSH_TX command to clear all entries in the TX FIFO.
+ *
+ * @return ESP_OK on success, ESP_FAIL on communication error.
  */
 esp_err_t nrf24l01plus_flush_tx(void);
 
 /**
- * @brief Clears the rx FIFO.
+ * Sends the FLUSH_RX command to clear all entries in the RX FIFO.
+ *
+ * @return ESP_OK on success, ESP_FAIL on communication error.
  */
 esp_err_t nrf24l01plus_flush_rx(void);
 

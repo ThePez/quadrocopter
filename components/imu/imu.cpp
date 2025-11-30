@@ -16,8 +16,8 @@
 #define DEG_2_RAD(x) ((M_PI / 180.0) * x)
 
 static const char* TAG = "IMU";
-TaskHandle_t bno085Task = NULL;
-QueueHandle_t bno085Queue = NULL;
+TaskHandle_t imuTaskHandle = NULL;
+QueueHandle_t imuQueue = NULL;
 
 /**
  * @brief Callback function for handling BNO08x IMU data.
@@ -46,8 +46,8 @@ static void imu_data_callback(BNO08x* imu) {
     data.pitchAngle = euler.y; // Y-axis -> Pitch
     data.yawAngle = euler.z;   // Z-axis -> Yaw
 
-    if (bno085Queue) {
-        xQueueSendToBack(bno085Queue, &data, 0);
+    if (imuQueue) {
+        xQueueSendToBack(imuQueue, &data, 0);
     }
 }
 
@@ -68,8 +68,8 @@ static void imu_data_callback(BNO08x* imu) {
  */
 static void bno08x_task(void* pvParameters) {
 
-    while (!bno085Queue) {
-        bno085Queue = xQueueCreate(BNO085_QUEUE_LENGTH, sizeof(Telemitry_t));
+    while (!imuQueue) {
+        imuQueue = xQueueCreate(BNO085_QUEUE_LENGTH, sizeof(Telemitry_t));
     }
 
     BNO08x imu; // create IMU object with default wiring scheme
@@ -110,15 +110,15 @@ static void bno08x_task(void* pvParameters) {
  * Creates a FreeRTOS task that initializes the IMU, registers a data
  * callback, and sets up data transmission via a queue.
  *
- * @note Uses global task handle `bno085Task`.
+ * @note Uses global task handle `imuTaskHandle`.
  */
 void imu_init(void) {
-    xTaskCreate(bno08x_task, "IMU Task", BNO085_STACK_SIZE, NULL, BNO085_PRIORITY, &bno085Task);
+    xTaskCreate(bno08x_task, "IMU Task", BNO085_STACK_SIZE, NULL, BNO085_PRIORITY, &imuTaskHandle);
 }
 
 /**
  * @brief Resumes the setup task for the bno085 so that it can shutdown
  */
 void imu_kill(void) {
-    vTaskResume(bno085Task);
+    vTaskResume(imuTaskHandle);
 }

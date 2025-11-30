@@ -36,8 +36,8 @@ typedef struct {
 void imu_init(void);
 void imu_kill(void);
 
-extern TaskHandle_t bno085Task;
-extern QueueHandle_t bno085Queue;
+extern TaskHandle_t imuTaskHandle;
+extern QueueHandle_t imuQueue;
 
 #ifdef __cplusplus
 }

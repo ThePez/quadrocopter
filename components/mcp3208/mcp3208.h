@@ -25,7 +25,7 @@
 #define MCPx_QUEUE_LENGTH 5
 #define MCPx_DELAY (pdMS_TO_TICKS(50))
 
-#define MCP3208_CS_PIN 25
+
 
 #define MCP3208_SPI_START (1 << 10)
 #define MCP3208_SINGLE 1
@@ -46,14 +46,16 @@
 #define MCP3208_DIFFERENTIAL_CHANNEL_MASK(channel) (0x0400 | ((channel & 0x0007) << 6))
 
 /**
- * @brief Initialiser function for the controller task of the MCPx.
- * 
- * Task init function that sets up the task that runs the MCPx chip.
- * 
- * @param spiMutex mutext used for ensuring exculsive access to spi
- * @param channels the active channels to read from
+ * Initializes and starts the FreeRTOS controller task for the MCPx ADC module.
+ *
+ * Allocates task parameters, sets the selected active ADC channels, and
+ * spawns the task responsible for reading values from the MCP3208 device.
+ *
+ * @param spiMutex Pointer to the SPI mutex used to ensure exclusive bus access.
+ * @param channels Bitmask defining which channels should be sampled.
+ * @param spiHost SPI host ID where the MCP3208 is connected.
  */
-void mcpx_task_init(SemaphoreHandle_t* spiMutex, uint8_t channels, spi_host_device_t spiHost);
+void mcpx_task_init(SemaphoreHandle_t* spiMutex, uint8_t channels, spi_host_device_t spiHost, uint8_t cs);
 
 extern TaskHandle_t mcpxTaskHandle;
 extern QueueHandle_t mcpxQueue;

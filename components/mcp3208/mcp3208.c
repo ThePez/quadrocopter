@@ -16,53 +16,57 @@
 //////////////////////////// Function Prototypes /////////////////////////////
 
 /**
- * @brief FreeRTOS task for reading inputs from the mcpx chip's adc inputs
+ * FreeRTOS task responsible for continuously sampling ADC inputs from
+ * the MCPx (MCP3208) chip.
  *
- * Will read the input channels of the mcpx chip every 50 ms.
+ * The task acquires the shared SPI mutex, cycles through all active
+ * channels, performs ADC conversions, and sends the results over the
+ * MCPx queue every configured delay period (50 ms).
  *
- * @param pvParams Pointer to the SPI mutex used by the bus.
- *
- * @note Uses SPI-protected access with mutex for thread safety.
+ * @param pvParams Pointer to mcpxInputParams_t
  */
 static void mcpx_task(void* pvParams);
 
 /**
- * @brief Initializes the SPI interface for the MCP3208 ADC.
+ * Configures and registers the MCP3208 device on the specified SPI bus.
  *
- * Sets the SPI configuration including clock speed, chip select pin,
- * SPI mode (CPOL = 0, CPHA = 0), and queue size. Registers the device
- * on the specified SPI bus.
+ * Sets up SPI timing, chip-select pin, SPI mode (CPOL = 0, CPHA = 0),
+ * and queue size before adding the device to the bus.
  *
- * @param spiBus SPI bus to which the MCP3208 is connected (e.g., HSPI_HOST).
+ * @param spiBus The SPI host device (e.g., HSPI_HOST or VSPI_HOST).
+ * @return ESP_OK on success, or an ESP_FAIL reason on error.
  */
 static esp_err_t mcp3208_spi_init(spi_host_device_t spiBus);
 
 /**
- * @brief Performs MCP3208 startup procedure and initializes SPI communication.
+ * Performs the MCP3208 startup sequence and initializes SPI communication.
  *
- * Cycles the chip select (CS) pin to reset the MCP3208 and calls
- * the SPI initialization function to prepare for communication.
+ * Cycles the CS line in the correct timing pattern to reset the chip,
+ * then calls the SPI initialization routine to prepare the device for use.
  *
- * @param spiBus SPI bus to which the MCP3208 is connected.
+ * @param spiBus SPI host to initialize the MCP3208 on.
+ * @return ESP_OK if initialization succeeds, otherwise an error code.
  */
 static esp_err_t mcp3208_init(spi_host_device_t spiBus);
 
 /**
- * @brief Reads an analog value from the specified MCP3208 channel.
+ * Reads a 12-bit ADC value from the specified MCP3208 channel.
  *
- * Constructs and sends a read command to the MCP3208 over SPI, then
- * receives and parses the 12-bit ADC result.
+ * Constructs and sends a 3-byte SPI command based on the selected
+ * channel and conversion type (single-ended or differential), then
+ * extracts and formats the 12-bit result from the returned data.
  *
- * @param channel ADC channel to read (0–7).
- * @param type Conversion type: 1 for single-ended, 0 for differential.
- *
- * @return 12-bit ADC result from the specified channel.
+ * @param channel ADC channel number (0–7).
+ * @param type Conversion mode: MCP3208_SINGLE (1) or MCP3208_DIFF (0).
+ * @return The 12-bit raw ADC result.
  */
 static uint16_t mcp3208_read_adc_channel(uint8_t channel, uint8_t type);
 
 //////////////////////////////////////////////////////////////////////////////
 
 #define TAG "MCPxTask"
+
+static uint8_t MCP3208_CS_PIN = 25;
 
 typedef struct {
     SemaphoreHandle_t* spiMutex; // Spi mutex used for thread safe spi comunication
@@ -76,11 +80,12 @@ QueueHandle_t mcpxQueue = NULL;
 // SPI device handle
 spi_device_handle_t mcpxSpiHandle = NULL;
 
-void mcpx_task_init(SemaphoreHandle_t* spiMutex, uint8_t channels, spi_host_device_t spiHost) {
+void mcpx_task_init(SemaphoreHandle_t* spiMutex, uint8_t channels, spi_host_device_t spiHost, uint8_t cs) {
     mcpxInputParams_t* params = pvPortMalloc(sizeof(mcpxInputParams_t));
     params->spiMutex = spiMutex;
     params->channels = channels;
     params->host = spiHost;
+    MCP3208_CS_PIN = cs;
     xTaskCreate((void*) &mcpx_task, "MCPxTask", MCPx_STACK, params, MCPx_PRIORITY, &mcpxTaskHandle);
 }
 
@@ -117,7 +122,7 @@ static void mcpx_task(void* pvParams) {
     }
 
     xSemaphoreTake(spiMutex, portMAX_DELAY);
-    esp_err_t err = mcp3208_init(host); // VSPI_HOST;
+    esp_err_t err = mcp3208_init(host); // VSPI_HOST for remote;
     xSemaphoreGive(spiMutex);
 
     if (err != ESP_OK) {
@@ -136,6 +141,7 @@ static void mcpx_task(void* pvParams) {
                 // Channels 1 to 4 are joysticks, 0 is slider
                 if ((channelMask & (1 << i)) != 0) {
                     adcValues[pos] = mcp3208_read_adc_channel(i, MCP3208_SINGLE);
+                    // ESP_LOGI(TAG, "channel %d: %d", i, adcValues[pos]);
                     pos++;
                 }
             }

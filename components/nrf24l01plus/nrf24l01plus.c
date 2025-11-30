@@ -36,11 +36,62 @@
 
 //////////////////////////// Function Prototypes /////////////////////////////
 
-// ISR Handler function
+/**
+ * Interrupt handler for the NRF24L01+ IRQ pin.
+ *
+ * Triggered on a falling edge whenever the radio signals:
+ * - A packet has been received (RX_DR)
+ * - A transmission has completed (TX_DS)
+ *
+ * The ISR does not perform SPI operations. Instead, it sends a direct
+ * task notification to the control task, allowing the radio state to be
+ * processed outside the interrupt context.
+ */
 static void radio_isr_handler(void);
-// Task Function Prototypes
+
+/**
+ * FreeRTOS task responsible for handling NRF24L01+ radio status events.
+ *
+ * This task waits for notifications from the IRQ handler, then:
+ * - Reads the NRF24L01+ STATUS register
+ * - Clears the appropriate interrupt flags
+ * - Notifies the receiver or transmitter task depending on event type
+ *
+ * It also performs initial radio setup tasks such as flushing FIFOs,
+ * clearing pending interrupts, and enabling the IRQ line once ready.
+ *
+ * @param pvParams Pointer to a SemaphoreHandle_t used as the SPI mutex.
+ */
 static void control_task(void* pvParams);
+
+/**
+ * FreeRTOS task responsible for receiving and dispatching inbound radio packets.
+ *
+ * The task waits for the control task to signal that a packet is ready.
+ * Once triggered, it:
+ * - Acquires the SPI mutex
+ * - Reads the packet from the NRF24L01+ RX FIFO
+ * - Releases the SPI mutex
+ * - Queues the decoded packet into radioReceiverQueue for processing
+ *
+ * @param pvParams Pointer to a SemaphoreHandle_t used as the SPI mutex.
+ */
 static void receiver_task(void* pvParams);
+
+/**
+ * FreeRTOS task responsible for sending outgoing NRF24L01+ packets.
+ *
+ * The task blocks until:
+ * - A message is available in radioTransmitterQueue, and
+ * - The control task signals that transmission is permitted (RADIO_TX_READY)
+ *
+ * Once both conditions are met, it:
+ * - Takes the SPI mutex
+ * - Sends the packet using nrf24l01plus_send_packet()
+ * - Releases the SPI mutex
+ *
+ * @param pvParams Pointer to a SemaphoreHandle_t used as the SPI mutex.
+ */
 static void transmitter_task(void* pvParams);
 
 ////////////////////////////// Global Variables //////////////////////////////
@@ -102,16 +153,6 @@ void radio_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost) {
     xTaskCreate(&transmitter_task, "TX_RADIO", RADIO_STACK, spiMutex, RADIO_PRIO + 1, &radioTransmitterTask);
 }
 
-/**
- * @brief ISR handler for the NRF24L01+ IRQ pin.
- *
- * Triggered on a falling edge when the radio signals that
- * data has been received or a transmission is complete.
- * Notifies the control task using a direct task notification
- * so SPI work can run outside the interrupt context.// ESP_LOGIESP_LOGI(TAG, "Radio: data sent ISR");
- *
- * @note Must reside in IRAM. Keep minimal and fast.
- */
 static void IRAM_ATTR radio_isr_handler(void) {
 
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
@@ -122,19 +163,6 @@ static void IRAM_ATTR radio_isr_handler(void) {
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
-/**
- * @brief FreeRTOS task for handling NRF24L01+ status events.
- *
- * Waits for notifications from the ISR. When triggered,
- * reads the radio status register, clears flags, and
- * signals the receiver or transmitter task as needed.
- *
- * Runs continuously while the system is active.
- *
- * @param pvParams Pointer to the task parameters (RadioParams_t).
- *
- * @note Uses NRF24L01+ driver functions.
- */
 static void control_task(void* pvParams) {
 
     // Deal with input parameters
@@ -189,19 +217,6 @@ static void control_task(void* pvParams) {
     }
 }
 
-/**
- * @brief FreeRTOS task for handling incoming radio packets.
- *
- * Waits for a signal from the control task that a new packet is ready.
- * Receives the packet over SPI and places the decoded data onto
- * the radioReceiverQueue for processing.
- *
- * Runs continuously while the system is active.
- *
- * @param pvParams Pointer to the task parameters (RadioParams_t).
- *
- * @note Uses NRF24L01+ driver functions.
- */
 static void receiver_task(void* pvParams) {
 
     // Deal with input parameters
@@ -224,19 +239,6 @@ static void receiver_task(void* pvParams) {
     }
 }
 
-/**
- * @brief FreeRTOS task for sending outgoing radio packets.
- *
- * Waits for a message on radioTransmitterQueue and for permission
- * to transmit. When both are ready, sends the packet to the radio
- * module over SPI.
- *
- * Runs continuously while the system is active.
- *
- * @param pvParams Pointer to the task parameters (RadioParams_t).
- *
- * @note Uses NRF24L01+ driver functions.
- */
 static void transmitter_task(void* pvParams) {
 
     // Deal with input parameters
