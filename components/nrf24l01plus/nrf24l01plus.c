@@ -17,6 +17,9 @@
 #include <stdio.h>
 #include <string.h>
 
+// Tag for log messages
+#define TAG "NRF24L01plus"
+
 #define CHECK_ERR(code, msg)                                                                                           \
     do {                                                                                                               \
         esp_err_t err = (code);                                                                                        \
@@ -109,8 +112,6 @@ static EventGroupHandle_t radioEventGroup = NULL;
 static uint8_t rxBuffer[NRF24L01PLUS_TX_PLOAD_WIDTH];
 static uint8_t txBuffer[NRF24L01PLUS_TX_PLOAD_WIDTH];
 
-// Tag for log messages
-#define TAG "NRF24L01plus"
 // Default radio channel (0–125 range on NRF24L01+)
 #define DEFAULT_RF_CHANNEL 40
 // Default 5-byte address (MSB first)
@@ -196,21 +197,20 @@ static void control_task(void* pvParams) {
             xSemaphoreGive(spiMutex);
             // Notify the Receiver Task
             xEventGroupSetBits(radioEventGroup, RADIO_RX_READY);
-
         } else if (status & NRF24L01PLUS_TX_DS) {
 
             // Data was sent
+            // Clear TX bit
             nrf24l01plus_write_register(NRF24L01PLUS_STATUS, NRF24L01PLUS_TX_DS);
+            // Put device back into recieve mode
             nrf24l01plus_receive_mode();
             xSemaphoreGive(spiMutex);
             // Notify the Transmitter Task that further sends are now allowed
             xEventGroupSetBits(radioEventGroup, RADIO_TX_READY);
-
         } else {
 
             // Failsafe to ensure SPI is allowed again, this shouldn't ever happen
-            uint8_t clearBoth = NRF24L01PLUS_TX_DS | NRF24L01PLUS_RX_DR;
-            nrf24l01plus_write_register(NRF24L01PLUS_STATUS, clearBoth);
+            nrf24l01plus_write_register(NRF24L01PLUS_STATUS, NRF24L01PLUS_TX_DS | NRF24L01PLUS_RX_DR);
             xSemaphoreGive(spiMutex);
             ESP_LOGI(TAG, "Radio: Failsafe ISR");
         }
@@ -221,7 +221,6 @@ static void receiver_task(void* pvParams) {
 
     // Deal with input parameters
     SemaphoreHandle_t spiMutex = *((SemaphoreHandle_t*) pvParams);
-
     ESP_LOGI(TAG, "Reciever task initialised");
 
     while (1) {
@@ -232,9 +231,13 @@ static void receiver_task(void* pvParams) {
 
             // Wait for the SPI to be available
             xSemaphoreTake(spiMutex, portMAX_DELAY);
-            nrf24l01plus_recieve_packet(rxBuffer);
+            esp_err_t err = nrf24l01plus_recieve_packet(rxBuffer);
             xSemaphoreGive(spiMutex);
-            xQueueSendToBack(radioReceiverQueue, rxBuffer, pdMS_TO_TICKS(5));
+
+            // If valid packet recieved -> put onto queue
+            if (err == ESP_OK) {
+                xQueueSendToBack(radioReceiverQueue, rxBuffer, pdMS_TO_TICKS(5));
+            }
         }
     }
 }
@@ -444,10 +447,10 @@ int nrf24l01plus_recieve_packet(uint8_t* rxBuffer) {
             ESP_LOGE(TAG, "Failed to clear RX_DR flag");
             return ESP_FAIL; // Error occurred
         }
-        return ESP_OK + 1; // Packet received successfully
+        return ESP_OK; // Packet received successfully
     }
 
-    return ESP_OK; // No packet available
+    return ESP_ERR_NOT_FOUND; // No packet available
 }
 
 esp_err_t nrf24l01plus_send_packet(uint8_t* txBuffer) {

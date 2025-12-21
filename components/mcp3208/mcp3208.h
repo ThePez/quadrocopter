@@ -25,8 +25,6 @@
 #define MCPx_QUEUE_LENGTH 5
 #define MCPx_DELAY (pdMS_TO_TICKS(50))
 
-
-
 #define MCP3208_SPI_START (1 << 10)
 #define MCP3208_SINGLE 1
 #define MCP3208_DIFF 0

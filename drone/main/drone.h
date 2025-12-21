@@ -39,7 +39,7 @@
 #define ADC_MIN 0
 #define ADC_MAX 4095
 
-#define MAX_RATE 200.0
+#define MAX_RATE 100.0
 #define MAX_ANGLE 30.0
 
 #define MIN_THROTTLE 1000.0

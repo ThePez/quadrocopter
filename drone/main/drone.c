@@ -15,7 +15,7 @@
 #include "motors.h"
 
 #define TAG "DRONE"
-#define FAILSAFE_TIMEOUT_US 2000000 // 2 seconds
+#define FAILSAFE_TIMEOUT_US 1000000 // 1 second
 
 ////////////////////////////// Global Variables //////////////////////////////
 
@@ -23,11 +23,12 @@
 TaskHandle_t flightController = NULL;
 
 // Set default Scalers for the PID structs
-static PID_t ratePitchPid = {.kp = 1.8, .ki = 0.00, .kd = 0.0000, .intLimit = 15.0};
-static PID_t rateRollPid = {.kp = 0, .ki = 0.00, .kd = 0.0000, .intLimit = 15.0};
-static PID_t rateYawPid = {.kp = 0, .ki = 0.00, .kd = 0.0000, .intLimit = 10.0};
-static PID_t anglePitchPid = {.kp = 1, .ki = 0.00, .kd = 0.0000, .intLimit = 5.0};
-static PID_t angleRollPid = {.kp = 1, .ki = 0.00, .kd = 0.0000, .intLimit = 5.0};
+static PID_t ratePitchPid =     {.kp = 0.3, .ki = 0.000, .kd = 0.00, .intLimit = 5.0};
+static PID_t rateRollPid =      {.kp = 0.3, .ki = 0.000, .kd = 0.00, .intLimit = 5.0};
+static PID_t rateYawPid =       {.kp = 0.0, .ki = 0.000, .kd = 0.00, .intLimit = 1.5};
+
+static PID_t anglePitchPid =    {.kp = 1.5, .ki = 0.000, .kd = 0.00, .intLimit = 5.0};
+static PID_t angleRollPid =     {.kp = 1.5, .ki = 0.000, .kd = 0.00, .intLimit = 5.0};
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -329,7 +330,7 @@ void process_remote_data(BlackBox_t* box, uint16_t* payload) {
         break;
 
     case SETPOINT_UPDATE:
-        box->setPoints->throttle = mapf(payload[1], ADC_MIN, ADC_MAX, MIN_THROTTLE, MAX_THROTTLE);
+        box->setPoints->throttle = mapf(payload[1], 0, ADC_MAX, MIN_THROTTLE, MAX_THROTTLE);
         // Pitch rate
         value = -mapf(payload[2], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
         box->setPoints->pitch = (fabsf(value) < 5) ? 0 : value;

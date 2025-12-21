@@ -138,10 +138,10 @@ static void mcpx_task(void* pvParams) {
         if (xSemaphoreTake(spiMutex, MCPx_DELAY) == pdTRUE) {
             uint8_t pos = 0;
             for (uint8_t i = 0; i < MCP3208_MAX_CHANNELS; i++) {
-                // Channels 1 to 4 are joysticks, 0 is slider
+                // Channels 1 to 4 are joysticks, 0 is slider for the remote
+                // Channel 1 is the battery for the drone
                 if ((channelMask & (1 << i)) != 0) {
                     adcValues[pos] = mcp3208_read_adc_channel(i, MCP3208_SINGLE);
-                    // ESP_LOGI(TAG, "channel %d: %d", i, adcValues[pos]);
                     pos++;
                 }
             }

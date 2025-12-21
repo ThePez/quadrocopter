@@ -217,8 +217,8 @@ esp_err_t nrf24l01plus_read_buffer(uint8_t reg_addr, uint8_t* buffer, int buffer
  * flushes the RX FIFO, and clears the RX_DR flag.
  *
  * @param rxBuffer Buffer to store the received payload.
- * @return ESP_OK + 1 when a packet is received,
- *         ESP_OK when no packet is available,
+ * @return ESP_OK when a packet is received,
+ *         ESP_ERR_NOT_FOUND when no packet is available,
  *         ESP_FAIL on error.
  */
 int nrf24l01plus_recieve_packet(uint8_t* rx_buf);
