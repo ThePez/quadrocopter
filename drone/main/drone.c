@@ -10,45 +10,66 @@
 
 #include "drone.h"
 #include "common_functions.h"
-#include "nrf24l01plus.h"
 #include "mcp3208.h"
 #include "motors.h"
+#include "nrf24l01plus.h"
 
 #define TAG "DRONE"
 #define FAILSAFE_TIMEOUT_US 1000000 // 1 second
+#define PID_LOOP_FREQ 2500          // 400 Hz -> 2.5ms -> 2500us
+#define PID_INT_LIMIT 400
 
 ////////////////////////////// Global Variables //////////////////////////////
 
 // Task Handles
-TaskHandle_t flightController = NULL;
+TaskHandle_t sensorTaskHandle = NULL;
+TaskHandle_t inputTaskhandle = NULL;
+TaskHandle_t pidTaskHandle = NULL;
 
 // Set default Scalers for the PID structs
-static PID_t ratePitchPid =     {.kp = 0.3, .ki = 0.000, .kd = 0.00, .intLimit = 5.0};
-static PID_t rateRollPid =      {.kp = 0.3, .ki = 0.000, .kd = 0.00, .intLimit = 5.0};
-static PID_t rateYawPid =       {.kp = 0.0, .ki = 0.000, .kd = 0.00, .intLimit = 1.5};
+static PIDParameters_t ratePid = {.kp = 0.7, .ki = 2.500, .kd = 0.02, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
+static PIDParameters_t rate_z_Pid = {.kp = 1, .ki = 4.000, .kd = 0.00, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
+static PIDParameters_t anglePid = {.kp = 0.4, .ki = 0.000, .kd = 0.00, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
 
-static PID_t anglePitchPid =    {.kp = 1.5, .ki = 0.000, .kd = 0.00, .intLimit = 5.0};
-static PID_t angleRollPid =     {.kp = 1.5, .ki = 0.000, .kd = 0.00, .intLimit = 5.0};
+// Various configs for general operation
+static DroneConfig_t* droneData = NULL;
+
+// 5 control PID loops containers
+static PIDFeedback_t* pidRate = NULL;
+static PIDFeedback_t* pidAngle = NULL;
+
+static PIDFinal_t* outputPID = NULL;
+
+// IMU data containers
+static Telemitry_t imuBufA;
+static Telemitry_t imuBufB;
+static volatile Telemitry_t* imuData = &imuBufA;
+
+// Remote set point into
+static TargetParameters_t* remoteIn = NULL;
+
+// PWM duty cycles
+static PWM_t* motors = NULL;
+
+// Radio
+static uint16_t* radioPayload = NULL;
 
 //////////////////////////////////////////////////////////////////////////////
 
-/**
- * @brief Main entry point of the application.
- *
- * Initializes all subsystems and creates the main FreeRTOS tasks:
- * - Initializes PWM for motor control.
- * - Sets up SPI and radio communication.
- * - Starts the IMU processing task.
- * - Launches the flight controller task.
- *
- * This function is called once at boot by the ESP32 framework.
- */
 void app_main(void) {
-    /* Physical Hardware setup */
+
     // Setup PWM
-    esc_pwm_init();
+    if (esc_pwm_init() != ESP_OK) {
+        esp_restart();
+    }
+
     // SPI Bus Setup for radio and mcp3208
-    spi_bus_setup(HSPI_HOST);
+    if (spi_bus_setup(HSPI_HOST) != ESP_OK) {
+        esp_restart();
+    }
+
+    // If a failure occurs in the call, the ESP will reset
+    memory_init();
 
     /* Helper tasks */
     radio_module_init(&spiHMutex, HSPI_HOST);
@@ -57,391 +78,257 @@ void app_main(void) {
     // the gpio_isr_install happens in radio setup -> it has been disabled in the BNO085x driver init
     imu_init(); // Start the C++ task
 
-    /* Main control Task */
-    xTaskCreate(&flight_controller, "FC_Task", SYS_STACK, NULL, SYS_PRIO, &flightController);
-}
-
-void set_flight_mode(FlightMode_t mode, BlackBox_t* box) {
-    if (mode != box->mode) {
-        box->mode = mode;
-
-        // Reset PID integrators when switching modes to prevent windup
-        pid_reset(&ratePitchPid);
-        pid_reset(&rateRollPid);
-        pid_reset(&rateYawPid);
-
-        if (mode == FLIGHT_MODE_ANGLE) {
-            pid_reset(&anglePitchPid);
-            pid_reset(&angleRollPid);
-        }
-
-        ESP_LOGI(TAG, "Switched to %s mode", mode == FLIGHT_MODE_ANGLE ? "ANGLE" : "RATE");
-    }
-}
-
-BlackBox_t* black_box_init(void) {
-
-    BlackBox_t* box = pvPortMalloc(sizeof(BlackBox_t));
-    if (!box) {
-        ESP_LOGE(TAG, "Black Box init failed");
-        return NULL;
-    }
-
-    box->imuData = pvPortMalloc(sizeof(Telemitry_t));
-    if (box->imuData) {
-        memset(box->imuData, 0, sizeof(Telemitry_t));
-    } else {
-        ESP_LOGE(TAG, "IMU Data init failed");
-        goto free_box;
-    }
-
-    box->setPoints = pvPortMalloc(sizeof(RemoteSetPoints_t));
-    if (box->setPoints) {
-        memset(box->setPoints, 0, sizeof(RemoteSetPoints_t));
-        box->setPoints->throttle = MIN_THROTTLE;
-    } else {
-        ESP_LOGE(TAG, "Remote Setpoint data failed");
-        goto free_imu;
-    }
-
-    box->motorInputs = pvPortMalloc(sizeof(PIDOutputs_t));
-    if (box->motorInputs) {
-        memset(box->motorInputs, 0, sizeof(PIDOutputs_t));
-    } else {
-        ESP_LOGE(TAG, "Motor input data failed");
-        goto free_setpoint;
-    }
-
-    box->motorOutputs = pvPortMalloc(sizeof(MotorPeriods_t));
-    if (box->motorOutputs) {
-        memset(box->motorOutputs, 0, sizeof(MotorPeriods_t));
-    } else {
-        ESP_LOGE(TAG, "Motor Period data failed");
-        goto free_pid;
-    }
-
-    box->mode = FLIGHT_MODE_RATE;
-    box->connectedToRemote = 0;
-    box->failsafeActive = 1;
-    return box;
-
-    /* Clean up paths */
-free_pid:
-    vPortFree(box->motorInputs);
-free_setpoint:
-    vPortFree(box->setPoints);
-free_imu:
-    vPortFree(box->imuData);
-free_box:
-    vPortFree(box);
-    return NULL;
-}
-
-void black_box_destroy(BlackBox_t* box) {
-    // Free the motor speed container
-    vPortFree(box->motorOutputs);
-    // Free the PID inputs
-    vPortFree(box->motorInputs);
-    // Free the remote setpoints
-    vPortFree(box->setPoints);
-    // Free the imu container
-    vPortFree(box->imuData);
-    // Free the container
-    vPortFree(box);
-}
-
-void flight_controller(void* pvParams) {
-
-    // Setup the container
-    BlackBox_t* box = black_box_init();
-    if (box == NULL) {
-        vTaskDelete(NULL);
-    }
-
-    // Radio payload container
-    uint16_t* payload = pvPortMalloc(sizeof(uint16_t) * (RADIO_PAYLOAD_WIDTH / 2));
-    if (payload == NULL) {
-        black_box_destroy(box);
-        vTaskDelete(NULL);
-    }
-
     // Wait until both input queues are created
     while (!radioReceiverQueue || !radioTransmitterQueue || !imuQueue) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
-    // Failsafe tracking - last time we got a SETPOINT_UPDATE
-    uint64_t lastRemoteUpdateTime = esp_timer_get_time();
-    
-    // Create QueueSet
-    uint8_t setLength = RADIO_QUEUE_LENGTH + BNO085_QUEUE_LENGTH;
-    QueueSetHandle_t controlLoopSet = xQueueCreateSet(setLength);
-    xQueueAddToSet(radioReceiverQueue, controlLoopSet);
-    xQueueAddToSet(imuQueue, controlLoopSet);
-    QueueSetMemberHandle_t xActivatedMember;
-
     // Initialise a callback task for returning info back to the remote
-    timer_task_callback_init(100000, box, remote_data_callback); // Interval of 100ms
-    timer_task_callback_init(50000, box, battery_callback); // Interval of 50ms
+    timer_task_callback_init(100000, remote_data_callback); // Interval of 100ms
+    timer_task_callback_init(50000, battery_callback);      // Interval of 50ms
+
+    /* Create 3 control Tasks */
+    xTaskCreatePinnedToCore(&pid_control, "PID_Task", SYS_STACK, NULL, SYS_PRIO + 2, &pidTaskHandle, (BaseType_t) 1);
+    xTaskCreatePinnedToCore(&sensor_control, "SENSOR_TASK", SYS_STACK, NULL, SYS_PRIO, &sensorTaskHandle,
+                            (BaseType_t) 0);
+    xTaskCreatePinnedToCore(&input_control, "INPUT_TASK", SYS_STACK, NULL, SYS_PRIO, &inputTaskhandle, (BaseType_t) 0);
+
+    // Initialise the timer for PID Task signalling
+    pid_timer_init();
+}
+
+void sensor_control(void* pvParams) {
+
+    while (!imuQueue) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    // Start on the backup buffer
+    Telemitry_t* buffer = &imuBufB;
 
     while (1) {
+        xQueueReceive(imuQueue, buffer, portMAX_DELAY);
+        // Set active buffer
+        imuData = buffer;
+        // Swap buffer to use on next sensor input
+        buffer = (buffer == &imuBufA) ? &imuBufB : &imuBufA;
+    }
+}
 
-        // This task only delay's based on the QueueSet.
-        // Usually the imu will activate it every ~10ms
+void input_control(void* pvParams) {
 
-        if (controlLoopSet) {
+    double inputReading;
 
-            xActivatedMember = xQueueSelectFromSet(controlLoopSet, portMAX_DELAY);
-            uint64_t now = esp_timer_get_time();
+    // Wait for the radio queue to be initialised
+    while (!radioReceiverQueue) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
 
-            // Update remote inputs
-            if (xActivatedMember == radioReceiverQueue) {
-                // Get remote set point data
-                xQueueReceive(radioReceiverQueue, payload, 0);
-                // Process it
-                process_remote_data(box, payload);
-                // Update flags
-                lastRemoteUpdateTime = now;
-                box->connectedToRemote = 1;
-                box->failsafeActive = 0;
-            }
-
-            // New position data arrived, run PID loop and update ESC's
-            if (xActivatedMember == imuQueue) {
-                // Get telemitry data from IMU
-                xQueueReceive(imuQueue, box->imuData, 0);
-
-                // Is the remote armed / connected?
-                if(now - lastRemoteUpdateTime > FAILSAFE_TIMEOUT_US) {
-                    failsafe(box);
-                    continue;
-                }
-                
-                // Normal PID update
-                process_positional_data(box);
-            }
+    while (1) {
+        if (xQueueReceive(radioReceiverQueue, radioPayload, portMAX_DELAY) == pdTRUE) {
+            droneData->lastRemoteTime = esp_timer_get_time();
+            droneData->armed = 1;
+            inputReading = mapf(radioPayload[1], 0, ADC_MAX, MIN_THROTTLE, MAX_THROTTLE);
+            remoteIn->throttle = (inputReading < MIN_THROTTLE + 20) ? MIN_THROTTLE : inputReading;
+            // Pitch Input
+            inputReading = -mapf(radioPayload[2], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
+            remoteIn->pitch = (fabs(inputReading) < 5) ? 0 : inputReading;
+            // Roll Input
+            inputReading = -mapf(radioPayload[3], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
+            remoteIn->roll = (fabs(inputReading) < 5) ? 0 : inputReading;
+            // Yaw Input
+            inputReading = mapf(radioPayload[4], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
+            remoteIn->yaw = (fabs(inputReading) < 5) ? 0 : inputReading;
+            // Flight mode
+            set_flight_mode((radioPayload[5] == ACRO) ? ACRO : STABILISE);
         }
     }
 }
 
-void failsafe(BlackBox_t* box) {
-    if (box->failsafeActive) {
+void pid_control(void* pvParams) {
+
+    while (1) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        uint64_t now = esp_timer_get_time();
+        // Is the remote armed / connected?
+        if (now - droneData->lastRemoteTime > FAILSAFE_TIMEOUT_US) {
+            failsafe();
+            continue;
+        }
+
+        double pitchRateSetpoint, rollRateSetpoint, yawRateSetpoint;
+
+        if (droneData->mode == STABILISE) {
+            // ANGLE MODE: Cascaded control with outer angle loop
+
+            // Map remote control inputs to angle setpoints
+            double pitchAngleSetpoint = mapf(remoteIn->pitch, -MAX_RATE, MAX_RATE, -MAX_ANGLE, MAX_ANGLE);
+            double rollAngleSetpoint = mapf(remoteIn->roll, -MAX_RATE, MAX_RATE, -MAX_ANGLE, MAX_ANGLE);
+
+            pitchRateSetpoint = pid_update(&anglePid, pidAngle->pitch, pitchAngleSetpoint, imuData->pitchAngle);
+            rollRateSetpoint = pid_update(&anglePid, pidAngle->roll, rollAngleSetpoint, imuData->rollAngle);
+
+        } else {
+            // RATE MODE: Direct rate control
+            pitchRateSetpoint = remoteIn->pitch;
+            rollRateSetpoint = remoteIn->roll;
+        }
+
+        // Yaw is still direct rate control in all control modes
+        yawRateSetpoint = remoteIn->yaw;
+
+        outputPID->pitch_pid = pid_update(&ratePid, pidRate->pitch, pitchRateSetpoint, imuData->pitchRate);
+        outputPID->roll_pid = pid_update(&ratePid, pidRate->roll, rollRateSetpoint, imuData->rollRate);
+        outputPID->yaw_pid = pid_update(&rate_z_Pid, pidRate->yaw, yawRateSetpoint, imuData->yawRate);
+
+        // Update ESCs
+        update_escs();
+    }
+}
+
+void memory_init(void) {
+    radioPayload = pvPortMalloc(sizeof(uint16_t) * (RADIO_PAYLOAD_WIDTH / 2));
+    pidRate = pvPortMalloc(sizeof(PIDFeedback_t));
+    pidAngle = pvPortMalloc(sizeof(PIDFeedback_t));
+    remoteIn = pvPortMalloc(sizeof(TargetParameters_t));
+    motors = pvPortMalloc(sizeof(PWM_t));
+    outputPID = pvPortMalloc(sizeof(PIDFinal_t));
+    droneData = pvPortMalloc(sizeof(DroneConfig_t));
+
+    // If any malloc's failed restart the MSU
+
+    if (!radioPayload || !pidRate || !pidAngle || !remoteIn || !motors || !outputPID || !droneData) {
+        esp_restart();
+    }
+
+    pidRate->pitch = pvPortMalloc(sizeof(PIDResult_t));
+    pidRate->roll = pvPortMalloc(sizeof(PIDResult_t));
+    pidRate->yaw = pvPortMalloc(sizeof(PIDResult_t));
+
+    pidAngle->pitch = pvPortMalloc(sizeof(PIDResult_t));
+    pidAngle->roll = pvPortMalloc(sizeof(PIDResult_t));
+
+    if (!pidRate->pitch || !pidRate->roll || !pidRate->yaw || !pidAngle->pitch || !pidAngle->roll) {
+        esp_restart();
+    }
+}
+
+void set_flight_mode(FlightMode_t mode) {
+    if (mode != droneData->mode) {
+        droneData->mode = mode;
+        // Reset PID integrators when switching modes to prevent windup
+        pid_reset(pidRate->pitch);
+        pid_reset(pidRate->roll);
+        pid_reset(pidRate->yaw);
+
+        pid_reset(pidAngle->pitch);
+        pid_reset(pidAngle->roll);
+
+        ESP_LOGI(TAG, "Switched to %s mode", mode == STABILISE ? "ANGLE" : "RATE");
+    }
+}
+
+void failsafe(void) {
+    if (!droneData->armed) {
         return;
     }
 
-    ESP_LOGE(TAG, "FAILSAFE TRIGGERED: No radio link for at least 2s");
-    box->failsafeActive = 1;
-    box->connectedToRemote = 0;
+    ESP_LOGE(TAG, "FAILSAFE TRIGGERED: No radio link for at least 1 second");
+    droneData->armed = 0;
 
-    // Force motors to MIN_THROTTLE and skip PID update
-    box->motorOutputs->motorA = MIN_THROTTLE;
-    box->motorOutputs->motorB = MIN_THROTTLE;
-    box->motorOutputs->motorC = MIN_THROTTLE;
-    box->motorOutputs->motorD = MIN_THROTTLE;
-
-    esc_pwm_set_duty_cycle(MOTOR_A, (uint16_t) box->motorOutputs->motorA);
-    esc_pwm_set_duty_cycle(MOTOR_B, (uint16_t) box->motorOutputs->motorB);
-    esc_pwm_set_duty_cycle(MOTOR_C, (uint16_t) box->motorOutputs->motorC);
-    esc_pwm_set_duty_cycle(MOTOR_D, (uint16_t) box->motorOutputs->motorD);
-}
-
-void process_positional_data(BlackBox_t* box) {
-
-    uint64_t time = box->imuData->prevTime;
-    double pitchRateSetpoint, rollRateSetpoint, yawRateSetpoint;
-
-    if (box->mode == FLIGHT_MODE_ANGLE) {
-        // ANGLE MODE: Cascaded control with outer angle loop
-
-        // Map remote control inputs to angle setpoints
-        double pitchAngleSetpoint = mapf(box->setPoints->pitch, -MAX_RATE, MAX_RATE, -MAX_ANGLE, MAX_ANGLE);
-        double rollAngleSetpoint = mapf(box->setPoints->roll, -MAX_RATE, MAX_RATE, -MAX_ANGLE, MAX_ANGLE);
-
-        // Outer loop: Angle PID controllers output desired rates
-        double errPitchAngle = pitchAngleSetpoint - box->imuData->pitchAngle;
-        double errRollAngle = rollAngleSetpoint - box->imuData->rollAngle;
-
-        pitchRateSetpoint = pid_update(&anglePitchPid, errPitchAngle, time);
-        rollRateSetpoint = pid_update(&angleRollPid, errRollAngle, time);
-
-        // Limit the rate setpoints from angle controllers
-        pitchRateSetpoint = constrainf(pitchRateSetpoint, -MAX_RATE, MAX_RATE);
-        rollRateSetpoint = constrainf(rollRateSetpoint, -MAX_RATE, MAX_RATE);
-
-        // Yaw is still direct rate control in angle mode
-        yawRateSetpoint = box->setPoints->yaw;
-
-    } else {
-        // RATE MODE: Direct rate control
-        pitchRateSetpoint = box->setPoints->pitch;
-        rollRateSetpoint = box->setPoints->roll;
-        yawRateSetpoint = box->setPoints->yaw;
+    // Force motors to MIN_THROTTLE before MCU reset
+    for (uint8_t i = 0; i < 4; i++) {
+        esc_pwm_set_duty_cycle((MotorIndex) i, MIN_THROTTLE);
     }
 
-    // Inner loop: Rate PID controllers (always runs)
-    double errPitchRate = pitchRateSetpoint - box->imuData->pitchRate;
-    double errRollRate = rollRateSetpoint - box->imuData->rollRate;
-    double errYawRate = yawRateSetpoint - box->imuData->yawRate;
-
-    box->motorInputs->pitchPID = pid_update(&ratePitchPid, errPitchRate, time);
-    box->motorInputs->rollPID = pid_update(&rateRollPid, errRollRate, time);
-    box->motorInputs->yawPID = pid_update(&rateYawPid, errYawRate, time);
-
-    // Debug logging
-    // static uint32_t log_counter = 0;
-    // if (++log_counter % 10 == 0) { // Log every ~100ms
-    //     ESP_LOGI(TAG, "Mode: %s, PID: P=%.02f R=%.02f Y=%.02f", box->mode ? "ANGLE" : "RATE",
-    //              box->motorInputs->pitchPID, box->motorInputs->rollPID, box->motorInputs->yawPID);
-    // }
-
-    // Update ESCs
-    update_escs(box);
+    // Reset the MCU
+    esp_restart();
 }
 
-void process_remote_data(BlackBox_t* box, uint16_t* payload) {
+void update_escs(void) {
 
-    uint8_t i = 0;
-    uint8_t* buffer;
-    float value;
-    switch (payload[0]) {
-    case PID_MODIFIERS:
-        buffer = (uint8_t*) (payload + 1);
-        // Rates
-        ratePitchPid.kp = buffer[i++]; // buffer[0]
-        ratePitchPid.ki = buffer[i++];
-        ratePitchPid.kd = buffer[i++];
+    double throttle = remoteIn->throttle;
+    // Front left
+    double speed = throttle - outputPID->pitch_pid + outputPID->roll_pid - outputPID->yaw_pid;
+    motors->motorA = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
 
-        rateRollPid.kp = buffer[i++];
-        rateRollPid.ki = buffer[i++];
-        rateRollPid.kd = buffer[i++];
+    // Rear left
+    speed = throttle + outputPID->pitch_pid + outputPID->roll_pid + outputPID->yaw_pid;
+    motors->motorB = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
 
-        rateYawPid.kp = buffer[i++];
-        rateYawPid.ki = buffer[i++];
-        rateYawPid.kd = buffer[i++];
-        // Angles
-        anglePitchPid.kp = buffer[i++];
-        anglePitchPid.ki = buffer[i++];
-        anglePitchPid.kd = buffer[i++];
+    // Rear right
+    speed = throttle + outputPID->pitch_pid - outputPID->roll_pid - outputPID->yaw_pid;
+    motors->motorC = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
 
-        angleRollPid.kp = buffer[i++];
-        angleRollPid.ki = buffer[i++];
-        angleRollPid.kd = buffer[i++]; // buffer[14]
+    // Front right
+    speed = throttle - outputPID->pitch_pid - outputPID->roll_pid + outputPID->yaw_pid;
+    motors->motorD = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
 
-        break;
-
-    case SETPOINT_UPDATE:
-        box->setPoints->throttle = mapf(payload[1], 0, ADC_MAX, MIN_THROTTLE, MAX_THROTTLE);
-        // Pitch rate
-        value = -mapf(payload[2], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
-        box->setPoints->pitch = (fabsf(value) < 5) ? 0 : value;
-        // Roll rate
-        value = -mapf(payload[3], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
-        box->setPoints->roll = (fabsf(value) < 5) ? 0 : value;
-        // Yaw rate
-        value = mapf(payload[4], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
-        box->setPoints->yaw = (fabsf(value) < 5) ? 0 : value;
-        // Flight mode
-        set_flight_mode((payload[5] == FLIGHT_MODE_RATE) ? FLIGHT_MODE_RATE : FLIGHT_MODE_ANGLE, box);
-        break;
-    }
+    esc_pwm_set_duty_cycle(MOTOR_A, motors->motorA);
+    esc_pwm_set_duty_cycle(MOTOR_B, motors->motorB);
+    esc_pwm_set_duty_cycle(MOTOR_C, motors->motorC);
+    esc_pwm_set_duty_cycle(MOTOR_D, motors->motorD);
 }
 
-void update_escs(BlackBox_t* box) {
+double pid_update(PIDParameters_t* params, PIDResult_t* values, double ref, double actual) {
 
-    double throttle = box->setPoints->throttle;
-    double pitchPID = box->motorInputs->pitchPID;
-    double rollPID = box->motorInputs->rollPID;
-    double yawPID = box->motorInputs->yawPID;
-    double speed = MIN_THROTTLE;
+    double dt = params->dt * 1e-6;
 
-    // Ensure the motors are off on low throttle inputs
-    if (throttle < 1020) {
+    double error = ref - actual;
+    // P
+    values->proportional = params->kp * error;
+    // I
+    values->intergral += params->ki * (error + values->prevError) * dt;
+    values->intergral = constrainf(values->intergral, -params->intLimit, params->intLimit);
+    // D
+    values->derivative = params->kd * (error - values->prevError) / dt;
+    // Update Error
+    values->prevError = error;
 
-        box->motorOutputs->motorA = speed;
-        box->motorOutputs->motorB = speed;
-        box->motorOutputs->motorC = speed;
-        box->motorOutputs->motorD = speed;
-    } else {
-
-        // Front left
-        speed = throttle - pitchPID + rollPID - yawPID;
-        box->motorOutputs->motorA = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
-        // Rear left
-        speed = throttle + pitchPID + rollPID + yawPID;
-        box->motorOutputs->motorB = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
-        // Rear right
-        speed = throttle + pitchPID - rollPID - yawPID;
-        box->motorOutputs->motorC = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
-        // Front right
-        speed = throttle - pitchPID - rollPID + yawPID;
-        box->motorOutputs->motorD = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
-    }
-
-    esc_pwm_set_duty_cycle(MOTOR_A, (uint16_t) box->motorOutputs->motorA);
-    esc_pwm_set_duty_cycle(MOTOR_B, (uint16_t) box->motorOutputs->motorB);
-    esc_pwm_set_duty_cycle(MOTOR_C, (uint16_t) box->motorOutputs->motorC);
-    esc_pwm_set_duty_cycle(MOTOR_D, (uint16_t) box->motorOutputs->motorD);
+    return values->proportional + values->intergral + values->derivative;
 }
 
-double pid_update(PID_t* pid, double error, uint64_t now) {
-    if (pid->prevTimeUS == 0) {
-        pid->prevTimeUS = now;
-        pid->prevError = error;
-        return 0.0;
-    }
-
-    long double dt = (now - pid->prevTimeUS) / 1e6;
-    pid->prevTimeUS = now;
-
-    // Proportional term
-    double pTerm = pid->kp * error;
-
-    // Integral term with anti-windup clamping
-    pid->intergral += error * dt;
-
-    // Clamp the integral accumulator
-    if (pid->intergral > pid->intLimit) {
-        pid->intergral = pid->intLimit;
-    } else if (pid->intergral < -pid->intLimit) {
-        pid->intergral = -pid->intLimit;
-    }
-
-    double iTerm = pid->ki * pid->intergral;
-
-    // Derivative term (basic - could add filtering later)
-    double derivative = (error - pid->prevError) / dt;
-    double dTerm = pid->kd * derivative;
-
-    pid->prevError = error;
-
-    return pTerm + iTerm + dTerm;
-}
-
-void pid_reset(PID_t* pid) {
+void pid_reset(PIDResult_t* pid) {
     if (pid) {
+        pid->proportional = 0.0;
         pid->intergral = 0.0;
+        pid->derivative = 0.0;
         pid->prevError = 0.0;
-        pid->prevTimeUS = 0; // Reset timing if your PID structure has this field
     }
 }
 
-void timer_task_callback_init(int periodUS, BlackBox_t* box, void (*cb)(void*)) {
+void timer_task_callback_init(int periodUS, void (*cb)(void*)) {
 
     esp_timer_create_args_t config = {
-        .callback = cb,  // Function to execute
+        .callback = cb,                    // Function to execute
         .dispatch_method = ESP_TIMER_TASK, // Where the function is called from
-        .arg = box                         // Input argument
+        .arg = NULL                        // Input argument
     };
-    
+
     esp_timer_handle_t timerHandle = NULL;
     esp_timer_create(&config, &timerHandle);
     esp_timer_start_periodic(timerHandle, periodUS);
 }
 
+void pid_timer_init(void) {
+    const esp_timer_create_args_t args = {.callback = pid_callback, .dispatch_method = ESP_TIMER_ISR};
+
+    esp_timer_handle_t pid_timer = NULL;
+    esp_timer_create(&args, &pid_timer);
+    esp_timer_start_periodic(pid_timer, 2500); // µs
+}
+
+void pid_callback(void* args) {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    if (pidTaskHandle) {
+        vTaskNotifyGiveFromISR(pidTaskHandle, &xHigherPriorityTaskWoken);
+    }
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
 void battery_callback(void* args) {
-    
-    BlackBox_t* box = (BlackBox_t*) args;
-    if (!box) {
+
+    if (!droneData) {
         return;
     }
 
@@ -451,20 +338,18 @@ void battery_callback(void* args) {
 
     uint16_t battery;
     if (xQueueReceive(mcpxQueue, &battery, pdMS_TO_TICKS(MCPx_DELAY)) == pdTRUE) {
-        box->battery = battery;
-        // ESP_LOGI(TAG, "Battery: %d", box->battery);
+        droneData->battery = battery;
+        // ESP_LOGI(TAG, "Battery: %d", droneData->battery);
     }
 }
 
 void remote_data_callback(void* args) {
-    BlackBox_t* box = (BlackBox_t*) args;
-
-    if (!box) {
+    if (!droneData) {
         return;
     }
 
     // Only send telemetry when we have a valid, active link
-    if (!box->connectedToRemote || box->failsafeActive) {
+    if (!droneData->armed) {
         return;
     }
 
@@ -479,25 +364,25 @@ void remote_data_callback(void* args) {
     // Total                       = 15
 
     // Angles
-    package[0] = (int16_t) box->imuData->pitchAngle;
-    package[1] = (int16_t) box->imuData->rollAngle;
-    package[2] = (int16_t) box->imuData->yawAngle;
+    package[0] = (int16_t) imuData->pitchAngle;
+    package[1] = (int16_t) imuData->rollAngle;
+    package[2] = (int16_t) imuData->yawAngle;
     // Rate
-    package[3] = (int16_t) box->imuData->pitchRate;
-    package[4] = (int16_t) box->imuData->rollRate;
-    package[5] = (int16_t) box->imuData->yawRate;
+    package[3] = (int16_t) imuData->pitchRate;
+    package[4] = (int16_t) imuData->rollRate;
+    package[5] = (int16_t) imuData->yawRate;
     // Flight mode
-    package[6] = (int16_t) box->mode;
+    package[6] = (int16_t) droneData->mode;
     // PID outputs
-    package[7] = (int16_t) box->motorInputs->pitchPID;
-    package[8] = (int16_t) box->motorInputs->rollPID;
-    package[9] = (int16_t) box->motorInputs->yawPID;
+    package[7] = (int16_t) outputPID->pitch_pid;
+    package[8] = (int16_t) outputPID->roll_pid;
+    package[9] = (int16_t) outputPID->yaw_pid;
     // Motor periods
-    package[10] = box->motorOutputs->motorA;
-    package[11] = box->motorOutputs->motorB;
-    package[12] = box->motorOutputs->motorC;
-    package[13] = box->motorOutputs->motorD;
-    package[14] = box->battery;
+    package[10] = motors->motorA;
+    package[11] = motors->motorB;
+    package[12] = motors->motorC;
+    package[13] = motors->motorD;
+    package[14] = droneData->battery;
 
     xQueueSendToBack(radioTransmitterQueue, package, 0);
 }

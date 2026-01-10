@@ -77,8 +77,8 @@ static esp_err_t emergancy_interrupt_init(void);
 // Handle for the remote_controller FreeRTOS task
 TaskHandle_t remoteTaskHandle = NULL;
 // Button states
-button_state_t mode_button = {.pin = 33, .pushAllowed = 1};
-button_state_t emergency_button = {.pin = 32, .pushAllowed = 1};
+button_state_t mode_button = {.pin = 32, .pushAllowed = 1};
+button_state_t emergency_button = {.pin = 33, .pushAllowed = 1};
 // Logging tag
 #define TAG "REMOTE"
 

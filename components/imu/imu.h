@@ -30,7 +30,6 @@ typedef struct {
     double rollRate;
     double yawAngle;
     double yawRate;
-    uint64_t prevTime;
 } Telemitry_t;
 
 void imu_init(void);

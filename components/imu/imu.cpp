@@ -33,7 +33,6 @@ static void imu_data_callback(BNO08x* imu) {
         return;
 
     Telemitry_t data;
-    data.prevTime = esp_timer_get_time();
 
     // Gyro rates
     bno08x_gyro_t velocity = imu->rpt.cal_gyro.get();
