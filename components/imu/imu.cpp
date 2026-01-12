@@ -41,8 +41,8 @@ static void imu_data_callback(BNO08x* imu) {
     data.yawRate = RAD_2_DEG(velocity.z); // Z-axis -> Yaw
 
     bno08x_euler_angle_t euler = imu->rpt.rv_ARVR_stabilized_game.get_euler();
-    data.rollAngle = euler.x; // X-axis -> Roll
-    data.pitchAngle = euler.y; // Y-axis -> Pitch
+    data.pitchAngle = euler.x; // X-axis -> Pitch
+    data.rollAngle = euler.y; // Y-axis -> Roll
     data.yawAngle = euler.z;   // Z-axis -> Yaw
 
     if (imuQueue) {

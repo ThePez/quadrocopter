@@ -20,6 +20,9 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#define MCPx_CS_PIN_DRONE 26 // Drone
+#define MCPx_CS_PIN_REMOTE 25 // Remote
+
 #define MCPx_STACK (configMINIMAL_STACK_SIZE * 2)
 #define MCPx_PRIORITY (tskIDLE_PRIORITY + 4)
 #define MCPx_QUEUE_LENGTH 5
@@ -43,17 +46,18 @@
 #define MCP3208_SINGLE_CHANNEL_MASK(channel) (0x0600 | ((channel & 0x0007) << 6))
 #define MCP3208_DIFFERENTIAL_CHANNEL_MASK(channel) (0x0400 | ((channel & 0x0007) << 6))
 
-/**
- * Initializes and starts the FreeRTOS controller task for the MCPx ADC module.
- *
- * Allocates task parameters, sets the selected active ADC channels, and
- * spawns the task responsible for reading values from the MCP3208 device.
- *
- * @param spiMutex Pointer to the SPI mutex used to ensure exclusive bus access.
- * @param channels Bitmask defining which channels should be sampled.
- * @param spiHost SPI host ID where the MCP3208 is connected.
- */
-void mcpx_task_init(SemaphoreHandle_t* spiMutex, uint8_t channels, spi_host_device_t spiHost, uint8_t cs);
+    /**
+     * Initializes and starts the FreeRTOS controller task for the MCPx ADC module.
+     *
+     * Allocates task parameters, sets the selected active ADC channels, and
+     * spawns the task responsible for reading values from the MCP3208 device.
+     *
+     * @param spiMutex Pointer to the SPI mutex used to ensure exclusive bus access.
+     * @param channels Bitmask defining which channels should be sampled.
+     * @param spiHost SPI host ID where the MCP3208 is connected.
+     */
+    void
+    mcpx_task_init(SemaphoreHandle_t* spiMutex, uint8_t channels, spi_host_device_t spiHost, uint8_t cs);
 
 extern TaskHandle_t mcpxTaskHandle;
 extern QueueHandle_t mcpxQueue;

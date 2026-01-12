@@ -94,8 +94,8 @@ void app_main(void) {
     spi_bus_setup(VSPI_HOST);
     spi_bus_setup(HSPI_HOST);
 
-    radio_module_init(&spiHMutex, HSPI_HOST);
-    mcpx_task_init(&spiVMutex, 0x1F, VSPI_HOST, 25); // Remote MCP3208 cs pin is 25
+    radio_module_init(&spiHMutex, HSPI_HOST, NRF24L01PLUS_CS_PIN_REMOTE); // Remote NRF CS pin is 26
+    mcpx_task_init(&spiVMutex, 0x1F, VSPI_HOST, MCPx_CS_PIN_REMOTE); // Remote MCP3208 cs pin is 25
 
     mode_swap_interrupt_init();
     emergancy_interrupt_init();
@@ -127,7 +127,7 @@ static void remote_controller(void) {
             // Was a joystick pressed?
             if (xTaskNotifyWait(0, 0xFFFFFFFF, &notifyValue, 0) == pdTRUE) {
                 switch (notifyValue) {
-                case 33: // Flight Mode
+                case 32: // Flight Mode
                     modePressed = 1;
                     if (armed) {
                         flightMode ^= 1;
@@ -135,7 +135,7 @@ static void remote_controller(void) {
                     }
                     break;
 
-                case 32: // Emergancy motor shutoff
+                case 33: // Emergancy motor shutoff
                     emergencyPressed = 1;
                     if (armed) {
                         emergencyPressed = 0;

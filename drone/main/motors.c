@@ -94,6 +94,12 @@ esp_err_t esc_pwm_init(void) {
         CHECK_ERR(mcpwm_timer_start_stop(pwm_timers[i], MCPWM_TIMER_START_NO_STOP), "Failed to start PWM timer");
     }
 
+    // Ensure all motors are completely off on startup.
+    for (uint8_t i = 0; i < NUMBER_OF_MOTORS; i++) {
+        
+        esc_pwm_set_duty_cycle(i, MOTOR_SPEED_MIN);
+    }
+
     ESP_LOGI(TAG, "ESC PWM initialization completed successfully");
     return ESP_OK;
 }

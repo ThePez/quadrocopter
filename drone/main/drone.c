@@ -15,7 +15,7 @@
 #include "nrf24l01plus.h"
 
 #define TAG "DRONE"
-#define FAILSAFE_TIMEOUT_US 1000000 // 1 second
+#define FAILSAFE_TIMEOUT_US 1500000 // 1.5 second
 #define PID_LOOP_FREQ 2500          // 400 Hz -> 2.5ms -> 2500us
 #define PID_INT_LIMIT 400
 
@@ -27,9 +27,9 @@ TaskHandle_t inputTaskhandle = NULL;
 TaskHandle_t pidTaskHandle = NULL;
 
 // Set default Scalers for the PID structs
-static PIDParameters_t ratePid = {.kp = 0.7, .ki = 2.500, .kd = 0.02, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
-static PIDParameters_t rate_z_Pid = {.kp = 1, .ki = 4.000, .kd = 0.00, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
-static PIDParameters_t anglePid = {.kp = 0.4, .ki = 0.000, .kd = 0.00, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
+static PIDParameters_t ratePid = {.kp = 0.7, .ki = 0.00, .kd = 0.00, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
+static PIDParameters_t rateZPid = {.kp = 0.2, .ki = 0.00, .kd = 0.00, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
+static PIDParameters_t anglePid = {.kp = 0.4, .ki = 0.00, .kd = 0.00, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
 
 // Various configs for general operation
 static DroneConfig_t* droneData = NULL;
@@ -72,8 +72,8 @@ void app_main(void) {
     memory_init();
 
     /* Helper tasks */
-    radio_module_init(&spiHMutex, HSPI_HOST);
-    mcpx_task_init(&spiHMutex, 0x02, HSPI_HOST, 33); // DRONE MCP3208 CS pin is 33
+    radio_module_init(&spiHMutex, HSPI_HOST, NRF24L01PLUS_CS_PIN_DRONE);
+    mcpx_task_init(&spiHMutex, 0x02, HSPI_HOST, MCPx_CS_PIN_DRONE); // DRONE MCP3208 CS pin is 26
 
     // the gpio_isr_install happens in radio setup -> it has been disabled in the BNO085x driver init
     imu_init(); // Start the C++ task
@@ -84,14 +84,16 @@ void app_main(void) {
     }
 
     // Initialise a callback task for returning info back to the remote
-    timer_task_callback_init(100000, remote_data_callback); // Interval of 100ms
-    timer_task_callback_init(50000, battery_callback);      // Interval of 50ms
+    timer_task_callback_init(200000, remote_data_callback); // Interval of 200ms
+    timer_task_callback_init(1000000, battery_callback);    // Interval of 1 second
 
     /* Create 3 control Tasks */
     xTaskCreatePinnedToCore(&pid_control, "PID_Task", SYS_STACK, NULL, SYS_PRIO + 2, &pidTaskHandle, (BaseType_t) 1);
     xTaskCreatePinnedToCore(&sensor_control, "SENSOR_TASK", SYS_STACK, NULL, SYS_PRIO, &sensorTaskHandle,
                             (BaseType_t) 0);
     xTaskCreatePinnedToCore(&input_control, "INPUT_TASK", SYS_STACK, NULL, SYS_PRIO, &inputTaskhandle, (BaseType_t) 0);
+
+    vTaskDelay(pdMS_TO_TICKS(10));
 
     // Initialise the timer for PID Task signalling
     pid_timer_init();
@@ -106,12 +108,18 @@ void sensor_control(void* pvParams) {
     // Start on the backup buffer
     Telemitry_t* buffer = &imuBufB;
 
+    ESP_LOGI(TAG, "Sensor Task Setup");
+
     while (1) {
-        xQueueReceive(imuQueue, buffer, portMAX_DELAY);
-        // Set active buffer
-        imuData = buffer;
-        // Swap buffer to use on next sensor input
-        buffer = (buffer == &imuBufA) ? &imuBufB : &imuBufA;
+        if (xQueueReceive(imuQueue, buffer, portMAX_DELAY) == pdTRUE) {
+            // Set active buffer
+            imuData = buffer;
+            // Swap buffer to use on next sensor input
+            buffer = (buffer == &imuBufA) ? &imuBufB : &imuBufA;
+            // ESP_LOGI(TAG, "Pitch: %f, Roll: %f, Yaw: %f", imuData->pitchAngle, imuData->rollAngle,
+            // imuData->yawAngle);
+            // vTaskDelay(pdMS_TO_TICKS(10));
+        }
     }
 }
 
@@ -123,6 +131,8 @@ void input_control(void* pvParams) {
     while (!radioReceiverQueue) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
+
+    ESP_LOGI(TAG, "Input Task Setup");
 
     while (1) {
         if (xQueueReceive(radioReceiverQueue, radioPayload, portMAX_DELAY) == pdTRUE) {
@@ -146,6 +156,8 @@ void input_control(void* pvParams) {
 }
 
 void pid_control(void* pvParams) {
+
+    ESP_LOGI(TAG, "PID Task Setup");
 
     while (1) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -179,7 +191,7 @@ void pid_control(void* pvParams) {
 
         outputPID->pitch_pid = pid_update(&ratePid, pidRate->pitch, pitchRateSetpoint, imuData->pitchRate);
         outputPID->roll_pid = pid_update(&ratePid, pidRate->roll, rollRateSetpoint, imuData->rollRate);
-        outputPID->yaw_pid = pid_update(&rate_z_Pid, pidRate->yaw, yawRateSetpoint, imuData->yawRate);
+        outputPID->yaw_pid = pid_update(&rateZPid, pidRate->yaw, yawRateSetpoint, imuData->yawRate);
 
         // Update ESCs
         update_escs();
@@ -211,6 +223,18 @@ void memory_init(void) {
     if (!pidRate->pitch || !pidRate->roll || !pidRate->yaw || !pidAngle->pitch || !pidAngle->roll) {
         esp_restart();
     }
+
+    pidRate->pitch->intergral = 0;
+    pidRate->roll->intergral = 0;
+    pidRate->yaw->intergral = 0;
+
+    pidAngle->pitch->intergral = 0;
+    pidAngle->roll->intergral = 0;
+    pidAngle->yaw->intergral = 0;
+
+    droneData->armed = 0;
+    droneData->lastRemoteTime = 0;
+    droneData->mode = ACRO;
 }
 
 void set_flight_mode(FlightMode_t mode) {
@@ -247,22 +271,30 @@ void failsafe(void) {
 
 void update_escs(void) {
 
-    double throttle = remoteIn->throttle;
-    // Front left
-    double speed = throttle - outputPID->pitch_pid + outputPID->roll_pid - outputPID->yaw_pid;
-    motors->motorA = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
+    // Low throttle input (ie off)
+    if (remoteIn->throttle < 1050) {
+        motors->motorA = MIN_THROTTLE;
+        motors->motorB = MIN_THROTTLE;
+        motors->motorC = MIN_THROTTLE;
+        motors->motorD = MIN_THROTTLE;
+    } else {
+        double throttle = remoteIn->throttle;
+        // Front left
+        double speed = throttle - outputPID->pitch_pid + outputPID->roll_pid - outputPID->yaw_pid;
+        motors->motorA = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
 
-    // Rear left
-    speed = throttle + outputPID->pitch_pid + outputPID->roll_pid + outputPID->yaw_pid;
-    motors->motorB = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
+        // Rear left
+        speed = throttle + outputPID->pitch_pid + outputPID->roll_pid + outputPID->yaw_pid;
+        motors->motorB = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
 
-    // Rear right
-    speed = throttle + outputPID->pitch_pid - outputPID->roll_pid - outputPID->yaw_pid;
-    motors->motorC = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
+        // Rear right
+        speed = throttle + outputPID->pitch_pid - outputPID->roll_pid - outputPID->yaw_pid;
+        motors->motorC = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
 
-    // Front right
-    speed = throttle - outputPID->pitch_pid - outputPID->roll_pid + outputPID->yaw_pid;
-    motors->motorD = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
+        // Front right
+        speed = throttle - outputPID->pitch_pid - outputPID->roll_pid + outputPID->yaw_pid;
+        motors->motorD = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
+    }
 
     esc_pwm_set_duty_cycle(MOTOR_A, motors->motorA);
     esc_pwm_set_duty_cycle(MOTOR_B, motors->motorB);
@@ -312,10 +344,10 @@ void timer_task_callback_init(int periodUS, void (*cb)(void*)) {
 
 void pid_timer_init(void) {
     const esp_timer_create_args_t args = {.callback = pid_callback, .dispatch_method = ESP_TIMER_ISR};
-
     esp_timer_handle_t pid_timer = NULL;
     esp_timer_create(&args, &pid_timer);
     esp_timer_start_periodic(pid_timer, 2500); // µs
+    ESP_LOGI(TAG, "PID TIMER Setup");
 }
 
 void pid_callback(void* args) {
@@ -327,11 +359,6 @@ void pid_callback(void* args) {
 }
 
 void battery_callback(void* args) {
-
-    if (!droneData) {
-        return;
-    }
-
     if (!mcpxQueue) {
         return;
     }
@@ -344,10 +371,6 @@ void battery_callback(void* args) {
 }
 
 void remote_data_callback(void* args) {
-    if (!droneData) {
-        return;
-    }
-
     // Only send telemetry when we have a valid, active link
     if (!droneData->armed) {
         return;

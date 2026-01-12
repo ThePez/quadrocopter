@@ -39,7 +39,8 @@ extern QueueHandle_t radioTransmitterQueue;
 #define RADIO_PAYLOAD_WIDTH 32
 
 // Actual Pins numbers used on the ESP chip
-#define NRF24L01PLUS_CS_PIN 26
+#define NRF24L01PLUS_CS_PIN_DRONE 33 // Drone
+#define NRF24L01PLUS_CS_PIN_REMOTE 26 // Remote
 #define NRF24L01PLUS_CE_PIN 27
 #define NRF24L01PLUS_IQR_PIN 35
 
@@ -125,7 +126,7 @@ extern QueueHandle_t radioTransmitterQueue;
  * @param spiMutex Pointer to the SPI bus mutex for synchronized SPI access.
  * @param spiHost  The SPI host device connected to the NRF24L01+ module.
  */
-void radio_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost);
+void radio_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost, uint8_t cs);
 
 /**
  * Initializes the SPI interface for the NRF24L01+ module.
@@ -136,7 +137,7 @@ void radio_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost);
  * @param spi_bus SPI host bus to attach the device to.
  * @return ESP_OK on success, ESP_FAIL on configuration error.
  */
-esp_err_t nrf24l01plus_spi_init(spi_host_device_t spi_bus);
+esp_err_t nrf24l01plus_spi_init(spi_host_device_t spi_bus, uint8_t cs);
 
 /**
  * Configures the IRQ pin for falling-edge interrupts and installs the ISR.
@@ -159,7 +160,7 @@ esp_err_t nrf24l01plus_interrupt_init(void* handler);
  * @param handler Optional IRQ handler (NULL if unused).
  * @return ESP_OK on success, ESP_FAIL on initialization failure.
  */
-esp_err_t nrf24l01plus_init(spi_host_device_t spi_bus, void* handler);
+esp_err_t nrf24l01plus_init(spi_host_device_t spi_bus, void* handler, uint8_t cs);
 
 /**
  * Sends an 8-bit instruction command to the NRF24L01+ by SPI.

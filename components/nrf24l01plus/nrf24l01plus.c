@@ -123,11 +123,11 @@ static uint8_t useIQR = 0;
 
 ////////////////////////////// FreeRTOS Functions /////////////////////////////
 
-void radio_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost) {
+void radio_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost, uint8_t cs) {
 
     // Setup the NRF24L01plus IC
     xSemaphoreTake(*spiMutex, portMAX_DELAY);
-    nrf24l01plus_init(spiHost, &radio_isr_handler);
+    nrf24l01plus_init(spiHost, &radio_isr_handler, cs);
     xSemaphoreGive(*spiMutex);
 
     // Ensure the event group is created
@@ -196,6 +196,7 @@ static void control_task(void* pvParams) {
             // Data available
             xSemaphoreGive(spiMutex);
             // Notify the Receiver Task
+            ESP_LOGI(TAG, "Radio: Data Available ISR");
             xEventGroupSetBits(radioEventGroup, RADIO_RX_READY);
         } else if (status & NRF24L01PLUS_TX_DS) {
 
@@ -205,6 +206,7 @@ static void control_task(void* pvParams) {
             // Put device back into recieve mode
             nrf24l01plus_receive_mode();
             xSemaphoreGive(spiMutex);
+            ESP_LOGI(TAG, "Radio: Data Sent ISR");
             // Notify the Transmitter Task that further sends are now allowed
             xEventGroupSetBits(radioEventGroup, RADIO_TX_READY);
         } else {
@@ -269,12 +271,12 @@ static void transmitter_task(void* pvParams) {
 
 ////////////////////////////// Chipset functions //////////////////////////////
 
-esp_err_t nrf24l01plus_spi_init(spi_host_device_t spiBus) {
+esp_err_t nrf24l01plus_spi_init(spi_host_device_t spiBus, uint8_t cs) {
 
     // Setup the SPI for the radio module
     spi_device_interface_config_t deviceConfig = {
-        .clock_speed_hz = 2000000,           // 1 MHz Clock speed
-        .spics_io_num = NRF24L01PLUS_CS_PIN, // Chip Select pin for device
+        .clock_speed_hz = 2000000,           // 2 MHz Clock speed
+        .spics_io_num = cs, // Chip Select pin for device
         .queue_size = 1,                     // Number of pending transactions allowed
         .mode = 0 /* SPI mode, representing a pair of (CPOL, CPHA). CPOL = 0 (clock idles low)
                     CPHA = 0 (data is sampled on the rising edge, changed on the falling edge) */
@@ -307,7 +309,7 @@ esp_err_t nrf24l01plus_interrupt_init(void* handler) {
     return ESP_OK;
 }
 
-esp_err_t nrf24l01plus_init(spi_host_device_t spiBus, void* handler) {
+esp_err_t nrf24l01plus_init(spi_host_device_t spiBus, void* handler, uint8_t cs) {
 
     // Setup the NRF24L01plus CE pin
     CHECK_ERR(gpio_set_direction(NRF24L01PLUS_CE_PIN, GPIO_MODE_INPUT_OUTPUT), "CE pin setup failed");
@@ -318,7 +320,7 @@ esp_err_t nrf24l01plus_init(spi_host_device_t spiBus, void* handler) {
     }
 
     // Configure the SPI
-    CHECK_ERR(nrf24l01plus_spi_init(spiBus), "Spi setup failed");
+    CHECK_ERR(nrf24l01plus_spi_init(spiBus, cs), "Spi setup failed");
     // Set CE low for idle state
     NRF_CE_LOW();
 
