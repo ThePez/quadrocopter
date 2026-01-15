@@ -41,6 +41,9 @@
 #define MIN_THROTTLE 1000.0
 #define MAX_THROTTLE 2000.0
 
+#define MODE_BUTTON_PIN 33
+#define SHUTOFF_BUTTON_PIN 25
+
 #define CHECK_ERR(code, msg)                                                                                           \
     do {                                                                                                               \
         esp_err_t err = (code);                                                                                        \

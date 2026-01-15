@@ -39,10 +39,10 @@ extern QueueHandle_t radioTransmitterQueue;
 #define RADIO_PAYLOAD_WIDTH 32
 
 // Actual Pins numbers used on the ESP chip
-#define NRF24L01PLUS_CS_PIN_DRONE 33 // Drone
+#define NRF24L01PLUS_CS_PIN_DRONE 26 // Drone
 #define NRF24L01PLUS_CS_PIN_REMOTE 26 // Remote
 #define NRF24L01PLUS_CE_PIN 27
-#define NRF24L01PLUS_IQR_PIN 35
+#define NRF24L01PLUS_IQR_PIN 32
 
 #define NRF24L01PLUS_TX_ADR_WIDTH 5    // 5 unsigned chars TX(RX) address width
 #define NRF24L01PLUS_TX_PLOAD_WIDTH 32 // 32 unsigned chars TX payload

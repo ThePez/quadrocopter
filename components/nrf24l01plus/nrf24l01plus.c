@@ -128,6 +128,16 @@ void radio_module_init(SemaphoreHandle_t* spiMutex, spi_host_device_t spiHost, u
     // Setup the NRF24L01plus IC
     xSemaphoreTake(*spiMutex, portMAX_DELAY);
     nrf24l01plus_init(spiHost, &radio_isr_handler, cs);
+
+    // Diagnostic
+    uint8_t config = nrf24l01plus_read_register(NRF24L01PLUS_CONFIG);
+    uint8_t status = nrf24l01plus_read_register(NRF24L01PLUS_STATUS);
+    uint8_t rf_ch = nrf24l01plus_read_register(NRF24L01PLUS_RF_CH);
+    ESP_LOGI(TAG, "NRF24 Init Check:");
+    ESP_LOGI(TAG, "  CONFIG: 0x%02X (expected 0x1B)", config);
+    ESP_LOGI(TAG, "  STATUS: 0x%02X (expected 0x0E)", status);
+    ESP_LOGI(TAG, "  RF_CH: 0x%02X (expected 0x%02X)", rf_ch, DEFAULT_RF_CHANNEL);
+
     xSemaphoreGive(*spiMutex);
 
     // Ensure the event group is created
@@ -170,16 +180,16 @@ static void control_task(void* pvParams) {
     SemaphoreHandle_t spiMutex = *((SemaphoreHandle_t*) pvParams);
 
     xSemaphoreTake(spiMutex, portMAX_DELAY);
-    uint8_t clearBoth = NRF24L01PLUS_TX_DS | NRF24L01PLUS_RX_DR;
+    uint8_t clearAll = NRF24L01PLUS_TX_DS | NRF24L01PLUS_RX_DR | NRF24L01PLUS_MAX_RT;
     nrf24l01plus_flush_rx();
     nrf24l01plus_flush_tx();
-    nrf24l01plus_write_register(NRF24L01PLUS_STATUS, clearBoth); // Clear interrupts
+    nrf24l01plus_write_register(NRF24L01PLUS_STATUS, clearAll); // Clear interrupts
     xSemaphoreGive(spiMutex);
 
-    // Enable interrupts now that the controller task is setup
-    gpio_intr_enable(NRF24L01PLUS_IQR_PIN);
     // Set bit for TX ready
     xEventGroupSetBits(radioEventGroup, RADIO_TX_READY);
+    // Enable interrupts now that the controller task is setup
+    gpio_intr_enable(NRF24L01PLUS_IQR_PIN);
 
     ESP_LOGI(TAG, "Control task initialised");
 
@@ -191,30 +201,29 @@ static void control_task(void* pvParams) {
         xSemaphoreTake(spiMutex, portMAX_DELAY);
         // Read status register
         uint8_t status = nrf24l01plus_read_register(NRF24L01PLUS_STATUS);
+        nrf24l01plus_write_register(NRF24L01PLUS_STATUS, clearAll); // Clear interrupts
         if (status & NRF24L01PLUS_RX_DR) {
-
             // Data available
             xSemaphoreGive(spiMutex);
             // Notify the Receiver Task
-            ESP_LOGI(TAG, "Radio: Data Available ISR");
+            // ESP_LOGI(TAG, "Radio: Data Available ISR");
             xEventGroupSetBits(radioEventGroup, RADIO_RX_READY);
         } else if (status & NRF24L01PLUS_TX_DS) {
-
             // Data was sent
-            // Clear TX bit
-            nrf24l01plus_write_register(NRF24L01PLUS_STATUS, NRF24L01PLUS_TX_DS);
             // Put device back into recieve mode
             nrf24l01plus_receive_mode();
             xSemaphoreGive(spiMutex);
-            ESP_LOGI(TAG, "Radio: Data Sent ISR");
+            // ESP_LOGI(TAG, "Radio: Data Sent ISR");
             // Notify the Transmitter Task that further sends are now allowed
             xEventGroupSetBits(radioEventGroup, RADIO_TX_READY);
         } else {
 
             // Failsafe to ensure SPI is allowed again, this shouldn't ever happen
-            nrf24l01plus_write_register(NRF24L01PLUS_STATUS, NRF24L01PLUS_TX_DS | NRF24L01PLUS_RX_DR);
+            nrf24l01plus_flush_tx();
+            nrf24l01plus_flush_rx();
+            nrf24l01plus_receive_mode();
             xSemaphoreGive(spiMutex);
-            ESP_LOGI(TAG, "Radio: Failsafe ISR");
+            ESP_LOGI(TAG, "Radio: Failsafe ISR, status reg: 0x%02x", status);
         }
     }
 }
@@ -275,11 +284,11 @@ esp_err_t nrf24l01plus_spi_init(spi_host_device_t spiBus, uint8_t cs) {
 
     // Setup the SPI for the radio module
     spi_device_interface_config_t deviceConfig = {
-        .clock_speed_hz = 2000000,           // 2 MHz Clock speed
-        .spics_io_num = cs, // Chip Select pin for device
-        .queue_size = 1,                     // Number of pending transactions allowed
-        .mode = 0 /* SPI mode, representing a pair of (CPOL, CPHA). CPOL = 0 (clock idles low)
-                    CPHA = 0 (data is sampled on the rising edge, changed on the falling edge) */
+        .clock_speed_hz = 2000000, // 2 MHz Clock speed
+        .spics_io_num = cs,        // Chip Select pin for device
+        .queue_size = 1,           // Number of pending transactions allowed
+        .mode = 0                  /* SPI mode, representing a pair of (CPOL, CPHA). CPOL = 0 (clock idles low)
+                                     CPHA = 0 (data is sampled on the rising edge, changed on the falling edge) */
     };
 
     return spi_bus_add_device(spiBus, &deviceConfig, &nrf24l01SpiHandle);
@@ -290,7 +299,7 @@ esp_err_t nrf24l01plus_interrupt_init(void* handler) {
     gpio_config_t config = {
         .mode = GPIO_MODE_INPUT,                        // Direction of the pin
         .pin_bit_mask = (1ULL << NRF24L01PLUS_IQR_PIN), // Pin is listed here as a bit mask
-        .pull_up_en = GPIO_PULLUP_DISABLE,              // No internal pull-up (IRQ is active low)
+        .pull_up_en = GPIO_PULLUP_ENABLE,               // No internal pull-up (IRQ is active low)
         .pull_down_en = GPIO_PULLDOWN_DISABLE,          // No internal pull-down
         .intr_type = GPIO_INTR_NEGEDGE                  // Interrupt on the falling edge
     };
@@ -326,7 +335,8 @@ esp_err_t nrf24l01plus_init(spi_host_device_t spiBus, void* handler, uint8_t cs)
 
     // Power on the IC
     CHECK_ERR(nrf24l01plus_write_register(NRF24L01PLUS_CONFIG, 0x7A), "Power-up failed");
-    esp_rom_delay_us(4500); // 4.5 ms spin delay
+    // esp_rom_delay_us(4500); // 4.5 ms spin delay
+    vTaskDelay(pdMS_TO_TICKS(5));
     // Writes TX_Address to nRF24L01plus
     CHECK_ERR(nrf24l01plus_write_buffer(NRF24L01PLUS_TX_ADDR, defaultAddress, 5), "TX address write failed");
     // Writes RX_Address to nRF24L01
@@ -429,8 +439,15 @@ esp_err_t nrf24l01plus_read_buffer(uint8_t regAddress, uint8_t* buffer, int buff
 
 int nrf24l01plus_recieve_packet(uint8_t* rxBuffer) {
 
-    uint8_t status = nrf24l01plus_read_register(NRF24L01PLUS_STATUS); // Read STATUS register
-    if (status & NRF24L01PLUS_RX_DR) {                                // Data Ready RX FIFO interrupt triggered
+    // Preset for entering function via the IQR interrupt
+    uint8_t status = NRF24L01PLUS_RX_DR;
+
+    if (!useIQR) {
+        // override the status value if not using IQR interrupts
+        status = nrf24l01plus_read_register(NRF24L01PLUS_STATUS); // Read STATUS register
+    }
+
+    if (status & NRF24L01PLUS_RX_DR) { // Data Ready RX FIFO interrupt triggered
 
         esp_err_t err = nrf24l01plus_read_buffer(NRF24L01PLUS_RD_RX_PLOAD, rxBuffer, NRF24L01PLUS_TX_PLOAD_WIDTH);
         if (err != ESP_OK) {
@@ -444,11 +461,14 @@ int nrf24l01plus_recieve_packet(uint8_t* rxBuffer) {
             return ESP_FAIL; // Error occurred
         }
 
-        err = nrf24l01plus_write_register(NRF24L01PLUS_STATUS, NRF24L01PLUS_RX_DR); // Clear RX_DR
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to clear RX_DR flag");
-            return ESP_FAIL; // Error occurred
+        if (!useIQR) {
+            err = nrf24l01plus_write_register(NRF24L01PLUS_STATUS, NRF24L01PLUS_RX_DR); // Clear RX_DR
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to clear RX_DR flag");
+                return ESP_FAIL; // Error occurred
+            }
         }
+
         return ESP_OK; // Packet received successfully
     }
 

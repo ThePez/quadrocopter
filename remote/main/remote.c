@@ -77,8 +77,8 @@ static esp_err_t emergancy_interrupt_init(void);
 // Handle for the remote_controller FreeRTOS task
 TaskHandle_t remoteTaskHandle = NULL;
 // Button states
-button_state_t mode_button = {.pin = 32, .pushAllowed = 1};
-button_state_t emergency_button = {.pin = 33, .pushAllowed = 1};
+button_state_t mode_button = {.pin = MODE_BUTTON_PIN, .pushAllowed = 1};
+button_state_t emergency_button = {.pin = SHUTOFF_BUTTON_PIN, .pushAllowed = 1};
 // Logging tag
 #define TAG "REMOTE"
 
@@ -127,7 +127,7 @@ static void remote_controller(void) {
             // Was a joystick pressed?
             if (xTaskNotifyWait(0, 0xFFFFFFFF, &notifyValue, 0) == pdTRUE) {
                 switch (notifyValue) {
-                case 32: // Flight Mode
+                case MODE_BUTTON_PIN: // Flight Mode
                     modePressed = 1;
                     if (armed) {
                         flightMode ^= 1;
@@ -135,7 +135,7 @@ static void remote_controller(void) {
                     }
                     break;
 
-                case 33: // Emergancy motor shutoff
+                case SHUTOFF_BUTTON_PIN: // Emergancy motor shutoff
                     emergencyPressed = 1;
                     if (armed) {
                         emergencyPressed = 0;

@@ -73,7 +73,7 @@ void app_main(void) {
 
     /* Helper tasks */
     radio_module_init(&spiHMutex, HSPI_HOST, NRF24L01PLUS_CS_PIN_DRONE);
-    mcpx_task_init(&spiHMutex, 0x02, HSPI_HOST, MCPx_CS_PIN_DRONE); // DRONE MCP3208 CS pin is 26
+    mcpx_task_init(&spiHMutex, 0x04, HSPI_HOST, MCPx_CS_PIN_DRONE); // DRONE MCP3208 CS pin is 33
 
     // the gpio_isr_install happens in radio setup -> it has been disabled in the BNO085x driver init
     imu_init(); // Start the C++ task
@@ -266,7 +266,7 @@ void failsafe(void) {
     }
 
     // Reset the MCU
-    esp_restart();
+    // esp_restart();
 }
 
 void update_escs(void) {
@@ -355,6 +355,7 @@ void pid_callback(void* args) {
     if (pidTaskHandle) {
         vTaskNotifyGiveFromISR(pidTaskHandle, &xHigherPriorityTaskWoken);
     }
+    
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
