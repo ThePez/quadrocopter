@@ -13,8 +13,8 @@
 #include "common_functions.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "espnow_comm.h"
 #include "mcp3208.h"
-#include "nrf24l01plus.h"
 
 //////////////////////////// Function Prototypes /////////////////////////////
 
@@ -92,10 +92,10 @@ button_state_t emergency_button = {.pin = SHUTOFF_BUTTON_PIN, .pushAllowed = 1};
  */
 void app_main(void) {
     spi_bus_setup(VSPI_HOST);
-    spi_bus_setup(HSPI_HOST);
 
-    radio_module_init(&spiHMutex, HSPI_HOST, NRF24L01PLUS_CS_PIN_REMOTE); // Remote NRF CS pin is 26
     mcpx_task_init(&spiVMutex, 0x1F, VSPI_HOST, MCPx_CS_PIN_REMOTE); // Remote MCP3208 cs pin is 25
+
+    esp_now_module_init(drone_mac);
 
     mode_swap_interrupt_init();
     emergancy_interrupt_init();
@@ -108,7 +108,7 @@ static void remote_controller(void) {
     uint16_t adcPacket[16] = {0};
 
     // Idle until all queue's are created
-    while (!mcpxQueue || !radioTransmitterQueue || !radioReceiverQueue) {
+    while (!mcpxQueue || !wifiQueue) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
@@ -169,8 +169,8 @@ static void remote_controller(void) {
             adcPacket[5] = (uint16_t) flightMode;                  // Mode
 
             // Send the resulting packet to the radio task
-            if (radioTransmitterQueue && armed) {
-                xQueueSendToFront(radioTransmitterQueue, adcPacket, pdMS_TO_TICKS(5));
+            if (armed) {
+                esp_send_packet(adcPacket, 32);
             }
 
             if (emergencyShutdown) {
@@ -179,7 +179,7 @@ static void remote_controller(void) {
         }
 
         // Was data recieved back from the drone? (No waiting)
-        if (xQueueReceive(radioReceiverQueue, adcPacket, 0) == pdTRUE) {
+        if (xQueueReceive(wifiQueue, adcPacket, 0) == pdTRUE) {
             int16_t* data = (int16_t*) adcPacket;
             // If not armed don't print data
             if (!armed) {
@@ -190,7 +190,7 @@ static void remote_controller(void) {
                      "Mode: %s, Angles: P=%d R=%d Y=%d, Rates: P=%d R=%d Y=%d, PID: P=%d R=%d Y=%d, Motors: FL=%u "
                      "BL=%u BR=%u FR=%u BAT=%f",
                      data[6] ? "ANGLE" : "RATE", data[0], data[1], data[2], data[3], data[4], data[5], data[7], data[8],
-                     data[9], adcPacket[10], adcPacket[11], adcPacket[12], adcPacket[13], 
+                     data[9], adcPacket[10], adcPacket[11], adcPacket[12], adcPacket[13],
                      mapf(adcPacket[14], 0, 4096, 0, 16.8));
         }
     }

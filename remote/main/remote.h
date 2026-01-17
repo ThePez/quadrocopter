@@ -42,7 +42,7 @@
 #define MAX_THROTTLE 2000.0
 
 #define MODE_BUTTON_PIN 33
-#define SHUTOFF_BUTTON_PIN 25
+#define SHUTOFF_BUTTON_PIN 26
 
 #define CHECK_ERR(code, msg)                                                                                           \
     do {                                                                                                               \
