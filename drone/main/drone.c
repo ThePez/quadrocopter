@@ -10,9 +10,9 @@
 
 #include "drone.h"
 #include "common_functions.h"
+#include "espnow_comm.h"
 #include "mcp3208.h"
 #include "motors.h"
-#include "nrf24l01plus.h"
 
 #define TAG "DRONE"
 #define FAILSAFE_TIMEOUT_US 1500000 // 1.5 second
@@ -40,11 +40,6 @@ static PIDFeedback_t* pidAngle = NULL;
 
 static PIDFinal_t* outputPID = NULL;
 
-// IMU data containers
-static Telemitry_t imuBufA;
-static Telemitry_t imuBufB;
-static volatile Telemitry_t* imuData = &imuBufA;
-
 // Remote set point into
 static TargetParameters_t* remoteIn = NULL;
 
@@ -70,27 +65,24 @@ void app_main(void) {
 
     // If a failure occurs in the call, the ESP will reset
     memory_init();
+    
+    // Start the C++ task
+    imu_init(); 
 
-    /* Helper tasks */
-    radio_module_init(&spiHMutex, HSPI_HOST, NRF24L01PLUS_CS_PIN_DRONE);
-    mcpx_task_init(&spiHMutex, 0x04, HSPI_HOST, MCPx_CS_PIN_DRONE); // DRONE MCP3208 CS pin is 33
-
-    // the gpio_isr_install happens in radio setup -> it has been disabled in the BNO085x driver init
-    imu_init(); // Start the C++ task
+    // Setup ESP-NOW
+    esp_now_module_init(remote_mac);
 
     // Wait until both input queues are created
-    while (!radioReceiverQueue || !radioTransmitterQueue || !imuQueue) {
+    while (!wifiQueue) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
     // Initialise a callback task for returning info back to the remote
     timer_task_callback_init(200000, remote_data_callback); // Interval of 200ms
-    timer_task_callback_init(1000000, battery_callback);    // Interval of 1 second
+    // timer_task_callback_init(1000000, battery_callback);    // Interval of 1 second
 
-    /* Create 3 control Tasks */
+    /* Create 2 control Tasks */
     xTaskCreatePinnedToCore(&pid_control, "PID_Task", SYS_STACK, NULL, SYS_PRIO + 2, &pidTaskHandle, (BaseType_t) 1);
-    xTaskCreatePinnedToCore(&sensor_control, "SENSOR_TASK", SYS_STACK, NULL, SYS_PRIO, &sensorTaskHandle,
-                            (BaseType_t) 0);
     xTaskCreatePinnedToCore(&input_control, "INPUT_TASK", SYS_STACK, NULL, SYS_PRIO, &inputTaskhandle, (BaseType_t) 0);
 
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -99,43 +91,19 @@ void app_main(void) {
     pid_timer_init();
 }
 
-void sensor_control(void* pvParams) {
-
-    while (!imuQueue) {
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-
-    // Start on the backup buffer
-    Telemitry_t* buffer = &imuBufB;
-
-    ESP_LOGI(TAG, "Sensor Task Setup");
-
-    while (1) {
-        if (xQueueReceive(imuQueue, buffer, portMAX_DELAY) == pdTRUE) {
-            // Set active buffer
-            imuData = buffer;
-            // Swap buffer to use on next sensor input
-            buffer = (buffer == &imuBufA) ? &imuBufB : &imuBufA;
-            // ESP_LOGI(TAG, "Pitch: %f, Roll: %f, Yaw: %f", imuData->pitchAngle, imuData->rollAngle,
-            // imuData->yawAngle);
-            // vTaskDelay(pdMS_TO_TICKS(10));
-        }
-    }
-}
-
 void input_control(void* pvParams) {
 
     double inputReading;
 
     // Wait for the radio queue to be initialised
-    while (!radioReceiverQueue) {
+    while (!wifiQueue) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     ESP_LOGI(TAG, "Input Task Setup");
 
     while (1) {
-        if (xQueueReceive(radioReceiverQueue, radioPayload, portMAX_DELAY) == pdTRUE) {
+        if (xQueueReceive(wifiQueue, radioPayload, portMAX_DELAY) == pdTRUE) {
             droneData->lastRemoteTime = esp_timer_get_time();
             droneData->armed = 1;
             inputReading = mapf(radioPayload[1], 0, ADC_MAX, MIN_THROTTLE, MAX_THROTTLE);
@@ -199,7 +167,7 @@ void pid_control(void* pvParams) {
 }
 
 void memory_init(void) {
-    radioPayload = pvPortMalloc(sizeof(uint16_t) * (RADIO_PAYLOAD_WIDTH / 2));
+    radioPayload = pvPortMalloc(sizeof(uint16_t) * 16);
     pidRate = pvPortMalloc(sizeof(PIDFeedback_t));
     pidAngle = pvPortMalloc(sizeof(PIDFeedback_t));
     remoteIn = pvPortMalloc(sizeof(TargetParameters_t));
@@ -281,19 +249,19 @@ void update_escs(void) {
         double throttle = remoteIn->throttle;
         // Front left
         double speed = throttle - outputPID->pitch_pid + outputPID->roll_pid - outputPID->yaw_pid;
-        motors->motorA = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
+        motors->motorA = constrainf(speed, MIN_THROTTLE + 50, MAX_THROTTLE);
 
         // Rear left
         speed = throttle + outputPID->pitch_pid + outputPID->roll_pid + outputPID->yaw_pid;
-        motors->motorB = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
+        motors->motorB = constrainf(speed, MIN_THROTTLE + 50, MAX_THROTTLE);
 
         // Rear right
         speed = throttle + outputPID->pitch_pid - outputPID->roll_pid - outputPID->yaw_pid;
-        motors->motorC = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
+        motors->motorC = constrainf(speed, MIN_THROTTLE + 50, MAX_THROTTLE);
 
         // Front right
         speed = throttle - outputPID->pitch_pid - outputPID->roll_pid + outputPID->yaw_pid;
-        motors->motorD = constrainf(speed, MIN_THROTTLE, MAX_THROTTLE);
+        motors->motorD = constrainf(speed, MIN_THROTTLE + 50, MAX_THROTTLE);
     }
 
     esc_pwm_set_duty_cycle(MOTOR_A, motors->motorA);
@@ -355,7 +323,7 @@ void pid_callback(void* args) {
     if (pidTaskHandle) {
         vTaskNotifyGiveFromISR(pidTaskHandle, &xHigherPriorityTaskWoken);
     }
-    
+
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
@@ -366,8 +334,8 @@ void battery_callback(void* args) {
 
     uint16_t battery;
     if (xQueueReceive(mcpxQueue, &battery, pdMS_TO_TICKS(MCPx_DELAY)) == pdTRUE) {
-        droneData->battery = battery;
-        // ESP_LOGI(TAG, "Battery: %d", droneData->battery);
+        droneData->battery = mapf(battery, 0, 1000, 0, ADC_MAX);
+        ESP_LOGI(TAG, "Battery: %d", droneData->battery);
     }
 }
 
@@ -377,7 +345,7 @@ void remote_data_callback(void* args) {
         return;
     }
 
-    int16_t package[RADIO_PAYLOAD_WIDTH / 2]; // 16 words
+    int16_t package[16]; // 16 words
 
     // Angles: pitch, roll, yaw     = 3
     // Rates: pitch, roll, yaw      = 3
@@ -408,5 +376,8 @@ void remote_data_callback(void* args) {
     package[13] = motors->motorD;
     package[14] = droneData->battery;
 
-    xQueueSendToBack(radioTransmitterQueue, package, 0);
+    esp_err_t result = esp_send_packet(&package, 32);
+    if (result != ESP_OK) {
+        ESP_LOGW(TAG, "data callback send failed");
+    }
 }
