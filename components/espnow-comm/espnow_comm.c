@@ -55,12 +55,13 @@ static void espnow_send_cb(const uint8_t* mac_addr, esp_now_send_status_t status
 static void espnow_recv_cb(const esp_now_recv_info_t* recv_info, const uint8_t* data, int len) {
     uint8_t packet[32];
     if (len != sizeof(packet)) {
+        ESP_LOGI(TAG, "Invalid packet length");
         return;
     }
 
     memcpy(&packet, data, sizeof(packet));
-    if (xQueueSendToBack(wifiQueue, packet, pdMS_TO_TICKS(10)) == pdTRUE) {
-        ESP_LOGI(TAG, "Packet recieved and posted");
+    if (xQueueSendToBack(wifiQueue, packet, 0) != pdTRUE) {
+        ESP_LOGI(TAG, "Packet recieved but not posted");
     }
 }
 
