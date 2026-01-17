@@ -17,59 +17,49 @@
 
 static const char* TAG = "IMU";
 TaskHandle_t imuTaskHandle = NULL;
-QueueHandle_t imuQueue = NULL;
 
-/**
- * @brief Callback function for handling BNO08x IMU data.
- *
- * This function is executed when new sensor data is available from the IMU.
- * It collects pitch, roll, and yaw angle and rate, timestamps the sample,
- * and sends the data to the global telemetry queue.
- *
- * @param imu Pointer to the BNO08x instance providing the data.
- */
+// IMU data containers
+static Telemitry_t imuBufA;
+static Telemitry_t imuBufB;
+volatile Telemitry_t* imuData = &imuBufA;
+static Telemitry_t* imuBuffer = &imuBufB;
+
 static void imu_data_callback(BNO08x* imu) {
-    if (!imu)
+    if (!imu) {
         return;
-
-    Telemitry_t data;
-
-    // Gyro rates
-    bno08x_gyro_t velocity = imu->rpt.cal_gyro.get();
-    data.rollRate = RAD_2_DEG(velocity.x); // X-axis -> Roll
-    data.pitchRate = RAD_2_DEG(velocity.y); // Y-axis -> Pitch
-    data.yawRate = RAD_2_DEG(velocity.z); // Z-axis -> Yaw
-
-    bno08x_euler_angle_t euler = imu->rpt.rv_ARVR_stabilized_game.get_euler();
-    data.pitchAngle = euler.x; // X-axis -> Pitch
-    data.rollAngle = euler.y; // Y-axis -> Roll
-    data.yawAngle = euler.z;   // Z-axis -> Yaw
-
-    if (imuQueue) {
-        xQueueSendToBack(imuQueue, &data, 0);
     }
+
+    /* No SH2-HAL */
+    // get rates
+    // imuBuffer->rollRate = imu->get_calibrated_gyro_velocity_X();
+    // imuBuffer->pitchRate = imu->get_calibrated_gyro_velocity_Y();
+    // imuBuffer->yawRate = imu->get_calibrated_gyro_velocity_Z();
+
+    // // Get angles
+    // imuBuffer->rollAngle = imu->get_roll_deg();
+    // imuBuffer->pitchAngle = imu->get_pitch_deg();
+    // imuBuffer->yawAngle = imu->get_yaw_deg();
+
+    /* With SH2-HAL */
+    // Rates
+    bno08x_gyro_t velocity = imu->rpt.cal_gyro.get();
+    imuBuffer->rollRate = RAD_2_DEG(velocity.x);  // X-axis -> Roll
+    imuBuffer->pitchRate = RAD_2_DEG(velocity.y); // Y-axis -> Pitch
+    imuBuffer->yawRate = RAD_2_DEG(velocity.z);   // Z-axis -> Yaw
+
+    // Angles
+    bno08x_euler_angle_t euler = imu->rpt.rv_ARVR_stabilized_game.get_euler();
+    imuBuffer->pitchAngle = euler.x; // X-axis -> Pitch
+    imuBuffer->rollAngle = euler.y;  // Y-axis -> Roll
+    imuBuffer->yawAngle = euler.z;   // Z-axis -> Yaw
+
+    // Set active buffer
+    imuData = imuBuffer;
+    // Swap buffer to use on next sensor input
+    imuBuffer = (imuBuffer == &imuBufA) ? &imuBufB : &imuBufA;
 }
 
-/**
- * @brief Task function for managing BNO08x IMU data acquisition.
- *
- * Initializes the BNO08x IMU and sets up a callback function that is
- * triggered whenever new sensor data is available. The callback extracts
- * pitch, roll, and yaw angles and angular velocities, then sends this
- * data to a FreeRTOS queue for use elsewhere in the system.
- *
- * The task suspends itself after setup, as the registered callback handles
- * all subsequent data processing.
- *
- * @param pvParameters Unused parameter.
- *
- * @note Relies on a lambda callback registered with the IMU driver.
- */
 static void bno08x_task(void* pvParameters) {
-
-    while (!imuQueue) {
-        imuQueue = xQueueCreate(BNO085_QUEUE_LENGTH, sizeof(Telemitry_t));
-    }
 
     BNO08x imu; // create IMU object with default wiring scheme
 
@@ -81,19 +71,31 @@ static void bno08x_task(void* pvParameters) {
     ESP_LOGI(TAG, "IMU Initialised");
 
     // Enable gyro & ARVR game rotation vector
+
+    /* No SH2-HAL */
+    // imu.enable_ARVR_stabilized_game_rotation_vector(10000UL);
+    // imu.enable_calibrated_gyro(10000UL);
+    
+    /* With SH2-HAL */
     imu.rpt.rv_ARVR_stabilized_game.enable(10000UL);
     imu.rpt.cal_gyro.enable(10000UL);
     ESP_LOGI(TAG, "Reports enabled");
-    
+
     // Register a callback function
     imu.register_cb([&imu]() { imu_data_callback(&imu); });
     ESP_LOGI(TAG, "Callback registered");
-    
+
     while (1) {
         ESP_LOGI(TAG, "Task suspended");
         vTaskSuspend(NULL); // Susspend task as callback functions handle the data.
 
         // Emergency shutdown path
+
+        /* No SH2-HAL */
+        // imu.disable_ARVR_stabilized_game_rotation_vector();
+        // imu.disable_calibrated_gyro();
+
+        /* With SH2-HAL */
         imu.rpt.rv_ARVR_stabilized_game.disable();
         imu.rpt.cal_gyro.disable();
 
@@ -103,21 +105,10 @@ static void bno08x_task(void* pvParameters) {
     }
 }
 
-/**
- * @brief Starts the BNO08x IMU task.
- *
- * Creates a FreeRTOS task that initializes the IMU, registers a data
- * callback, and sets up data transmission via a queue.
- *
- * @note Uses global task handle `imuTaskHandle`.
- */
 void imu_init(void) {
     xTaskCreate(bno08x_task, "IMU Task", BNO085_STACK_SIZE, NULL, BNO085_PRIORITY, &imuTaskHandle);
 }
 
-/**
- * @brief Resumes the setup task for the bno085 so that it can shutdown
- */
 void imu_kill(void) {
     vTaskResume(imuTaskHandle);
 }

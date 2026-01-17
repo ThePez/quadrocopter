@@ -114,7 +114,7 @@ static void mcpx_task(void* pvParams) {
             adcValues[i] = 0;
         }
     }
-    
+
     while (!mcpxQueue) {
         // Loop to ensure the input queue is created
         mcpxQueue = xQueueCreate(MCPx_QUEUE_LENGTH, sizeof(uint16_t) * numChannels);
@@ -142,7 +142,7 @@ static void mcpx_task(void* pvParams) {
                 // Channel 1 is the battery for the drone
                 if ((channelMask & (1 << i)) != 0) {
                     adcValues[pos] = mcp3208_read_adc_channel(i, MCP3208_SINGLE);
-                    // ESP_LOGI(TAG, "ADC READING: %d", adcValues[pos]);
+                    // ESP_LOGI(TAG, "ADC CH%d: %d", pos, adcValues[pos]);
                     pos++;
                 }
             }

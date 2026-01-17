@@ -36,7 +36,7 @@ void imu_init(void);
 void imu_kill(void);
 
 extern TaskHandle_t imuTaskHandle;
-extern QueueHandle_t imuQueue;
+extern volatile Telemitry_t* imuData;
 
 #ifdef __cplusplus
 }
