@@ -153,7 +153,7 @@ static void remote_controller(void) {
                 if (!emergencyShutdown) {
                     armed = 1;
                     ESP_LOGW(TAG, "REMOTE ARMED — communication is now enabled.");
-                } else if (adcValues[0] < 50) {
+                } else if (adcValues[2] < 50) {
                     emergencyShutdown = 0;
                     armed = 1;
                     ESP_LOGW(TAG, "REMOTE REARMED — communication is now enabled.");
@@ -162,11 +162,14 @@ static void remote_controller(void) {
 
             memset(adcPacket, 0, sizeof(adcPacket));
             adcPacket[0] = 1;                                      // Setpoint update
-            adcPacket[1] = (emergencyShutdown) ? 0 : adcValues[0]; // Throttle
+            adcPacket[1] = (emergencyShutdown) ? 0 : adcValues[2]; // Throttle
             adcPacket[2] = adcValues[1];                           // Pitch
-            adcPacket[3] = adcValues[2];                           // Roll
+            adcPacket[3] = adcValues[0];                           // Roll
             adcPacket[4] = adcValues[3];                           // Yaw
             adcPacket[5] = (uint16_t) flightMode;                  // Mode
+
+            // ESP_LOGI(TAG, "Throttle %d, Pitch %d, Roll %d, Yaw %d", adcValues[2], adcValues[1], adcValues[0],
+            //          adcValues[3]);
 
             // Send the resulting packet to the radio task
             if (armed) {

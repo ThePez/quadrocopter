@@ -18,10 +18,10 @@
 // Motor/ESC's GPIO Pins
 // Ensure these are sequential as the PWM setup requires this.
 // If not possible alter the esc_pwm_init() function.
-#define MOTOR_A_CW 4   // Front left
+#define MOTOR_A_CW 17  // Front left
 #define MOTOR_B_CCW 16 // Rear left
-#define MOTOR_C_CW 17  // Rear right
-#define MOTOR_D_CCW 5  // Front right
+#define MOTOR_C_CW 27  // Rear right
+#define MOTOR_D_CCW 26 // Front right
 
 // Throttle speeds / Duty cycle's in us
 #define MOTOR_SPEED_MIN 1000

@@ -21,7 +21,7 @@
 #include "freertos/task.h"
 
 #define MCPx_CS_PIN_DRONE 33 // Drone
-#define MCPx_CS_PIN_REMOTE 25 // Remote
+#define MCPx_CS_PIN_REMOTE 22 // Remote
 
 #define MCPx_STACK (configMINIMAL_STACK_SIZE * 2)
 #define MCPx_PRIORITY (tskIDLE_PRIORITY + 4)
