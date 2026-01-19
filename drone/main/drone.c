@@ -65,9 +65,9 @@ void app_main(void) {
 
     // If a failure occurs in the call, the ESP will reset
     memory_init();
-    
+
     // Start the C++ task
-    imu_init(); 
+    imu_init();
 
     // Setup ESP-NOW
     esp_now_module_init(remote_mac);
@@ -130,9 +130,16 @@ void pid_control(void* pvParams) {
     while (1) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         uint64_t now = esp_timer_get_time();
-        // Is the remote armed / connected?
+
+        // Check drone angle
+        if (fabs(imuData->pitchAngle) > 50 || fabs(imuData->rollAngle) > 50) {
+            angle_failsafe();
+            continue;
+        }
+
+        // Check last connection to remote
         if (now - droneData->lastRemoteTime > FAILSAFE_TIMEOUT_US) {
-            failsafe();
+            comms_failsafe();
             continue;
         }
 
@@ -220,21 +227,32 @@ void set_flight_mode(FlightMode_t mode) {
     }
 }
 
-void failsafe(void) {
+void angle_failsafe(void) {
     if (!droneData->armed) {
         return;
     }
 
-    ESP_LOGE(TAG, "FAILSAFE TRIGGERED: No radio link for at least 1 second");
     droneData->armed = 0;
+    // ESP_LOGW(TAG, "FAILSAFE: drone angle too steep");
 
-    // Force motors to MIN_THROTTLE before MCU reset
+    // Force motors to MIN_THROTTLE
     for (uint8_t i = 0; i < 4; i++) {
         esc_pwm_set_duty_cycle((MotorIndex) i, MIN_THROTTLE);
     }
+}
 
-    // Reset the MCU
-    // esp_restart();
+void comms_failsafe(void) {
+    if (!droneData->armed) {
+        return;
+    }
+
+    // ESP_LOGE(TAG, "FAILSAFE TRIGGERED: No wifi link for at least 1.5 second");
+    droneData->armed = 0;
+
+    // Force motors to MIN_THROTTLE
+    for (uint8_t i = 0; i < 4; i++) {
+        esc_pwm_set_duty_cycle((MotorIndex) i, MIN_THROTTLE);
+    }
 }
 
 void update_escs(void) {
@@ -314,7 +332,7 @@ void pid_timer_init(void) {
     const esp_timer_create_args_t args = {.callback = pid_callback, .dispatch_method = ESP_TIMER_ISR};
     esp_timer_handle_t pid_timer = NULL;
     esp_timer_create(&args, &pid_timer);
-    esp_timer_start_periodic(pid_timer, 2500); // µs
+    esp_timer_start_periodic(pid_timer, 2500); // us
     ESP_LOGI(TAG, "PID TIMER Setup");
 }
 
@@ -340,11 +358,6 @@ void battery_callback(void* args) {
 }
 
 void remote_data_callback(void* args) {
-    // Only send telemetry when we have a valid, active link
-    if (!droneData->armed) {
-        return;
-    }
-
     int16_t package[16]; // 16 words
 
     // Angles: pitch, roll, yaw     = 3
@@ -374,6 +387,7 @@ void remote_data_callback(void* args) {
     package[11] = motors->motorB;
     package[12] = motors->motorC;
     package[13] = motors->motorD;
+    // Battery Voltage
     package[14] = droneData->battery;
 
     esp_err_t result = esp_send_packet(&package, 32);

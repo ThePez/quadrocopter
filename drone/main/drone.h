@@ -97,12 +97,12 @@ typedef struct {
 
 ///////////////////////////////// Prototypes /////////////////////////////////
 
-void sensor_control(void* pvParams);
 void input_control(void* pvParams);
 void pid_control(void* pvParams);
 void memory_init(void);
 void set_flight_mode(FlightMode_t mode);
-void failsafe(void);
+void angle_failsafe(void);
+void comms_failsafe(void);
 void update_escs(void);
 double pid_update(PIDParameters_t* params, PIDResult_t* values, double ref, double actual);
 void pid_reset(PIDResult_t* pid);
