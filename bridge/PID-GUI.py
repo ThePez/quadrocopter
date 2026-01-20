@@ -234,19 +234,27 @@ class PIDTunerGUI(QMainWindow):
     def refresh_ports(self):
         """Refresh the list of available serial ports"""
         self.port_combo.clear()
+
         ports = serial.tools.list_ports.comports()
-        
+        valid_ports = []
+
         for port in ports:
-            # Shorter display text to fit better
-            if port.description and port.description != port.device:
-                display_text = f"{port.device} ({port.description[:40]})"
-            else:
-                display_text = port.device
+            # Filter out junk / N/A ports
+            if not port.device:
+                continue
+
+            if not port.description or port.description.strip().upper() == "N/A":
+                continue
+
+            valid_ports.append(port)
+
+            display_text = f"{port.device} ({port.description[:40]})"
             self.port_combo.addItem(display_text, port.device)
-        
-        if not ports:
-            self.port_combo.addItem("No ports found", None)
-            self.log_message("No serial ports detected.")
+
+        if not valid_ports:
+            self.port_combo.addItem("No valid ports found", None)
+            self.log_message("No valid serial ports detected.")
+
     
     def toggle_connection(self):
         """Connect or disconnect from serial port"""

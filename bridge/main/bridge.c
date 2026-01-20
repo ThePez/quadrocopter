@@ -23,7 +23,7 @@ static void uart_task(void* pvParameters) {
                 ESP_LOGI(TAG, "Received PID packet from laptop");
 
                 // Forward to drone via ESP-NOW
-                esp_err_t result = esp_send_packet(data, 32);
+                esp_err_t result = esp_send_packet(data, 32, NULL);
 
                 if (result == ESP_OK) {
                     ESP_LOGI(TAG, "PID packet forwarded to drone");
