@@ -64,6 +64,13 @@ esp_err_t esp_send_packet(void* packet, const uint8_t len);
 extern const uint8_t drone_mac[6];
 // REMOTE's MAC ADDRESS
 extern const uint8_t remote_mac[6];
+// BRIDGE's MAC ADDRESS
+extern const uint8_t bridge_mac[6];
+
+// Encription keys
+extern const uint8_t pmk_key[16];
+extern const uint8_t lmk_key[16];
+
 // ESPNOW queue
 extern QueueHandle_t wifiQueue;
 

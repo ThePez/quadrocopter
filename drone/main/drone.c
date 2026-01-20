@@ -15,7 +15,7 @@
 #include "motors.h"
 
 #define TAG "DRONE"
-#define FAILSAFE_TIMEOUT_US 1500000 // 1.5 second
+#define FAILSAFE_TIMEOUT_US 1000000 // 1 second
 #define PID_LOOP_FREQ 2500          // 400 Hz -> 2.5ms -> 2500us
 #define PID_INT_LIMIT 400
 
@@ -27,7 +27,7 @@ TaskHandle_t inputTaskhandle = NULL;
 TaskHandle_t pidTaskHandle = NULL;
 
 // Set default Scalers for the PID structs
-static PIDParameters_t ratePid = {.kp = 0.7, .ki = 0.00, .kd = 0.00, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
+static PIDParameters_t ratePid = {.kp = 0.5, .ki = 0.00, .kd = 0.00, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
 static PIDParameters_t rateZPid = {.kp = 0.2, .ki = 0.00, .kd = 0.00, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
 static PIDParameters_t anglePid = {.kp = 0.4, .ki = 0.00, .kd = 0.00, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
 
@@ -69,22 +69,38 @@ void app_main(void) {
     // Start the C++ task
     imu_init();
 
-    // Setup ESP-NOW
+    // Wait for the IMU initialisation to finish
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    // Setup ESP-NOW (pair the remote here)
     esp_now_module_init(remote_mac);
 
-    // Wait until both input queues are created
+    // Register bridge as additional peer (used to tune the PID co-efficients)
+    esp_now_peer_info_t bridge_peer = {.channel = 0, .ifidx = WIFI_IF_STA, .encrypt = true};
+    memcpy(bridge_peer.peer_addr, bridge_mac, ESP_NOW_ETH_ALEN);
+    memcpy(bridge_peer.lmk, lmk_key, 16); // Same encryption keys
+    if (esp_now_add_peer(&bridge_peer) == ESP_OK) {
+        ESP_LOGI(TAG, "Bridge added as peer");
+    } else {
+        ESP_LOGE(TAG, "Bridge not paired");
+    }
+
+    // Wait to ensure the wifiQueue is created for inter-task coms
     while (!wifiQueue) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
-    // Initialise a callback task for returning info back to the remote
+    // Initialise a callback for returning info back to the remote
     timer_task_callback_init(200000, remote_data_callback); // Interval of 200ms
+
+    // Initialise a callback for check battery voltage
     // timer_task_callback_init(1000000, battery_callback);    // Interval of 1 second
 
     /* Create 2 control Tasks */
     xTaskCreatePinnedToCore(&pid_control, "PID_Task", SYS_STACK, NULL, SYS_PRIO + 2, &pidTaskHandle, (BaseType_t) 1);
     xTaskCreatePinnedToCore(&input_control, "INPUT_TASK", SYS_STACK, NULL, SYS_PRIO, &inputTaskhandle, (BaseType_t) 0);
 
+    // Small delay to ensure all setup is complete before the clock is started
     vTaskDelay(pdMS_TO_TICKS(10));
 
     // Initialise the timer for PID Task signalling
@@ -95,7 +111,7 @@ void input_control(void* pvParams) {
 
     double inputReading;
 
-    // Wait for the radio queue to be initialised
+    // Wait for the radio queue to be initialised (should already be done by this point)
     while (!wifiQueue) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -104,21 +120,42 @@ void input_control(void* pvParams) {
 
     while (1) {
         if (xQueueReceive(wifiQueue, radioPayload, portMAX_DELAY) == pdTRUE) {
-            droneData->lastRemoteTime = esp_timer_get_time();
-            droneData->armed = 1;
-            inputReading = mapf(radioPayload[1], 0, ADC_MAX, MIN_THROTTLE, MAX_THROTTLE);
-            remoteIn->throttle = (inputReading < MIN_THROTTLE + 20) ? MIN_THROTTLE : inputReading;
-            // Pitch Input
-            inputReading = -mapf(radioPayload[2], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
-            remoteIn->pitch = (fabs(inputReading) < 5) ? 0 : inputReading;
-            // Roll Input
-            inputReading = -mapf(radioPayload[3], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
-            remoteIn->roll = (fabs(inputReading) < 5) ? 0 : inputReading;
-            // Yaw Input
-            inputReading = mapf(radioPayload[4], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
-            remoteIn->yaw = (fabs(inputReading) < 5) ? 0 : inputReading;
-            // Flight mode
-            set_flight_mode((radioPayload[5] == ACRO) ? ACRO : STABILISE);
+
+            uint16_t cmd = radioPayload[0];
+            switch (cmd) {
+            case REMOTE_UPDATE:
+                droneData->lastRemoteTime = esp_timer_get_time();
+
+                // Only set armed state if not in angle failsafe state
+                if (!droneData->angle_failsafe_active) {
+                    droneData->armed = 1;
+                }
+
+                inputReading = mapf(radioPayload[1], 0, ADC_MAX, MIN_THROTTLE, MAX_THROTTLE);
+                remoteIn->throttle = (inputReading < MIN_THROTTLE + 20) ? MIN_THROTTLE : inputReading;
+                // Pitch Input
+                inputReading = mapf(radioPayload[2], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
+                remoteIn->pitch = (fabs(inputReading) < 5) ? 0 : inputReading;
+                // Roll Input
+                inputReading = mapf(radioPayload[3], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
+                remoteIn->roll = (fabs(inputReading) < 5) ? 0 : inputReading;
+                // Yaw Input (inverted due to physical position of joystick on remote)
+                inputReading = -mapf(radioPayload[4], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
+                remoteIn->yaw = (fabs(inputReading) < 5) ? 0 : inputReading;
+                // Flight mode
+                set_flight_mode((radioPayload[5] == ACRO) ? ACRO : STABILISE);
+                break;
+
+            case PID_UPDATE:
+                pid_config_packet_t* pidPacket = (pid_config_packet_t*) radioPayload;
+                ESP_LOGI(TAG, "PID Coefficient update");
+                handle_pid_update(pidPacket);
+                break;
+
+            default:
+                ESP_LOGW(TAG, "Unknown cmd ID %d", cmd);
+                break;
+            }
         }
     }
 }
@@ -131,15 +168,36 @@ void pid_control(void* pvParams) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         uint64_t now = esp_timer_get_time();
 
-        // Check drone angle
-        if (fabs(imuData->pitchAngle) > 50 || fabs(imuData->rollAngle) > 50) {
+        // Check drone for critical angles
+        if (fabs(imuData->pitchAngle) > FAIL_ANGLE || fabs(imuData->rollAngle) > FAIL_ANGLE) {
             angle_failsafe();
             continue;
+        } else if (droneData->angle_failsafe_active) {
+            // To reset drone, throttle must be off and drone must be level
+            bool throttle_safe = remoteIn->throttle < (MIN_THROTTLE + 50);
+            bool level = (fabs(imuData->pitchAngle) < 5) && (fabs(imuData->rollAngle) < 5);
+            if (throttle_safe && level) {
+                ESP_LOGI(TAG, "Angle Failsafe cleared");
+                droneData->angle_failsafe_active = 0;
+            } else {
+                motor_shutdown();
+                continue;
+            }
         }
 
         // Check last connection to remote
         if (now - droneData->lastRemoteTime > FAILSAFE_TIMEOUT_US) {
             comms_failsafe();
+            continue;
+        } else if (droneData->comms_failsafe_active) {
+            // Comms recovered - clear failsafe
+            droneData->comms_failsafe_active = 0;
+            ESP_LOGI(TAG, "Comms failsafe cleared - link restored");
+        }
+
+        // Only run control if armed and no failsafes active
+        if (!droneData->armed) {
+            motor_shutdown();
             continue;
         }
 
@@ -199,60 +257,138 @@ void memory_init(void) {
         esp_restart();
     }
 
+    // Rate PID's
     pidRate->pitch->intergral = 0;
     pidRate->roll->intergral = 0;
     pidRate->yaw->intergral = 0;
 
+    // Angle PID's
     pidAngle->pitch->intergral = 0;
     pidAngle->roll->intergral = 0;
     pidAngle->yaw->intergral = 0;
 
+    // Drone info
     droneData->armed = 0;
     droneData->lastRemoteTime = 0;
+    droneData->angle_failsafe_active = 0;
+    droneData->comms_failsafe_active = 0;
     droneData->mode = ACRO;
 }
 
-void set_flight_mode(FlightMode_t mode) {
-    if (mode != droneData->mode) {
-        droneData->mode = mode;
-        // Reset PID integrators when switching modes to prevent windup
-        pid_reset(pidRate->pitch);
-        pid_reset(pidRate->roll);
-        pid_reset(pidRate->yaw);
+void handle_pid_update(pid_config_packet_t* packet) {
 
-        pid_reset(pidAngle->pitch);
-        pid_reset(pidAngle->roll);
+    const char* axis_names[] = {"Pitch", "Roll", "Yaw"};
+    const char* mode_names[] = {"Rate", "Angle"};
 
-        ESP_LOGI(TAG, "Switched to %s mode", mode == STABILISE ? "ANGLE" : "RATE");
+    if (packet->axis > 2) {
+        ESP_LOGE(TAG, "Invalid axis: %d", packet->axis);
+        return;
     }
+
+    if (packet->mode > 1) {
+        ESP_LOGE(TAG, "Invalid mode: %d", packet->mode);
+        return;
+    }
+
+    // Yaw only supports Rate mode
+    if (packet->axis == 2 && packet->mode != 0) {
+        ESP_LOGW(TAG, "Yaw axis only supports Rate mode, ignoring Angle request");
+        packet->mode = 0;
+    }
+
+    ESP_LOGI(TAG, "PID Update - %s %s: Kp=%.3f Ki=%.3f Kd=%.3f", axis_names[packet->axis], mode_names[packet->mode],
+             packet->kp, packet->ki, packet->kd);
+
+    // Update the appropriate PID controller
+    if (packet->mode == 0) {
+        // Rate mode
+        PIDParameters_t* pid = (packet->axis == 2) ? &rateZPid : &ratePid;
+        pid->kp = packet->kp;
+        pid->ki = packet->ki;
+        pid->kd = packet->kd;
+
+        // Reset integrator when changing gains
+        if (packet->axis == 0)
+            pid_reset(pidRate->pitch);
+        else if (packet->axis == 1)
+            pid_reset(pidRate->roll);
+        else if (packet->axis == 2)
+            pid_reset(pidRate->yaw);
+
+    } else {
+        // Angle mode (only Pitch and Roll)
+        if (packet->axis < 2) {
+            anglePid.kp = packet->kp;
+            anglePid.ki = packet->ki;
+            anglePid.kd = packet->kd;
+
+            // Reset integrator
+            if (packet->axis == 0)
+                pid_reset(pidAngle->pitch);
+            else if (packet->axis == 1)
+                pid_reset(pidAngle->roll);
+        }
+    }
+
+    ESP_LOGI(TAG, "PID coefficients updated successfully");
+}
+
+void set_flight_mode(FlightMode_t mode) {
+    if (mode == droneData->mode) {
+        return;
+    }
+
+    // Update flight mode
+    droneData->mode = mode;
+
+    // Reset PID integrators when switching modes to prevent windup
+
+    // Rates
+    pid_reset(pidRate->pitch);
+    pid_reset(pidRate->roll);
+    pid_reset(pidRate->yaw);
+    // Angles
+    pid_reset(pidAngle->pitch);
+    pid_reset(pidAngle->roll);
+
+    ESP_LOGI(TAG, "Switched to %s mode", mode == STABILISE ? "ANGLE" : "RATE");
+}
+
+void motor_shutdown(void) {
+    for (uint8_t i = 0; i < 4; i++) {
+        esc_pwm_set_duty_cycle((MotorIndex) i, MIN_THROTTLE);
+    }
+
+    motors->motorA = MIN_THROTTLE;
+    motors->motorB = MIN_THROTTLE;
+    motors->motorC = MIN_THROTTLE;
+    motors->motorD = MIN_THROTTLE;
 }
 
 void angle_failsafe(void) {
-    if (!droneData->armed) {
+    if (droneData->angle_failsafe_active) {
         return;
     }
 
     droneData->armed = 0;
-    // ESP_LOGW(TAG, "FAILSAFE: drone angle too steep");
-
-    // Force motors to MIN_THROTTLE
-    for (uint8_t i = 0; i < 4; i++) {
-        esc_pwm_set_duty_cycle((MotorIndex) i, MIN_THROTTLE);
-    }
+    droneData->angle_failsafe_active = 1;
+    ESP_LOGE(TAG, "FAILSAFE: angles Pitch %.1f, Roll %.1f", imuData->pitchAngle, imuData->rollAngle);
+    ESP_LOGW(TAG, "FAILSAFE: Level the drone and throttle down to reset");
+    // Kill the motors
+    motor_shutdown();
 }
 
 void comms_failsafe(void) {
-    if (!droneData->armed) {
+    if (droneData->comms_failsafe_active || !droneData->armed) {
         return;
     }
 
-    // ESP_LOGE(TAG, "FAILSAFE TRIGGERED: No wifi link for at least 1.5 second");
+    droneData->comms_failsafe_active = 1;
     droneData->armed = 0;
-
-    // Force motors to MIN_THROTTLE
-    for (uint8_t i = 0; i < 4; i++) {
-        esc_pwm_set_duty_cycle((MotorIndex) i, MIN_THROTTLE);
-    }
+    ESP_LOGE(TAG, "FAILSAFE: No wifi link for at least 1 second");
+    ESP_LOGW(TAG, "FAILSAFE: May need to reset both remote and drone to reset");
+    // Kill the motors
+    motor_shutdown();
 }
 
 void update_escs(void) {

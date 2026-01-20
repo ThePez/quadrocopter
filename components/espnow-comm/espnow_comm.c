@@ -10,7 +10,7 @@
 
 #include "espnow_comm.h"
 
-#define TAG "ESPNOW_DRONE"
+#define TAG "ESPNOW"
 
 #define CHECK_ERR(code, msg)                                                                                           \
     do {                                                                                                               \
@@ -33,21 +33,24 @@
 const uint8_t drone_mac[6] = {0xD8, 0x13, 0x2A, 0x2C, 0x4D, 0x74};
 // REMOTE's MAC ADDRESS
 const uint8_t remote_mac[6] = {0x10, 0x06, 0x1C, 0xF2, 0x42, 0xA4};
+// Bridge MAC ADDRESS
+const uint8_t bridge_mac[6] = {0x58, 0x8C, 0x81, 0xCA, 0x5F, 0x80};
 
+// Local vairable used during set up
 static uint8_t peer_mac[6];
 
 // Encryption keys
 // PMK (Primary Master Key) - must be same on both devices
-static uint8_t pmk_key[16] = {0x9F, 0x3C, 0x8A, 0x2D, 0x7B, 0x14, 0xE6, 0xF0, 0xA5, 0xC9, 0xD2, 0xB1};
+const uint8_t pmk_key[16] = {0x9F, 0x3C, 0x8A, 0x2D, 0x7B, 0x14, 0xE6, 0xF0, 0xA5, 0xC9, 0xD2, 0xB1};
 // LMK (Local Master Key) - must be same for this peer relationship
-static uint8_t lmk_key[16] = {0x4A, 0x7E, 0x1D, 0x9C, 0x0F, 0x6B, 0x2A, 0x8E, 0x5D, 0x3C, 0x91, 0xB4};
+const uint8_t lmk_key[16] = {0x4A, 0x7E, 0x1D, 0x9C, 0x0F, 0x6B, 0x2A, 0x8E, 0x5D, 0x3C, 0x91, 0xB4};
 
 // Queue for recieving packets
 QueueHandle_t wifiQueue = NULL;
 
 static void espnow_send_cb(const uint8_t* mac_addr, esp_now_send_status_t status) {
     if (status != ESP_NOW_SEND_SUCCESS) {
-        ESP_LOGW(TAG, "Send failed");
+        // ESP_LOGW(TAG, "Send failed");
         // ESP_LOGI(TAG, "Send success");
     }
 }

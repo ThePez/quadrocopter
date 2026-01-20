@@ -19,8 +19,26 @@
 // ESP-IDF Prebuilts
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
+#include "soc/soc_caps.h"
 
-// SPI Pins
+// Handle SPI host naming differences between ESP32 and ESP32-S3
+#ifdef CONFIG_IDF_TARGET_ESP32
+
+#define HSPI_HOST_COMPAT HSPI_HOST
+#define VSPI_HOST_COMPAT VSPI_HOST
+
+#else
+
+// ESP32-S3, ESP32-C3, etc use SPI2/SPI3 naming
+#define HSPI_HOST_COMPAT SPI2_HOST
+#define VSPI_HOST_COMPAT SPI3_HOST
+
+#endif
+
+// SPI Pins - handle differences between chips
+#ifdef CONFIG_IDF_TARGET_ESP32
+
+// ESP32 default SPI pins
 #define HSPI_MISO 12
 #define HSPI_MOSI 13
 #define HSPI_CLK 14
@@ -28,9 +46,46 @@
 #define VSPI_MOSI 23
 #define VSPI_CLK 18
 
-// I2C Pins
+#elif CONFIG_IDF_TARGET_ESP32S3
+
+// ESP32-S3 SPI pins (commonly used)
+#define HSPI_MISO 13
+#define HSPI_MOSI 11
+#define HSPI_CLK 12
+#define VSPI_MISO 37
+#define VSPI_MOSI 35
+#define VSPI_CLK 36
+
+#else
+
+// Fallback defaults
+#define HSPI_MISO 13
+#define HSPI_MOSI 11
+#define HSPI_CLK 12
+#define VSPI_MISO 37
+#define VSPI_MOSI 35
+#define VSPI_CLK 36
+
+#endif
+
+// I2C Pins - handle differences between chips
+#ifdef CONFIG_IDF_TARGET_ESP32
+
 #define I2C_SCL 22
 #define I2C_SDA 21
+
+#elif CONFIG_IDF_TARGET_ESP32S3
+
+// ESP32-S3 commonly uses these pins
+#define I2C_SCL 9
+#define I2C_SDA 8
+
+#else
+
+// Fallback for other chips
+#define I2C_SCL 9
+#define I2C_SDA 8
+#endif
 
 /**
  * @brief Initializes the specified SPI bus (HSPI or VSPI).

@@ -1,9 +1,9 @@
 /*
  *****************************************************************************
- * File: common_inits.c
+ * File: common_functions.c
  * Author: Jack Cairns
  * Date: 23-07-2025
- * Brief:
+ * Brief: ESP32 and ESP32-S3 compatible common functions
  * REFERENCE: None
  *****************************************************************************
  */
@@ -21,14 +21,14 @@ SemaphoreHandle_t i2cMutex = NULL;
 
 esp_err_t spi_bus_setup(spi_host_device_t host) {
 
-    if ((host == VSPI_HOST && spiVBusInitialised) || (host == HSPI_HOST && spiHBusInitialised)) {
+    if ((host == VSPI_HOST_COMPAT && spiVBusInitialised) || (host == HSPI_HOST_COMPAT && spiHBusInitialised)) {
         return ESP_ERR_INVALID_ARG;
     }
 
     spi_bus_config_t busConfig = {
-        .miso_io_num = (host == HSPI_HOST) ? HSPI_MISO : VSPI_MISO,
-        .mosi_io_num = (host == HSPI_HOST) ? HSPI_MOSI : VSPI_MOSI,
-        .sclk_io_num = (host == HSPI_HOST) ? HSPI_CLK : VSPI_CLK,
+        .miso_io_num = (host == HSPI_HOST_COMPAT) ? HSPI_MISO : VSPI_MISO,
+        .mosi_io_num = (host == HSPI_HOST_COMPAT) ? HSPI_MOSI : VSPI_MOSI,
+        .sclk_io_num = (host == HSPI_HOST_COMPAT) ? HSPI_CLK : VSPI_CLK,
         .quadhd_io_num = -1,
         .quadwp_io_num = -1,
     };
@@ -42,10 +42,10 @@ esp_err_t spi_bus_setup(spi_host_device_t host) {
         return err;
     }
 
-    if (host == HSPI_HOST) {
+    if (host == HSPI_HOST_COMPAT) {
         spiHBusInitialised = 1;
         spiHMutex = xSemaphoreCreateMutex();
-    } else if (host == VSPI_HOST) {
+    } else if (host == VSPI_HOST_COMPAT) {
         spiVBusInitialised = 1;
         spiVMutex = xSemaphoreCreateMutex();
     }
@@ -58,8 +58,8 @@ i2c_master_bus_handle_t* i2c_bus_setup(void) {
     i2c_master_bus_config_t i2cMasterConfig = {
         .clk_source = I2C_CLK_SRC_DEFAULT,    // Default
         .i2c_port = -1,                       // Auto select
-        .scl_io_num = GPIO_NUM_22,            // Default
-        .sda_io_num = GPIO_NUM_21,            // Default
+        .scl_io_num = I2C_SCL,                // Chip-specific default
+        .sda_io_num = I2C_SDA,                // Chip-specific default
         .glitch_ignore_cnt = 7,               // Default
         .flags.enable_internal_pullup = true, // Default
     };
