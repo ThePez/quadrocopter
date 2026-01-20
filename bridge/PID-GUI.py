@@ -174,7 +174,7 @@ class PIDTunerGUI(QMainWindow):
         # Kp input
         layout.addWidget(QLabel("Kp:"), 1, 0)
         kp_spin = QDoubleSpinBox()
-        kp_spin.setRange(-100, 100)
+        kp_spin.setRange(0, 100)
         kp_spin.setDecimals(3)
         kp_spin.setSingleStep(0.01)
         kp_spin.setValue(0.0)
@@ -183,7 +183,7 @@ class PIDTunerGUI(QMainWindow):
         # Ki input
         layout.addWidget(QLabel("Ki:"), 1, 2)
         ki_spin = QDoubleSpinBox()
-        ki_spin.setRange(-100, 100)
+        ki_spin.setRange(0, 100)
         ki_spin.setDecimals(3)
         ki_spin.setSingleStep(0.001)
         ki_spin.setValue(0.0)
@@ -192,9 +192,9 @@ class PIDTunerGUI(QMainWindow):
         # Kd input
         layout.addWidget(QLabel("Kd:"), 2, 0)
         kd_spin = QDoubleSpinBox()
-        kd_spin.setRange(-100, 100)
+        kd_spin.setRange(0, 100)
         kd_spin.setDecimals(3)
-        kd_spin.setSingleStep(0.01)
+        kd_spin.setSingleStep(0.001)
         kd_spin.setValue(0.0)
         layout.addWidget(kd_spin, 2, 1)
         
