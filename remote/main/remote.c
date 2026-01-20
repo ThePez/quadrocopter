@@ -112,7 +112,7 @@ static void remote_controller(void) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
-    uint8_t flightMode = 0; // 0 Rate, 1 Angle
+    FlightMode_t flightMode = ACRO;
     uint8_t modePressed = 0;
     uint8_t emergencyPressed = 0;
     uint8_t emergencyShutdown = 0;
@@ -130,7 +130,7 @@ static void remote_controller(void) {
                 case MODE_BUTTON_PIN: // Flight Mode
                     modePressed = 1;
                     if (armed) {
-                        flightMode ^= 1;
+                        flightMode = (flightMode != ACRO) ? ACRO : STABILISE;
                         ESP_LOGI(TAG, "Flight Mode %d", flightMode);
                     }
                     break;
@@ -173,7 +173,7 @@ static void remote_controller(void) {
 
             // Send the resulting packet to the radio task
             if (armed) {
-                esp_send_packet(adcPacket, 32);
+                esp_send_packet(adcPacket, 32, NULL);
             }
 
             if (emergencyShutdown) {

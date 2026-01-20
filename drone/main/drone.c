@@ -526,7 +526,7 @@ void remote_data_callback(void* args) {
     // Battery Voltage
     package[14] = droneData->battery;
 
-    esp_err_t result = esp_send_packet(&package, 32);
+    esp_err_t result = esp_send_packet(&package, 32, NULL);
     if (result != ESP_OK) {
         ESP_LOGW(TAG, "data callback send failed");
     }

@@ -18,8 +18,8 @@
 #include "sdkconfig.h"
 
 // ESP-IDF Prebuilts
-#include "driver/spi_master.h"
 #include "driver/gpio.h"
+#include "driver/spi_master.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -43,6 +43,8 @@
 
 #define MODE_BUTTON_PIN 25
 #define SHUTOFF_BUTTON_PIN 32
+
+typedef enum { ACRO, STABILISE } FlightMode_t; // ACRO is rate control (FPV mode), STABILISE is standard mode
 
 #define CHECK_ERR(code, msg)                                                                                           \
     do {                                                                                                               \

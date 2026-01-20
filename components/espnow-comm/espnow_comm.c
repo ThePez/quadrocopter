@@ -63,6 +63,7 @@ static void espnow_recv_cb(const esp_now_recv_info_t* recv_info, const uint8_t* 
     }
 
     memcpy(&packet, data, sizeof(packet));
+    // No waiting
     if (xQueueSendToBack(wifiQueue, packet, 0) != pdTRUE) {
         ESP_LOGI(TAG, "Packet recieved but not posted");
     }
@@ -135,9 +136,18 @@ esp_err_t esp_now_module_init(const uint8_t peer_addr[6]) {
     return ESP_OK;
 }
 
-esp_err_t esp_send_packet(void* packet, const uint8_t len) {
+esp_err_t esp_send_packet(void* packet, const uint8_t len, uint8_t* addr) {
+
+    // Defaults
+    // Sender :  Receiver
+    // Drone  -> Remote
+    // Remote -> Drone
+    // Bridge -> Drone
+    if (addr == NULL) {
+        addr = peer_mac;
+    }
 
     uint8_t* data = (uint8_t*) packet;
-    CHECK_ERR(esp_now_send(peer_mac, data, len), "Send error");
+    CHECK_ERR(esp_now_send(addr, data, len), "Send error");
     return ESP_OK;
 }
