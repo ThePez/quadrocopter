@@ -26,10 +26,8 @@ static void uart_task(void* pvParameters) {
                 esp_err_t result = esp_send_packet(data, 32);
 
                 if (result == ESP_OK) {
-                    uart_write_bytes(UART_NUM, "ACK: PID packet sent to drone\n", 31);
                     ESP_LOGI(TAG, "PID packet forwarded to drone");
                 } else {
-                    uart_write_bytes(UART_NUM, "ERROR: Failed to send to drone\n", 32);
                     ESP_LOGE(TAG, "Failed to forward packet");
                 }
             } else {
@@ -42,7 +40,7 @@ static void uart_task(void* pvParameters) {
 }
 
 void app_main(void) {
-    ESP_LOGI(TAG, "ESP32 Bridge Starting...");
+    ESP_LOGI(TAG, "ESP32-S3 Bridge Starting...");
 
     // Configure UART
     uart_config_t uart_config = {
