@@ -37,7 +37,7 @@
 #define ADC_MIN 0
 #define ADC_MAX 4095
 
-#define MAX_RATE 45.0  // deg/s
+#define MAX_RATE 200.0  // deg/s
 #define MAX_ANGLE 25.0 // deg
 #define FAIL_ANGLE 30.0
 

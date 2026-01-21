@@ -27,9 +27,9 @@ TaskHandle_t inputTaskhandle = NULL;
 TaskHandle_t pidTaskHandle = NULL;
 
 // Set default Scalers for the PID structs
-static PIDParameters_t ratePid = {.kp = 0.5, .ki = 0.00, .kd = 0.00, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
-static PIDParameters_t rateZPid = {.kp = 0.2, .ki = 0.00, .kd = 0.00, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
-static PIDParameters_t anglePid = {.kp = 0.4, .ki = 0.00, .kd = 0.00, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
+static PIDParameters_t ratePid = {.kp = 0.175, .ki = 0.00, .kd = 0.001, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
+static PIDParameters_t rateZPid = {.kp = 0.1, .ki = 0.00, .kd = 0.001, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
+static PIDParameters_t anglePid = {.kp = 1.0, .ki = 0.00, .kd = 0.00, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
 
 // Various configs for general operation
 static DroneConfig_t* droneData = NULL;
@@ -277,10 +277,10 @@ void memory_init(void) {
 
 void handle_pid_update(pid_config_packet_t* packet) {
 
-    const char* axis_names[] = {"Pitch", "Roll", "Yaw"};
+    const char* axis_names[] = {"Pitch & Roll", "Yaw"};
     const char* mode_names[] = {"Rate", "Angle"};
 
-    if (packet->axis > 2) {
+    if (packet->axis > 1) {
         ESP_LOGE(TAG, "Invalid axis: %d", packet->axis);
         return;
     }
@@ -291,42 +291,39 @@ void handle_pid_update(pid_config_packet_t* packet) {
     }
 
     // Yaw only supports Rate mode
-    if (packet->axis == 2 && packet->mode != 0) {
+    if (packet->axis == 1 && packet->mode != 0) {
         ESP_LOGW(TAG, "Yaw axis only supports Rate mode, ignoring Angle request");
         packet->mode = 0;
     }
 
-    ESP_LOGI(TAG, "PID Update - %s %s: Kp=%.3f Ki=%.3f Kd=%.3f", axis_names[packet->axis], mode_names[packet->mode],
+    ESP_LOGI(TAG, "PID Update - %s %s: Kp=%.4f Ki=%.4f Kd=%.4f", axis_names[packet->axis], mode_names[packet->mode],
              packet->kp, packet->ki, packet->kd);
 
     // Update the appropriate PID controller
-    if (packet->mode == 0) {
+    if (!packet->mode) {
         // Rate mode
-        PIDParameters_t* pid = (packet->axis == 2) ? &rateZPid : &ratePid;
+        PIDParameters_t* pid = (packet->axis == 1) ? &rateZPid : &ratePid;
         pid->kp = packet->kp;
         pid->ki = packet->ki;
         pid->kd = packet->kd;
 
         // Reset integrator when changing gains
-        if (packet->axis == 0)
+        if (!packet->axis) {
             pid_reset(pidRate->pitch);
-        else if (packet->axis == 1)
             pid_reset(pidRate->roll);
-        else if (packet->axis == 2)
+        } else {
             pid_reset(pidRate->yaw);
+        }
 
     } else {
         // Angle mode (only Pitch and Roll)
-        if (packet->axis < 2) {
+        if (!packet->axis) {
             anglePid.kp = packet->kp;
             anglePid.ki = packet->ki;
             anglePid.kd = packet->kd;
-
-            // Reset integrator
-            if (packet->axis == 0)
-                pid_reset(pidAngle->pitch);
-            else if (packet->axis == 1)
-                pid_reset(pidAngle->roll);
+            // Reset integrators
+            pid_reset(pidAngle->pitch);
+            pid_reset(pidAngle->roll);
         }
     }
 
@@ -432,7 +429,7 @@ double pid_update(PIDParameters_t* params, PIDResult_t* values, double ref, doub
     // P
     values->proportional = params->kp * error;
     // I
-    values->intergral += params->ki * (error + values->prevError) * dt;
+    values->intergral += params->ki * (error) * dt;
     values->intergral = constrainf(values->intergral, -params->intLimit, params->intLimit);
     // D
     values->derivative = params->kd * (error - values->prevError) / dt;
