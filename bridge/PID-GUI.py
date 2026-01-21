@@ -49,12 +49,11 @@ class PIDTunerGUI(QMainWindow):
         
         # Track PID configurations
         self.pid_config = {
-            0: {0: None, 1: None},  # Pitch: Rate, Angle
-            1: {0: None, 1: None},  # Roll: Rate, Angle
-            2: {0: None, 1: None},  # Yaw: Rate (mode 1 not used)
+            0: {0: None, 1: None},  # Pitch / Roll: Rate, Angle
+            1: {0: None, 1: None},  # Yaw: Rate (mode 1 not used)
         }
         
-        self.axis_names = ['Pitch', 'Roll', 'Yaw']
+        self.axis_names = ['Pitch / Roll', 'Yaw']
         self.mode_names = ['Rate', 'Angle']
         
         self.init_ui()
@@ -69,6 +68,9 @@ class PIDTunerGUI(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
         
+        # Log/Console output (add to layout later)
+        log_group = self.create_log_section()
+
         # Connection section
         connection_group = self.create_connection_section()
         main_layout.addWidget(connection_group)
@@ -76,19 +78,15 @@ class PIDTunerGUI(QMainWindow):
         # Tabs for each axis
         self.tabs = QTabWidget()
         
-        # Create tabs for Pitch, Roll, Yaw
-        self.pitch_tab = self.create_axis_tab(0)
-        self.roll_tab = self.create_axis_tab(1)
-        self.yaw_tab = self.create_axis_tab(2)
+        # Create tabs for Pitch & Roll, Yaw
+        self.pitch_roll_tab = self.create_axis_tab(0)
+        self.yaw_tab = self.create_axis_tab(1)
         
-        self.tabs.addTab(self.pitch_tab, "Pitch")
-        self.tabs.addTab(self.roll_tab, "Roll")
+        self.tabs.addTab(self.pitch_roll_tab, "Pitch + Roll")
         self.tabs.addTab(self.yaw_tab, "Yaw")
-        
         main_layout.addWidget(self.tabs)
-        
-        # Log/Console output
-        log_group = self.create_log_section()
+
+        # Add the log section to layout last
         main_layout.addWidget(log_group)
         
         self.log_message("PID Tuner started. Please connect to serial port.")
@@ -144,7 +142,7 @@ class PIDTunerGUI(QMainWindow):
         layout.addWidget(rate_group)
         
         # Angle mode section (not for Yaw)
-        if axis != 2:
+        if axis != 1:
             angle_group = self.create_pid_group(axis, 1, "Angle Mode PID")
             layout.addWidget(angle_group)
         else:
@@ -175,8 +173,8 @@ class PIDTunerGUI(QMainWindow):
         layout.addWidget(QLabel("Kp:"), 1, 0)
         kp_spin = QDoubleSpinBox()
         kp_spin.setRange(0, 100)
-        kp_spin.setDecimals(3)
-        kp_spin.setSingleStep(0.01)
+        kp_spin.setDecimals(4)
+        kp_spin.setSingleStep(0.001)
         kp_spin.setValue(0.0)
         layout.addWidget(kp_spin, 1, 1)
         
@@ -184,7 +182,7 @@ class PIDTunerGUI(QMainWindow):
         layout.addWidget(QLabel("Ki:"), 1, 2)
         ki_spin = QDoubleSpinBox()
         ki_spin.setRange(0, 100)
-        ki_spin.setDecimals(3)
+        ki_spin.setDecimals(4)
         ki_spin.setSingleStep(0.001)
         ki_spin.setValue(0.0)
         layout.addWidget(ki_spin, 1, 3)
@@ -193,7 +191,7 @@ class PIDTunerGUI(QMainWindow):
         layout.addWidget(QLabel("Kd:"), 2, 0)
         kd_spin = QDoubleSpinBox()
         kd_spin.setRange(0, 100)
-        kd_spin.setDecimals(3)
+        kd_spin.setDecimals(4)
         kd_spin.setSingleStep(0.001)
         kd_spin.setValue(0.0)
         layout.addWidget(kd_spin, 2, 1)
@@ -235,27 +233,30 @@ class PIDTunerGUI(QMainWindow):
         """Refresh the list of available serial ports"""
         self.port_combo.clear()
 
-        ports = serial.tools.list_ports.comports()
-        valid_ports = []
+        try:
+            ports = serial.tools.list_ports.comports()
+            valid_ports = []
 
-        for port in ports:
-            # Filter out junk / N/A ports
-            if not port.device:
-                continue
+            for port in ports:
+                # Filter out junk / N/A ports
+                if not port.device:
+                    continue
 
-            if not port.description or port.description.strip().upper() == "N/A":
-                continue
+                if not port.description or port.description.strip().upper() == "N/A":
+                    continue
 
-            valid_ports.append(port)
+                valid_ports.append(port)
 
-            display_text = f"{port.device} ({port.description[:40]})"
-            self.port_combo.addItem(display_text, port.device)
+                display_text = f"{port.device} ({port.description[:40]})"
+                self.port_combo.addItem(display_text, port.device)
 
-        if not valid_ports:
-            self.port_combo.addItem("No valid ports found", None)
-            self.log_message("No valid serial ports detected.")
+            if not valid_ports:
+                self.port_combo.addItem("No valid ports found", None)
+                self.log_message("No valid serial ports detected.")
+        except Exception as e:
+            self.port_combo.addItem("Error scanning ports", None)
+            self.log_message(f"Error scanning ports: {e}")
 
-    
     def toggle_connection(self):
         """Connect or disconnect from serial port"""
         if self.serial_port and self.serial_port.is_open:
@@ -316,7 +317,7 @@ class PIDTunerGUI(QMainWindow):
             return
         
         # Yaw only supports Rate mode
-        if axis == 2 and mode != 0:
+        if axis == 1 and mode != 0:
             QMessageBox.warning(self, "Invalid Mode", "Yaw only supports Rate mode.")
             return
         
@@ -339,13 +340,13 @@ class PIDTunerGUI(QMainWindow):
             
             # Update current value label
             current_label = getattr(self, f'current_label_{axis}_{mode}')
-            current_label.setText(f"Kp={kp:.3f}, Ki={ki:.3f}, Kd={kd:.3f}")
+            current_label.setText(f"Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}")
             current_label.setStyleSheet("color: #2196F3; font-weight: bold;")
                         
             # Log
             axis_name = self.axis_names[axis]
             mode_name = self.mode_names[mode]
-            self.log_message(f"→ Sent {axis_name} {mode_name}: Kp={kp:.3f}, Ki={ki:.3f}, Kd={kd:.3f}")
+            self.log_message(f"→ Sent {axis_name} {mode_name}: Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}")
             
         except Exception as e:
             QMessageBox.critical(self, "Send Error", f"Failed to send: {e}")
