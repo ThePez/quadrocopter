@@ -82,6 +82,8 @@ button_state_t emergency_button = {.pin = SHUTOFF_BUTTON_PIN, .pushAllowed = 1};
 // Logging tag
 #define TAG "REMOTE"
 
+#define STATUS_LED 2
+
 //////////////////////////////////////////////////////////////////////////////
 
 /**
@@ -118,6 +120,16 @@ static void remote_controller(void) {
     uint8_t emergencyShutdown = 0;
     uint8_t armed = 0;
     uint32_t notifyValue;
+
+    // Initialize status LED
+    gpio_config_t led_config = {.mode = GPIO_MODE_OUTPUT,
+                                .pin_bit_mask = (1ULL << STATUS_LED),
+                                .pull_up_en = GPIO_PULLUP_DISABLE,
+                                .pull_down_en = GPIO_PULLDOWN_DISABLE,
+                                .intr_type = GPIO_INTR_DISABLE};
+    gpio_config(&led_config);
+    gpio_set_level(STATUS_LED, 0); // Start with LED off for ACRO mode
+
     ESP_LOGW(TAG, "Waiting to be armed, press both joysticks.");
 
     while (1) {
@@ -131,7 +143,8 @@ static void remote_controller(void) {
                     modePressed = 1;
                     if (armed) {
                         flightMode = (flightMode != ACRO) ? ACRO : STABILISE;
-                        ESP_LOGI(TAG, "Flight Mode %d", flightMode);
+                        gpio_set_level(STATUS_LED, (flightMode == STABILISE) ? 1 : 0);
+                        ESP_LOGI(TAG, "Flight Mode %s", (flightMode == STABILISE) ? "Stabilise" : "Acro");
                     }
                     break;
 

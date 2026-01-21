@@ -367,8 +367,8 @@ void angle_failsafe(void) {
         return;
     }
 
-    droneData->armed = 0;
     droneData->angle_failsafe_active = 1;
+    droneData->armed = 0;
     ESP_LOGE(TAG, "FAILSAFE: angles Pitch %.1f, Roll %.1f", imuData->pitchAngle, imuData->rollAngle);
     ESP_LOGW(TAG, "FAILSAFE: Level the drone and throttle down to reset");
     // Kill the motors
