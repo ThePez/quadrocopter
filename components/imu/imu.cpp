@@ -12,6 +12,9 @@
 #include "BNO08x.hpp"
 #include "esp_timer.h"
 
+#define GYRO_ALPHA 0.4
+#define GYRO_DEADBAND 10
+
 #define RAD_2_DEG(x) ((180.0 / M_PI) * x)
 #define DEG_2_RAD(x) ((M_PI / 180.0) * x)
 
@@ -23,6 +26,13 @@ static Telemitry_t imuBufA;
 static Telemitry_t imuBufB;
 volatile Telemitry_t* imuData = &imuBufA;
 static Telemitry_t* imuBuffer = &imuBufB;
+
+static Stabilizedrates_t rates = {};
+
+static float filter(float raw, float* filtered) {
+    *filtered = (GYRO_ALPHA * raw) + ((1.0 - GYRO_ALPHA) * (*filtered));
+    return (fabsf(*filtered) < GYRO_DEADBAND) ? 0.0f : *filtered;
+}
 
 static void imu_data_callback(BNO08x* imu) {
     if (!imu) {
@@ -43,9 +53,9 @@ static void imu_data_callback(BNO08x* imu) {
     /* With SH2-HAL */
     // Rates
     bno08x_gyro_t velocity = imu->rpt.cal_gyro.get();
-    imuBuffer->rollRate = RAD_2_DEG(velocity.x);  // X-axis -> Roll
-    imuBuffer->pitchRate = RAD_2_DEG(velocity.y); // Y-axis -> Pitch
-    imuBuffer->yawRate = RAD_2_DEG(velocity.z);   // Z-axis -> Yaw
+    imuBuffer->rollRate = filter(RAD_2_DEG(velocity.x), &rates.roll);  // X-axis -> Roll
+    imuBuffer->pitchRate = filter(RAD_2_DEG(velocity.y), &rates.pitch); // Y-axis -> Pitch
+    imuBuffer->yawRate = filter(RAD_2_DEG(velocity.z), &rates.yaw);   // Z-axis -> Yaw
 
     // Angles
     bno08x_euler_angle_t euler = imu->rpt.rv_ARVR_stabilized_game.get_euler();
@@ -73,9 +83,9 @@ static void bno08x_task(void* pvParameters) {
     // Enable gyro & ARVR game rotation vector
 
     /* No SH2-HAL */
-    // imu.enable_ARVR_stabilized_game_rotation_vector(10000UL);
-    // imu.enable_calibrated_gyro(10000UL);
-    
+    // imu.enable_ARVR_stabilized_game_rotation_vector(2500UL);
+    // imu.enable_calibrated_gyro(2500UL);
+
     /* With SH2-HAL */
     imu.rpt.rv_ARVR_stabilized_game.enable(2500UL);
     imu.rpt.cal_gyro.enable(2500UL);

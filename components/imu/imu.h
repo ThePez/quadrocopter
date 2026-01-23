@@ -23,7 +23,7 @@ extern "C" {
 #define BNO085_STACK_SIZE (configMINIMAL_STACK_SIZE * 3)
 #define BNO085_PRIORITY (tskIDLE_PRIORITY + 4)
 
-typedef struct {
+typedef struct __packed {
     double pitchAngle;
     double pitchRate;
     double rollAngle;
@@ -31,6 +31,12 @@ typedef struct {
     double yawAngle;
     double yawRate;
 } Telemitry_t;
+
+typedef struct {
+    float pitch;
+    float roll;
+    float yaw;
+} Stabilizedrates_t;
 
 void imu_init(void);
 void imu_kill(void);
