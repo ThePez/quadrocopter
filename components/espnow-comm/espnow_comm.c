@@ -47,7 +47,7 @@ QueueHandle_t wifiQueue = NULL;
 
 static void espnow_send_cb(const uint8_t* mac_addr, esp_now_send_status_t status) {
     if (status != ESP_NOW_SEND_SUCCESS) {
-        // Does nothing....
+        ESP_LOGW(TAG, "MESSAGE NOT DELIVERED");
     }
 }
 
@@ -73,6 +73,7 @@ static esp_err_t wifi_init(void) {
     CHECK_ERR(esp_wifi_set_storage(WIFI_STORAGE_RAM), "storage init failed");
     CHECK_ERR(esp_wifi_set_mode(WIFI_MODE_STA), "mode set failed");
     CHECK_ERR(esp_wifi_start(), "wifi not started");
+    CHECK_ERR(esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE), "Wifi channel not set");
 
     // Print MAC address
     uint8_t mac[6];
