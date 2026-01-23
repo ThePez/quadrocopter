@@ -11,13 +11,11 @@
 #include "drone.h"
 #include "common_functions.h"
 #include "espnow_comm.h"
+#include "imu.h"
 #include "mcp3208.h"
 #include "motors.h"
 
 #define TAG "DRONE"
-#define FAILSAFE_TIMEOUT_US 1000000 // 1 second
-#define PID_LOOP_FREQ 2500          // 400 Hz -> 2.5ms -> 2500us
-#define PID_INT_LIMIT 400
 
 ////////////////////////////// Global Variables //////////////////////////////
 
@@ -27,9 +25,9 @@ TaskHandle_t inputTaskhandle = NULL;
 TaskHandle_t pidTaskHandle = NULL;
 
 // Set default Scalers for the PID structs
-static PIDParameters_t ratePid = {.kp = 0.175, .ki = 0.00, .kd = 0.001, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
-static PIDParameters_t rateZPid = {.kp = 0.1, .ki = 0.00, .kd = 0.001, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
-static PIDParameters_t anglePid = {.kp = 1.0, .ki = 0.00, .kd = 0.00, .intLimit = PID_INT_LIMIT, .dt = PID_LOOP_FREQ};
+static PIDParameters_t ratePid;
+static PIDParameters_t rateZPid;
+static PIDParameters_t anglePid;
 
 // Various configs for general operation
 static DroneConfig_t* droneData = NULL;
@@ -47,11 +45,31 @@ static TargetParameters_t* remoteIn = NULL;
 static PWM_t* motors = NULL;
 
 // Radio
-static uint16_t* radioPayload = NULL;
+static uint16_t* wifiPayload = NULL;
+
+///////////////////////////////// Prototypes /////////////////////////////////
+
+static void memory_init(void);
+
+static void init_pid_params(PIDParameters_t* params, double kp, double kd, double ki);
+static double pid_update(PIDParameters_t* params, PIDResult_t* values, double ref, double actual);
+static void pid_reset(PIDResult_t* pid);
+static void pid_timer_init(void);
+static void pid_callback(void* args);
+static void handle_pid_update(pid_config_packet_t* packet);
+
+static void timer_task_callback_init(int periodUS, void (*cb)(void*));
+static void battery_callback(void* args);
+static void remote_data_callback(void* args);
 
 //////////////////////////////////////////////////////////////////////////////
 
 void app_main(void) {
+
+    // Set Co-efficients for the PID control loops
+    init_pid_params(&ratePid, 0.175, 0, 0);
+    init_pid_params(&rateZPid, 0.1, 0, 0);
+    init_pid_params(&anglePid, 1, 0, 0);
 
     // Setup PWM
     if (esc_pwm_init() != ESP_OK) {
@@ -72,18 +90,20 @@ void app_main(void) {
     // Wait for the IMU initialisation to finish
     vTaskDelay(pdMS_TO_TICKS(200));
 
-    // Setup ESP-NOW (pair the remote here)
-    esp_now_module_init(remote_mac);
+    uint8_t* macs[] = {remote_mac, bridge_mac};
 
-    // Register bridge as additional peer (used to tune the PID co-efficients)
-    esp_now_peer_info_t bridge_peer = {.channel = 0, .ifidx = WIFI_IF_STA, .encrypt = true};
-    memcpy(bridge_peer.peer_addr, bridge_mac, ESP_NOW_ETH_ALEN);
-    memcpy(bridge_peer.lmk, lmk_key, 16); // Same encryption keys
-    if (esp_now_add_peer(&bridge_peer) == ESP_OK) {
-        ESP_LOGI(TAG, "Bridge added as peer");
-    } else {
-        ESP_LOGE(TAG, "Bridge not paired");
-    }
+    // Setup ESP-NOW (pair the remote here)
+    esp_now_module_init(macs, 2);
+
+    // // Register bridge as additional peer (used to tune the PID co-efficients)
+    // esp_now_peer_info_t bridge_peer = {.channel = 0, .ifidx = WIFI_IF_STA, .encrypt = true};
+    // memcpy(bridge_peer.peer_addr, bridge_mac, ESP_NOW_ETH_ALEN);
+    // memcpy(bridge_peer.lmk, lmk_key, 16); // Same encryption keys
+    // if (esp_now_add_peer(&bridge_peer) == ESP_OK) {
+    //     ESP_LOGI(TAG, "Bridge added as peer");
+    // } else {
+    //     ESP_LOGE(TAG, "Bridge not paired");
+    // }
 
     // Wait to ensure the wifiQueue is created for inter-task coms
     while (!wifiQueue) {
@@ -91,7 +111,7 @@ void app_main(void) {
     }
 
     // Initialise a callback for returning info back to the remote
-    timer_task_callback_init(200000, remote_data_callback); // Interval of 200ms
+    timer_task_callback_init(100000, remote_data_callback); // Interval of 100ms
 
     // Initialise a callback for check battery voltage
     // timer_task_callback_init(1000000, battery_callback);    // Interval of 1 second
@@ -101,11 +121,13 @@ void app_main(void) {
     xTaskCreatePinnedToCore(&input_control, "INPUT_TASK", SYS_STACK, NULL, SYS_PRIO, &inputTaskhandle, (BaseType_t) 0);
 
     // Small delay to ensure all setup is complete before the clock is started
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     // Initialise the timer for PID Task signalling
     pid_timer_init();
 }
+
+/* Control Tasks */
 
 void input_control(void* pvParams) {
 
@@ -119,9 +141,9 @@ void input_control(void* pvParams) {
     ESP_LOGI(TAG, "Input Task Setup");
 
     while (1) {
-        if (xQueueReceive(wifiQueue, radioPayload, portMAX_DELAY) == pdTRUE) {
+        if (xQueueReceive(wifiQueue, wifiPayload, portMAX_DELAY) == pdTRUE) {
 
-            uint16_t cmd = radioPayload[0];
+            uint16_t cmd = wifiPayload[0];
             switch (cmd) {
             case REMOTE_UPDATE:
                 droneData->lastRemoteTime = esp_timer_get_time();
@@ -131,23 +153,23 @@ void input_control(void* pvParams) {
                     droneData->armed = 1;
                 }
 
-                inputReading = mapf(radioPayload[1], 0, ADC_MAX, MIN_THROTTLE, MAX_THROTTLE);
+                inputReading = mapf(wifiPayload[1], 0, ADC_MAX, MIN_THROTTLE, MAX_THROTTLE);
                 remoteIn->throttle = (inputReading < MIN_THROTTLE + 20) ? MIN_THROTTLE : inputReading;
                 // Pitch Input
-                inputReading = mapf(radioPayload[2], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
+                inputReading = mapf(wifiPayload[2], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
                 remoteIn->pitch = (fabs(inputReading) < 5) ? 0 : inputReading;
                 // Roll Input
-                inputReading = mapf(radioPayload[3], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
+                inputReading = mapf(wifiPayload[3], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
                 remoteIn->roll = (fabs(inputReading) < 5) ? 0 : inputReading;
                 // Yaw Input (inverted due to physical position of joystick on remote)
-                inputReading = -mapf(radioPayload[4], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
+                inputReading = -mapf(wifiPayload[4], 0, ADC_MAX, -MAX_RATE, MAX_RATE);
                 remoteIn->yaw = (fabs(inputReading) < 5) ? 0 : inputReading;
                 // Flight mode
-                set_flight_mode((radioPayload[5] == ACRO) ? ACRO : STABILISE);
+                set_flight_mode((wifiPayload[5] == ACRO) ? ACRO : STABILISE);
                 break;
 
             case PID_UPDATE:
-                pid_config_packet_t* pidPacket = (pid_config_packet_t*) radioPayload;
+                pid_config_packet_t* pidPacket = (pid_config_packet_t*) wifiPayload;
                 ESP_LOGI(TAG, "PID Coefficient update");
                 handle_pid_update(pidPacket);
                 break;
@@ -231,8 +253,10 @@ void pid_control(void* pvParams) {
     }
 }
 
-void memory_init(void) {
-    radioPayload = pvPortMalloc(sizeof(uint16_t) * 16);
+/* Memory setup */
+
+static void memory_init(void) {
+    wifiPayload = pvPortMalloc(sizeof(uint16_t) * 16);
     pidRate = pvPortMalloc(sizeof(PIDFeedback_t));
     pidAngle = pvPortMalloc(sizeof(PIDFeedback_t));
     remoteIn = pvPortMalloc(sizeof(TargetParameters_t));
@@ -242,7 +266,7 @@ void memory_init(void) {
 
     // If any malloc's failed restart the MSU
 
-    if (!radioPayload || !pidRate || !pidAngle || !remoteIn || !motors || !outputPID || !droneData) {
+    if (!wifiPayload || !pidRate || !pidAngle || !remoteIn || !motors || !outputPID || !droneData) {
         esp_restart();
     }
 
@@ -275,60 +299,7 @@ void memory_init(void) {
     droneData->mode = ACRO;
 }
 
-void handle_pid_update(pid_config_packet_t* packet) {
-
-    const char* axis_names[] = {"Pitch & Roll", "Yaw"};
-    const char* mode_names[] = {"Rate", "Angle"};
-
-    if (packet->axis > 1) {
-        ESP_LOGE(TAG, "Invalid axis: %d", packet->axis);
-        return;
-    }
-
-    if (packet->mode > 1) {
-        ESP_LOGE(TAG, "Invalid mode: %d", packet->mode);
-        return;
-    }
-
-    // Yaw only supports Rate mode
-    if (packet->axis == 1 && packet->mode != 0) {
-        ESP_LOGW(TAG, "Yaw axis only supports Rate mode, ignoring Angle request");
-        packet->mode = 0;
-    }
-
-    ESP_LOGI(TAG, "PID Update - %s %s: Kp=%.4f Ki=%.4f Kd=%.4f", axis_names[packet->axis], mode_names[packet->mode],
-             packet->kp, packet->ki, packet->kd);
-
-    // Update the appropriate PID controller
-    if (!packet->mode) {
-        // Rate mode
-        PIDParameters_t* pid = (packet->axis == 1) ? &rateZPid : &ratePid;
-        pid->kp = packet->kp;
-        pid->ki = packet->ki;
-        pid->kd = packet->kd;
-
-        // Reset integrator when changing gains
-        if (!packet->axis) {
-            pid_reset(pidRate->pitch);
-            pid_reset(pidRate->roll);
-        } else {
-            pid_reset(pidRate->yaw);
-        }
-
-    } else {
-        // Angle mode (only Pitch and Roll)
-        if (!packet->axis) {
-            anglePid.kp = packet->kp;
-            anglePid.ki = packet->ki;
-            anglePid.kd = packet->kd;
-            // Reset integrators
-            pid_reset(pidAngle->pitch);
-            pid_reset(pidAngle->roll);
-        }
-    }
-
-    ESP_LOGI(TAG, "PID coefficients updated successfully");
-}
+/* Saftey related functions */
 
 void set_flight_mode(FlightMode_t mode) {
     if (mode == droneData->mode) {
@@ -348,7 +319,7 @@ void set_flight_mode(FlightMode_t mode) {
     pid_reset(pidAngle->pitch);
     pid_reset(pidAngle->roll);
 
-    ESP_LOGI(TAG, "Switched to %s mode", mode == STABILISE ? "ANGLE" : "RATE");
+    ESP_LOGI(TAG, "Control mode: %s", mode == STABILISE ? "Stabilise" : "Acro");
 }
 
 void motor_shutdown(void) {
@@ -421,7 +392,18 @@ void update_escs(void) {
     esc_pwm_set_duty_cycle(MOTOR_D, motors->motorD);
 }
 
-double pid_update(PIDParameters_t* params, PIDResult_t* values, double ref, double actual) {
+/* PID control loop related functions */
+
+static void init_pid_params(PIDParameters_t* params, double kp, double kd, double ki) {
+    params->divLimit = PID_DIV_LIMIT;
+    params->intLimit = PID_INT_LIMIT;
+    params->dt = PID_LOOP_FREQ;
+    params->kp = kp;
+    params->kd = kd;
+    params->ki = ki;
+}
+
+static double pid_update(PIDParameters_t* params, PIDResult_t* values, double ref, double actual) {
 
     double dt = params->dt * 1e-6;
 
@@ -429,7 +411,7 @@ double pid_update(PIDParameters_t* params, PIDResult_t* values, double ref, doub
     // P
     values->proportional = params->kp * error;
     // I
-    values->intergral += params->ki * (error) * dt;
+    values->intergral += params->ki * (error) *dt;
     values->intergral = constrainf(values->intergral, -params->intLimit, params->intLimit);
     // D
     values->derivative = params->kd * (error - values->prevError) / dt;
@@ -439,7 +421,7 @@ double pid_update(PIDParameters_t* params, PIDResult_t* values, double ref, doub
     return values->proportional + values->intergral + values->derivative;
 }
 
-void pid_reset(PIDResult_t* pid) {
+static void pid_reset(PIDResult_t* pid) {
     if (pid) {
         pid->proportional = 0.0;
         pid->intergral = 0.0;
@@ -448,7 +430,81 @@ void pid_reset(PIDResult_t* pid) {
     }
 }
 
-void timer_task_callback_init(int periodUS, void (*cb)(void*)) {
+static void pid_timer_init(void) {
+    const esp_timer_create_args_t args = {.callback = pid_callback, .dispatch_method = ESP_TIMER_ISR};
+    esp_timer_handle_t pid_timer = NULL;
+    esp_timer_create(&args, &pid_timer);
+    esp_timer_start_periodic(pid_timer, 2500); // us
+    ESP_LOGI(TAG, "PID TIMER Setup");
+}
+
+static void pid_callback(void* args) {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    if (pidTaskHandle) {
+        vTaskNotifyGiveFromISR(pidTaskHandle, &xHigherPriorityTaskWoken);
+    }
+
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+static void handle_pid_update(pid_config_packet_t* packet) {
+
+    const char* axis_names[] = {"Pitch & Roll", "Yaw"};
+    const char* mode_names[] = {"Rate", "Angle"};
+
+    if (packet->axis > 1) {
+        ESP_LOGE(TAG, "Invalid axis: %d", packet->axis);
+        return;
+    }
+
+    if (packet->mode > 1) {
+        ESP_LOGE(TAG, "Invalid mode: %d", packet->mode);
+        return;
+    }
+
+    // Yaw only supports Rate mode
+    if (packet->axis == 1 && packet->mode != 0) {
+        ESP_LOGW(TAG, "Yaw axis only supports Rate mode, ignoring Angle request");
+        packet->mode = 0;
+    }
+
+    ESP_LOGI(TAG, "PID Update - %s %s: Kp=%.4f Ki=%.4f Kd=%.4f", axis_names[packet->axis], mode_names[packet->mode],
+             packet->kp, packet->ki, packet->kd);
+
+    // Update the appropriate PID controller
+    if (!packet->mode) {
+        // Rate mode
+        PIDParameters_t* pid = (packet->axis == 1) ? &rateZPid : &ratePid;
+        pid->kp = packet->kp;
+        pid->ki = packet->ki;
+        pid->kd = packet->kd;
+
+        // Reset integrator when changing gains
+        if (!packet->axis) {
+            pid_reset(pidRate->pitch);
+            pid_reset(pidRate->roll);
+        } else {
+            pid_reset(pidRate->yaw);
+        }
+
+    } else {
+        // Angle mode (only Pitch and Roll)
+        if (!packet->axis) {
+            anglePid.kp = packet->kp;
+            anglePid.ki = packet->ki;
+            anglePid.kd = packet->kd;
+            // Reset integrators
+            pid_reset(pidAngle->pitch);
+            pid_reset(pidAngle->roll);
+        }
+    }
+
+    ESP_LOGI(TAG, "PID coefficients updated successfully");
+}
+
+/* Functions run in the ESP-TIMER-TASK */
+
+static void timer_task_callback_init(int periodUS, void (*cb)(void*)) {
 
     esp_timer_create_args_t config = {
         .callback = cb,                    // Function to execute
@@ -461,24 +517,7 @@ void timer_task_callback_init(int periodUS, void (*cb)(void*)) {
     esp_timer_start_periodic(timerHandle, periodUS);
 }
 
-void pid_timer_init(void) {
-    const esp_timer_create_args_t args = {.callback = pid_callback, .dispatch_method = ESP_TIMER_ISR};
-    esp_timer_handle_t pid_timer = NULL;
-    esp_timer_create(&args, &pid_timer);
-    esp_timer_start_periodic(pid_timer, 2500); // us
-    ESP_LOGI(TAG, "PID TIMER Setup");
-}
-
-void pid_callback(void* args) {
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    if (pidTaskHandle) {
-        vTaskNotifyGiveFromISR(pidTaskHandle, &xHigherPriorityTaskWoken);
-    }
-
-    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-}
-
-void battery_callback(void* args) {
+static void battery_callback(void* args) {
     if (!mcpxQueue) {
         return;
     }
@@ -490,17 +529,8 @@ void battery_callback(void* args) {
     }
 }
 
-void remote_data_callback(void* args) {
-    int16_t package[16]; // 16 words
-
-    // Angles: pitch, roll, yaw     = 3
-    // Rates: pitch, roll, yaw      = 3
-    // Flight mode                  = 1
-    // PID outputs pitch, roll, yaw = 3
-    // Motor periods A, B, C, D     = 4
-    // Battery percentage           = 1
-    // Total                       = 15
-
+static void remote_data_callback(void* args) {
+    int16_t package[16]; // 16 words / 32 bytes
     // Angles
     package[0] = (int16_t) imuData->pitchAngle;
     package[1] = (int16_t) imuData->rollAngle;
@@ -521,9 +551,12 @@ void remote_data_callback(void* args) {
     package[12] = motors->motorC;
     package[13] = motors->motorD;
     // Battery Voltage
-    package[14] = droneData->battery;
+    package[14] = 0; // MCP3208 not on drone atm -> force to 0
 
-    esp_err_t result = esp_send_packet(&package, 32, NULL);
+    // ID for Bridge Telemetry data
+    package[15] = 3;
+
+    esp_err_t result = esp_now_send((uint8_t*) bridge_mac, (uint8_t*) package, 32);
     if (result != ESP_OK) {
         ESP_LOGW(TAG, "data callback send failed");
     }

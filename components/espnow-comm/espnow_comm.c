@@ -82,7 +82,7 @@ static esp_err_t wifi_init(void) {
     return ESP_OK;
 }
 
-static esp_err_t espnow_init(uint8_t* peer_addr[6], uint8_t num_peers) {
+static esp_err_t espnow_init(uint8_t* peer_addr[], uint8_t num_peers) {
     // Initialize ESP-NOW
     CHECK_ERR(esp_now_init(), "init failed");
 
@@ -106,7 +106,7 @@ static esp_err_t espnow_init(uint8_t* peer_addr[6], uint8_t num_peers) {
     // Add all peers
     for (uint8_t i = 0; i < num_peers; i++) {
         // Copy in the mac address
-        memcpy(peer_info.peer_addr, peer_addr, ESP_NOW_ETH_ALEN);
+        memcpy(peer_info.peer_addr, peer_addr[i], ESP_NOW_ETH_ALEN);
         CHECK_ERR(esp_now_add_peer(&peer_info), "peer add failed");
     }
 
@@ -114,7 +114,7 @@ static esp_err_t espnow_init(uint8_t* peer_addr[6], uint8_t num_peers) {
     return ESP_OK;
 }
 
-esp_err_t esp_now_module_init(uint8_t* peer_addr[6], uint8_t num_peers) {
+esp_err_t esp_now_module_init(uint8_t* peer_addr[], uint8_t num_peers) {
 
     // Initialize NVS
     esp_err_t ret = nvs_flash_init();

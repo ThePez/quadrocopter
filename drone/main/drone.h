@@ -4,14 +4,11 @@
  * Author: Jack Cairns
  * Date: 27-06-2025
  * Brief:
- * REFERENCE: None
  *****************************************************************************
  */
 
 #ifndef DRONE_H
 #define DRONE_H
-
-#include "imu.h"
 
 // STD C lib headers
 #include <math.h>
@@ -37,7 +34,7 @@
 #define ADC_MIN 0
 #define ADC_MAX 4095
 
-#define MAX_RATE 200.0  // deg/s
+#define MAX_RATE 200.0 // deg/s
 #define MAX_ANGLE 25.0 // deg
 #define FAIL_ANGLE 30.0
 
@@ -46,6 +43,11 @@
 
 #define REMOTE_UPDATE 1
 #define PID_UPDATE 2
+
+#define FAILSAFE_TIMEOUT_US 1000000 // 1 second
+#define PID_LOOP_FREQ 2500          // 400 Hz -> 2.5ms -> 2500us
+#define PID_INT_LIMIT 50
+#define PID_DIV_LIMIT 50
 
 ///////////////////////////// Structures & Enums /////////////////////////////
 
@@ -63,6 +65,7 @@ typedef struct __packed {
     double ki;       // Intergral scaler
     double kd;       // Derivative scaler
     double intLimit; // Intergral limiting term
+    double divLimit; // Derivative limiting term
     double dt;       // Time delta
 } PIDParameters_t;
 
@@ -115,19 +118,10 @@ typedef struct __packed {
 
 void input_control(void* pvParams);
 void pid_control(void* pvParams);
-void memory_init(void);
-void handle_pid_update(pid_config_packet_t* packet);
 void set_flight_mode(FlightMode_t mode);
 void motor_shutdown(void);
 void angle_failsafe(void);
 void comms_failsafe(void);
 void update_escs(void);
-double pid_update(PIDParameters_t* params, PIDResult_t* values, double ref, double actual);
-void pid_reset(PIDResult_t* pid);
-void timer_task_callback_init(int periodUS, void (*cb)(void*));
-void pid_timer_init(void);
-void pid_callback(void* args);
-void battery_callback(void* args);
-void remote_data_callback(void* args);
 
 #endif

@@ -57,7 +57,7 @@ typedef struct {
     uint16_t reserved[10];
 } __attribute__((packed)) remote_control_packet_t;
 
-esp_err_t esp_now_module_init(uint8_t* peer_addr[6], uint8_t num_peers);
+esp_err_t esp_now_module_init(uint8_t* peer_addr[], uint8_t num_peers);
 
 // DRONE's MAC ADDRESS
 extern uint8_t drone_mac[6];
