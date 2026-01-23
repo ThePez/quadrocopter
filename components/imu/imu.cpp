@@ -77,8 +77,8 @@ static void bno08x_task(void* pvParameters) {
     // imu.enable_calibrated_gyro(10000UL);
     
     /* With SH2-HAL */
-    imu.rpt.rv_ARVR_stabilized_game.enable(10000UL);
-    imu.rpt.cal_gyro.enable(10000UL);
+    imu.rpt.rv_ARVR_stabilized_game.enable(2500UL);
+    imu.rpt.cal_gyro.enable(2500UL);
     ESP_LOGI(TAG, "Reports enabled");
 
     // Register a callback function
