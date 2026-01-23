@@ -8,12 +8,13 @@
 
 static void uart_task(void* pvParameters) {
     uint8_t data[BUF_SIZE];
+    uint16_t count = 0;
 
     ESP_LOGI(TAG, "UART task started - waiting for PID packets from laptop");
 
     while (1) {
         // Read from UART (laptop)
-        int len = uart_read_bytes(UART_NUM, data, 32, pdMS_TO_TICKS(100));
+        int len = uart_read_bytes(UART_NUM, data, 32, pdMS_TO_TICKS(10));
 
         if (len == 32) {
             uint16_t* packet = (uint16_t*) data;
@@ -35,7 +36,22 @@ static void uart_task(void* pvParameters) {
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(10));
+        // Check for telemetry from drone (ESP-NOW -> UART)
+        uint8_t telemetry[32];
+        if (xQueueReceive(wifiQueue, telemetry, 0) == pdTRUE) {
+            uint16_t* packet = (uint16_t*) telemetry;
+            
+            // Check if it's telemetry data (cmd_id = 3)
+            if (packet[15] == 3) {
+                count++;
+                // ESP_LOGI(TAG, "Telemetry packet received");
+                // Forward to laptop via UART
+                uart_write_bytes(UART_NUM, telemetry, 32);
+                // No logging to avoid spam
+            }
+        }
+
+        // vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -58,6 +74,8 @@ void app_main(void) {
     esp_now_module_init(drone_mac);
 
     ESP_LOGI(TAG, "Bridge initialized - ready to forward packets");
+
+    esp_log_level_set("*", ESP_LOG_NONE);
 
     // Start UART task
     xTaskCreate(uart_task, "uart_task", 4096, NULL, 5, NULL);
