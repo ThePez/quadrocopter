@@ -30,14 +30,11 @@
     } while (0)
 
 // DRONE's MAC ADDRESS
-const uint8_t drone_mac[6] = {0xD8, 0x13, 0x2A, 0x2C, 0x4D, 0x74};
+uint8_t drone_mac[6] = {0xD8, 0x13, 0x2A, 0x2C, 0x4D, 0x74};
 // REMOTE's MAC ADDRESS
-const uint8_t remote_mac[6] = {0x10, 0x06, 0x1C, 0xF2, 0x42, 0xA4};
+uint8_t remote_mac[6] = {0x10, 0x06, 0x1C, 0xF2, 0x42, 0xA4};
 // Bridge MAC ADDRESS
-const uint8_t bridge_mac[6] = {0x58, 0x8C, 0x81, 0xCA, 0x5F, 0x80};
-
-// Local vairable used during set up
-static uint8_t peer_mac[6];
+uint8_t bridge_mac[6] = {0x58, 0x8C, 0x81, 0xCA, 0x5F, 0x80};
 
 // Encryption keys
 // PMK (Primary Master Key) - must be same on both devices
@@ -50,8 +47,7 @@ QueueHandle_t wifiQueue = NULL;
 
 static void espnow_send_cb(const uint8_t* mac_addr, esp_now_send_status_t status) {
     if (status != ESP_NOW_SEND_SUCCESS) {
-        // ESP_LOGW(TAG, "Send failed");
-        // ESP_LOGI(TAG, "Send success");
+        // Does nothing....
     }
 }
 
@@ -62,7 +58,7 @@ static void espnow_recv_cb(const esp_now_recv_info_t* recv_info, const uint8_t* 
         return;
     }
 
-    memcpy(&packet, data, sizeof(packet));
+    memcpy(&packet, data, sizeof(uint8_t) * 32);
     // No waiting
     if (xQueueSendToBack(wifiQueue, packet, 0) != pdTRUE) {
         ESP_LOGI(TAG, "Packet recieved but not posted");
@@ -86,7 +82,7 @@ static esp_err_t wifi_init(void) {
     return ESP_OK;
 }
 
-static esp_err_t espnow_init(const uint8_t peer_addr[6]) {
+static esp_err_t espnow_init(uint8_t* peer_addr[6], uint8_t num_peers) {
     // Initialize ESP-NOW
     CHECK_ERR(esp_now_init(), "init failed");
 
@@ -104,16 +100,21 @@ static esp_err_t espnow_init(const uint8_t peer_addr[6]) {
         .encrypt = true       // Encryption enabled
     };
 
-    memcpy(peer_info.peer_addr, peer_addr, ESP_NOW_ETH_ALEN);
+    // Copy in the LMK
     memcpy(peer_info.lmk, lmk_key, 16);
 
-    CHECK_ERR(esp_now_add_peer(&peer_info), "peer add failed");
+    // Add all peers
+    for (uint8_t i = 0; i < num_peers; i++) {
+        // Copy in the mac address
+        memcpy(peer_info.peer_addr, peer_addr, ESP_NOW_ETH_ALEN);
+        CHECK_ERR(esp_now_add_peer(&peer_info), "peer add failed");
+    }
 
     ESP_LOGI(TAG, "ESP-NOW initialized with encryption, peer added");
     return ESP_OK;
 }
 
-esp_err_t esp_now_module_init(const uint8_t peer_addr[6]) {
+esp_err_t esp_now_module_init(uint8_t* peer_addr[6], uint8_t num_peers) {
 
     // Initialize NVS
     esp_err_t ret = nvs_flash_init();
@@ -126,28 +127,10 @@ esp_err_t esp_now_module_init(const uint8_t peer_addr[6]) {
 
     // Initialize WiFi and ESP-NOW
     wifi_init();
-    espnow_init(peer_addr);
-    memcpy(peer_mac, peer_addr, ESP_NOW_ETH_ALEN);
-
+    espnow_init(peer_addr, num_peers);
     while (!wifiQueue) {
-        wifiQueue = xQueueCreate(5, sizeof(uint8_t) * 32);
+        wifiQueue = xQueueCreate(10, sizeof(uint8_t) * 32);
     }
 
-    return ESP_OK;
-}
-
-esp_err_t esp_send_packet(void* packet, const uint8_t len, uint8_t* addr) {
-
-    // Defaults
-    // Sender :  Receiver
-    // Drone  -> Remote
-    // Remote -> Drone
-    // Bridge -> Drone
-    if (addr == NULL) {
-        addr = peer_mac;
-    }
-
-    uint8_t* data = (uint8_t*) packet;
-    CHECK_ERR(esp_now_send(addr, data, len), "Send error");
     return ESP_OK;
 }
