@@ -73,7 +73,9 @@ static esp_err_t wifi_init(void) {
     CHECK_ERR(esp_wifi_set_storage(WIFI_STORAGE_RAM), "storage init failed");
     CHECK_ERR(esp_wifi_set_mode(WIFI_MODE_STA), "mode set failed");
     CHECK_ERR(esp_wifi_start(), "wifi not started");
-    CHECK_ERR(esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE), "Wifi channel not set");
+    CHECK_ERR(esp_wifi_set_channel(9, WIFI_SECOND_CHAN_ABOVE), "Wifi channel not set");
+    // Force Long Range Mode (slows down speed, drastically improves signal reliability)
+    // CHECK_ERR(esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_LR), "set protocol failed");
 
     // Print MAC address
     uint8_t mac[6];
@@ -126,12 +128,13 @@ esp_err_t esp_now_module_init(uint8_t* peer_addr[], uint8_t num_peers) {
 
     CHECK_ERR(ret, "nvs flash code failed");
 
-    // Initialize WiFi and ESP-NOW
-    wifi_init();
-    espnow_init(peer_addr, num_peers);
     while (!wifiQueue) {
         wifiQueue = xQueueCreate(10, sizeof(uint8_t) * 32);
     }
+
+    // Initialize WiFi and ESP-NOW
+    wifi_init();
+    espnow_init(peer_addr, num_peers);
 
     return ESP_OK;
 }
