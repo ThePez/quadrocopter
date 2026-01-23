@@ -6,52 +6,42 @@
 #define UART_NUM UART_NUM_0
 #define BUF_SIZE 1024
 
-static void uart_task(void* pvParameters) {
-    uint8_t data[BUF_SIZE];
-    uint16_t count = 0;
+static void telemetry_task(void* pvParameters) {
 
-    ESP_LOGI(TAG, "UART task started - waiting for PID packets from laptop");
+    uint16_t telemetry[16];
+
+    while (1) {
+        // Check for telemetry from drone (ESP-NOW -> UART)
+
+        if (xQueueReceive(wifiQueue, telemetry, portMAX_DELAY) == pdTRUE) {
+
+            // Check if it's telemetry data (cmd_id = 3)
+            if (telemetry[15] == 3) {
+                // Forward to laptop via UART
+                uart_write_bytes(UART_NUM, telemetry, 32);
+            }
+        }
+    }
+}
+
+static void uart_task(void* pvParameters) {
+
+    uint8_t data[BUF_SIZE];
 
     while (1) {
         // Read from UART (laptop)
-        int len = uart_read_bytes(UART_NUM, data, 32, pdMS_TO_TICKS(10));
+        int len = uart_read_bytes(UART_NUM, data, 32, portMAX_DELAY);
 
         if (len == 32) {
             uint16_t* packet = (uint16_t*) data;
             uint16_t cmd_id = packet[0];
 
-            if (cmd_id == 2) { // PID update packet
-                ESP_LOGI(TAG, "Received PID packet from laptop");
-
-                // Forward to drone via ESP-NOW
-                esp_err_t result = esp_send_packet(data, 32, NULL);
-
-                if (result == ESP_OK) {
-                    ESP_LOGI(TAG, "PID packet forwarded to drone");
-                } else {
-                    ESP_LOGE(TAG, "Failed to forward packet");
-                }
-            } else {
-                ESP_LOGW(TAG, "Unknown command ID: %d", cmd_id);
+            // PID update packet
+            if (cmd_id == 2) {
+                // Forward to drone
+                esp_now_send(drone_mac, (uint8_t*) packet, 32);
             }
         }
-
-        // Check for telemetry from drone (ESP-NOW -> UART)
-        uint8_t telemetry[32];
-        if (xQueueReceive(wifiQueue, telemetry, 0) == pdTRUE) {
-            uint16_t* packet = (uint16_t*) telemetry;
-            
-            // Check if it's telemetry data (cmd_id = 3)
-            if (packet[15] == 3) {
-                count++;
-                // ESP_LOGI(TAG, "Telemetry packet received");
-                // Forward to laptop via UART
-                uart_write_bytes(UART_NUM, telemetry, 32);
-                // No logging to avoid spam
-            }
-        }
-
-        // vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -69,14 +59,15 @@ void app_main(void) {
 
     uart_param_config(UART_NUM, &uart_config);
     uart_driver_install(UART_NUM, BUF_SIZE * 2, 0, 0, NULL, 0);
-
+    uint8_t* macs[] = {drone_mac};
     // Initialize ESP-NOW (connect to drone)
-    esp_now_module_init(drone_mac);
+    esp_now_module_init(macs, 1);
 
-    ESP_LOGI(TAG, "Bridge initialized - ready to forward packets");
+    ESP_LOGI(TAG, "Bridge initialized");
 
     esp_log_level_set("*", ESP_LOG_NONE);
 
-    // Start UART task
+    // Start Tasks
     xTaskCreate(uart_task, "uart_task", 4096, NULL, 5, NULL);
+    xTaskCreate(telemetry_task, "telemetry_task", 4096, NULL, 5, NULL);
 }
