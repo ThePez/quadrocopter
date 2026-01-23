@@ -44,7 +44,7 @@ static TargetParameters_t* remoteIn = NULL;
 // PWM duty cycles
 static PWM_t* motors = NULL;
 
-// Radio
+// Wifi
 static uint16_t* wifiPayload = NULL;
 
 ///////////////////////////////// Prototypes /////////////////////////////////
@@ -76,10 +76,10 @@ void app_main(void) {
         esp_restart();
     }
 
-    // SPI Bus Setup for radio and mcp3208
-    if (spi_bus_setup(HSPI_HOST) != ESP_OK) {
-        esp_restart();
-    }
+    // // SPI Bus Setup for radio and mcp3208
+    // if (spi_bus_setup(HSPI_HOST) != ESP_OK) {
+    //     esp_restart();
+    // }
 
     // If a failure occurs in the call, the ESP will reset
     memory_init();
@@ -282,14 +282,13 @@ static void memory_init(void) {
     }
 
     // Rate PID's
-    pidRate->pitch->intergral = 0;
-    pidRate->roll->intergral = 0;
-    pidRate->yaw->intergral = 0;
+    pid_reset(pidRate->pitch);
+    pid_reset(pidRate->roll);
+    pid_reset(pidRate->yaw);
 
     // Angle PID's
-    pidAngle->pitch->intergral = 0;
-    pidAngle->roll->intergral = 0;
-    pidAngle->yaw->intergral = 0;
+    pid_reset(pidAngle->pitch);
+    pid_reset(pidAngle->roll);
 
     // Drone info
     droneData->armed = 0;

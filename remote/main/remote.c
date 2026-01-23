@@ -97,7 +97,8 @@ void app_main(void) {
 
     mcpx_task_init(&spiVMutex, 0x1F, VSPI_HOST, MCPx_CS_PIN_REMOTE); // Remote MCP3208 cs pin is 25
 
-    esp_now_module_init(drone_mac);
+    uint8_t* macs[] = {drone_mac};
+    esp_now_module_init(macs, 1);
 
     mode_swap_interrupt_init();
     emergancy_interrupt_init();
@@ -186,7 +187,7 @@ static void remote_controller(void) {
 
             // Send the resulting packet to the radio task
             if (armed) {
-                esp_send_packet(adcPacket, 32, NULL);
+                esp_now_send(drone_mac, (uint8_t*) adcPacket, 32);
             }
 
             if (emergencyShutdown) {
