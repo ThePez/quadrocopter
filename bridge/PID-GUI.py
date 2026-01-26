@@ -589,8 +589,8 @@ class PIDTunerGUI(QMainWindow):
                 if key == 'mode':
                     text = "STABILISE" if data[key] else "ACRO"
                 elif key == 'battery':
-                    # Convert ADC to voltage (0-4096 -> 0-16.8V)
-                    voltage = (data[key] / 4096.0) * 16.8
+                    # voltage sent as mV
+                    voltage = (data[key] / 1000)
                     text = f"{voltage:.2f}{unit}"
                 else:
                     text = f"{data[key]}{unit}"
