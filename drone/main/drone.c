@@ -12,7 +12,6 @@
 #include "common_functions.h"
 #include "espnow_comm.h"
 #include "imu.h"
-#include "mcp3208.h"
 #include "motors.h"
 
 #define TAG "DRONE"
@@ -20,9 +19,8 @@
 ////////////////////////////// Global Variables //////////////////////////////
 
 // Task Handles
-TaskHandle_t sensorTaskHandle = NULL;
-TaskHandle_t inputTaskhandle = NULL;
-TaskHandle_t pidTaskHandle = NULL;
+static TaskHandle_t inputTaskhandle = NULL;
+static TaskHandle_t pidTaskHandle = NULL;
 
 // Set default Scalers for the PID structs
 static PIDParameters_t ratePid;
@@ -47,65 +45,40 @@ static PWM_t* motors = NULL;
 // Wifi
 static uint16_t* wifiPayload = NULL;
 
-///////////////////////////////// Prototypes /////////////////////////////////
-
-static void memory_init(void);
-
-static void init_pid_params(PIDParameters_t* params, double kp, double kd, double ki);
-static double pid_update(PIDParameters_t* params, PIDResult_t* values, double ref, double actual);
-static void pid_reset(PIDResult_t* pid);
-static void pid_timer_init(void);
-static void pid_callback(void* args);
-static void handle_pid_update(pid_config_packet_t* packet);
-
-static void timer_task_callback_init(int periodUS, void (*cb)(void*));
-static void battery_callback(void* args);
-static void remote_data_callback(void* args);
+// ADC
+static adc_oneshot_unit_handle_t adcHandle;
+static adc_cali_handle_t adcCaliHandle;
 
 //////////////////////////////////////////////////////////////////////////////
 
 void app_main(void) {
 
     // Set Co-efficients for the PID control loops
-    init_pid_params(&ratePid, 0.175, 0, 0);
-    init_pid_params(&rateZPid, 0.1, 0, 0);
-    init_pid_params(&anglePid, 1, 0, 0);
+    init_pid_params(&ratePid, 0.175, 0, 0); // kp, kd, ki
+    init_pid_params(&rateZPid, 0.1, 0, 0);  // kp, kd, ki
+    init_pid_params(&anglePid, 1, 0, 0);    // kp, kd, ki
 
     // Setup PWM
     if (esc_pwm_init() != ESP_OK) {
         esp_restart();
     }
 
-    // // SPI Bus Setup for radio and mcp3208
-    // if (spi_bus_setup(HSPI_HOST) != ESP_OK) {
-    //     esp_restart();
-    // }
-
     // If a failure occurs in the call, the ESP will reset
     memory_init();
 
-    // Start the C++ task
+    // ADC for measuring the battery voltage
+    adc_init();
+
+    // Start the C++ imu task
     imu_init();
-
     // Wait for the IMU initialisation to finish
-    vTaskDelay(pdMS_TO_TICKS(200));
+    vTaskDelay(pdMS_TO_TICKS(500));
 
+    // Setup ESP-NOW (pair the bridge and remote)
     uint8_t* macs[] = {remote_mac, bridge_mac};
-
-    // Setup ESP-NOW (pair the remote here)
     esp_now_module_init(macs, 2);
 
-    // // Register bridge as additional peer (used to tune the PID co-efficients)
-    // esp_now_peer_info_t bridge_peer = {.channel = 0, .ifidx = WIFI_IF_STA, .encrypt = true};
-    // memcpy(bridge_peer.peer_addr, bridge_mac, ESP_NOW_ETH_ALEN);
-    // memcpy(bridge_peer.lmk, lmk_key, 16); // Same encryption keys
-    // if (esp_now_add_peer(&bridge_peer) == ESP_OK) {
-    //     ESP_LOGI(TAG, "Bridge added as peer");
-    // } else {
-    //     ESP_LOGE(TAG, "Bridge not paired");
-    // }
-
-    // Wait to ensure the wifiQueue is created for inter-task coms
+    // Wait to ensure the wifiQueue is created before timer callback tasks are registered
     while (!wifiQueue) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -114,14 +87,11 @@ void app_main(void) {
     timer_task_callback_init(100000, remote_data_callback); // Interval of 100ms
 
     // Initialise a callback for check battery voltage
-    // timer_task_callback_init(1000000, battery_callback);    // Interval of 1 second
+    timer_task_callback_init(1000000, battery_callback); // Interval of 1 second
 
     /* Create 2 control Tasks */
     xTaskCreatePinnedToCore(&pid_control, "PID_Task", SYS_STACK, NULL, SYS_PRIO + 2, &pidTaskHandle, (BaseType_t) 1);
     xTaskCreatePinnedToCore(&input_control, "INPUT_TASK", SYS_STACK, NULL, SYS_PRIO, &inputTaskhandle, (BaseType_t) 0);
-
-    // Small delay to ensure all setup is complete before the clock is started
-    vTaskDelay(pdMS_TO_TICKS(100));
 
     // Initialise the timer for PID Task signalling
     pid_timer_init();
@@ -253,9 +223,9 @@ void pid_control(void* pvParams) {
     }
 }
 
-/* Memory setup */
+/* Setup Functions */
 
-static void memory_init(void) {
+void memory_init(void) {
     wifiPayload = pvPortMalloc(sizeof(uint16_t) * 16);
     pidRate = pvPortMalloc(sizeof(PIDFeedback_t));
     pidAngle = pvPortMalloc(sizeof(PIDFeedback_t));
@@ -296,6 +266,70 @@ static void memory_init(void) {
     droneData->angle_failsafe_active = 0;
     droneData->comms_failsafe_active = 0;
     droneData->mode = ACRO;
+}
+
+void adc_init(void) {
+
+    adc_oneshot_unit_init_cfg_t unitConfig = {.unit_id = ADC_UNIT_1};
+    adc_oneshot_new_unit(&unitConfig, &adcHandle);
+
+    adc_oneshot_chan_cfg_t config = {
+        .atten = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+
+    adc_oneshot_config_channel(adcHandle, ADC_CHANNEL_7, &config);
+    adc_calibration_init();
+}
+
+esp_err_t adc_calibration_init(void) {
+    adc_cali_handle_t handle = NULL;
+    esp_err_t ret = ESP_FAIL;
+    uint8_t calibrated = 0;
+
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+    if (!calibrated) {
+        ESP_LOGI(TAG, "calibration scheme version is %s", "Curve Fitting");
+        adc_cali_curve_fitting_config_t cali_config = {
+            .unit_id = ADC_UNIT_1,
+            .chan = ADC_CHANNEL_7,
+            .atten = ADC_ATTEN_DB_12,
+            .bitwidth = ADC_BITWIDTH_DEFAULT,
+        };
+        ret = adc_cali_create_scheme_curve_fitting(&cali_config, &handle);
+        if (ret == ESP_OK) {
+            calibrated = true;
+        }
+    }
+#endif
+
+#if ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
+    if (!calibrated) {
+        ESP_LOGI(TAG, "calibration scheme version is \"Line Fitting\"");
+        adc_cali_line_fitting_config_t cali_config = {
+            .unit_id = ADC_UNIT_1,
+            .atten = ADC_ATTEN_DB_12,
+            .bitwidth = ADC_BITWIDTH_DEFAULT,
+        };
+
+        ret = adc_cali_create_scheme_line_fitting(&cali_config, &handle);
+        if (ret == ESP_OK) {
+            calibrated = 1;
+        }
+    }
+#endif
+
+    adcCaliHandle = handle;
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Calibration Success");
+        return ESP_OK;
+    } else if (ret == ESP_ERR_NOT_SUPPORTED || !calibrated) {
+        ESP_LOGW(TAG, "eFuse not burnt, skip software calibration");
+    } else {
+        ESP_LOGE(TAG, "Invalid arg or no memory");
+    }
+
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 /* Saftey related functions */
@@ -361,7 +395,7 @@ void comms_failsafe(void) {
 void update_escs(void) {
 
     // Low throttle input (ie off)
-    if (remoteIn->throttle < 1050) {
+    if (remoteIn->throttle < 1050 || droneData->battery < CRITICAL_VOLTAGE) {
         motors->motorA = MIN_THROTTLE;
         motors->motorB = MIN_THROTTLE;
         motors->motorC = MIN_THROTTLE;
@@ -393,7 +427,7 @@ void update_escs(void) {
 
 /* PID control loop related functions */
 
-static void init_pid_params(PIDParameters_t* params, double kp, double kd, double ki) {
+void init_pid_params(PIDParameters_t* params, double kp, double kd, double ki) {
     params->divLimit = PID_DIV_LIMIT;
     params->intLimit = PID_INT_LIMIT;
     params->dt = PID_LOOP_FREQ;
@@ -402,7 +436,7 @@ static void init_pid_params(PIDParameters_t* params, double kp, double kd, doubl
     params->ki = ki;
 }
 
-static double pid_update(PIDParameters_t* params, PIDResult_t* values, double ref, double actual) {
+double pid_update(PIDParameters_t* params, PIDResult_t* values, double ref, double actual) {
 
     double dt = params->dt * 1e-6;
 
@@ -420,7 +454,7 @@ static double pid_update(PIDParameters_t* params, PIDResult_t* values, double re
     return values->proportional + values->intergral + values->derivative;
 }
 
-static void pid_reset(PIDResult_t* pid) {
+void pid_reset(PIDResult_t* pid) {
     if (pid) {
         pid->proportional = 0.0;
         pid->intergral = 0.0;
@@ -429,7 +463,7 @@ static void pid_reset(PIDResult_t* pid) {
     }
 }
 
-static void pid_timer_init(void) {
+void pid_timer_init(void) {
     const esp_timer_create_args_t args = {.callback = pid_callback, .dispatch_method = ESP_TIMER_ISR};
     esp_timer_handle_t pid_timer = NULL;
     esp_timer_create(&args, &pid_timer);
@@ -437,7 +471,7 @@ static void pid_timer_init(void) {
     ESP_LOGI(TAG, "PID TIMER Setup");
 }
 
-static void pid_callback(void* args) {
+void pid_callback(void* args) {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     if (pidTaskHandle) {
         vTaskNotifyGiveFromISR(pidTaskHandle, &xHigherPriorityTaskWoken);
@@ -446,7 +480,7 @@ static void pid_callback(void* args) {
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
-static void handle_pid_update(pid_config_packet_t* packet) {
+void handle_pid_update(pid_config_packet_t* packet) {
 
     const char* axis_names[] = {"Pitch & Roll", "Yaw"};
     const char* mode_names[] = {"Rate", "Angle"};
@@ -503,7 +537,7 @@ static void handle_pid_update(pid_config_packet_t* packet) {
 
 /* Functions run in the ESP-TIMER-TASK */
 
-static void timer_task_callback_init(int periodUS, void (*cb)(void*)) {
+void timer_task_callback_init(int periodUS, void (*cb)(void*)) {
 
     esp_timer_create_args_t config = {
         .callback = cb,                    // Function to execute
@@ -516,20 +550,34 @@ static void timer_task_callback_init(int periodUS, void (*cb)(void*)) {
     esp_timer_start_periodic(timerHandle, periodUS);
 }
 
-static void battery_callback(void* args) {
-    if (!mcpxQueue) {
+void battery_callback(void* args) {
+    int raw_value;
+    esp_err_t ret = adc_oneshot_read(adcHandle, ADC_CHANNEL_7, &raw_value);
+
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "ADC read failed");
         return;
     }
 
-    uint16_t battery;
-    if (xQueueReceive(mcpxQueue, &battery, pdMS_TO_TICKS(MCPx_DELAY)) == pdTRUE) {
-        droneData->battery = mapf(battery, 0, 1000, 0, ADC_MAX);
-        ESP_LOGI(TAG, "Battery: %d", droneData->battery);
+    float battery_voltage;
+
+    if (adcCaliHandle != NULL) {
+        // Use calibrated reading
+        int calibrated_voltage;
+        adc_cali_raw_to_voltage(adcCaliHandle, raw_value, &calibrated_voltage);
+        battery_voltage = calibrated_voltage * VOLTAGE_MULTIPLIER;
+    } else {
+        // Fallback to uncalibrated (0-3.3V range for 12dB attenuation)
+        battery_voltage = (float) raw_value * NON_CALIBRATED_MULTIPLIER * VOLTAGE_MULTIPLIER;
     }
+
+    // Store as millivolts
+    droneData->battery = (uint16_t) battery_voltage; // mV
 }
 
-static void remote_data_callback(void* args) {
+void remote_data_callback(void* args) {
     int16_t package[16]; // 16 words / 32 bytes
+
     // Angles
     package[0] = (int16_t) imuData->pitchAngle;
     package[1] = (int16_t) imuData->rollAngle;
@@ -550,13 +598,18 @@ static void remote_data_callback(void* args) {
     package[12] = motors->motorC;
     package[13] = motors->motorD;
     // Battery Voltage
-    package[14] = 0; // MCP3208 not on drone atm -> force to 0
+    package[14] = droneData->battery;
 
     // ID for Bridge Telemetry data
     package[15] = 3;
 
-    esp_err_t result = esp_now_send((uint8_t*) bridge_mac, (uint8_t*) package, 32);
-    if (result != ESP_OK) {
-        ESP_LOGW(TAG, "data callback send failed");
+    // Only allow sending after the previous message was sent
+    if (xSemaphoreTake(wifiSendSemaphore, 0) == pdTRUE) {
+        esp_err_t result = esp_now_send((uint8_t*) bridge_mac, (uint8_t*) package, 32);
+        if (result != ESP_OK) {
+            ESP_LOGW(TAG, "data callback send failed");
+        }
+    } else {
+        ESP_LOGW(TAG, "wifi semaphore unavailable");
     }
 }

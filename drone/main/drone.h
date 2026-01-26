@@ -20,6 +20,9 @@
 // KConfig header
 #include "sdkconfig.h"
 
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
+#include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -48,6 +51,14 @@
 #define PID_LOOP_FREQ 2500          // 400 Hz -> 2.5ms -> 2500us
 #define PID_INT_LIMIT 50
 #define PID_DIV_LIMIT 50
+
+// Voltage divider constants
+#define R1 46400.0f                            // 46.4k ohms
+#define R2 9840.0f                             // 9.84k ohms
+#define VOLTAGE_MULTIPLIER ((R1 + R2) / R2)    // ~5.715
+#define NON_CALIBRATED_MULTIPLIER 0.000805861f // 3.3 / 4095
+#define LOW_VOLTAGE 14000                      // mV (Warn operator at this voltage)
+#define CRITICAL_VOLTAGE 13600                 // mV (min voltage the battery can be)
 
 ///////////////////////////// Structures & Enums /////////////////////////////
 
@@ -123,5 +134,18 @@ void motor_shutdown(void);
 void angle_failsafe(void);
 void comms_failsafe(void);
 void update_escs(void);
+void memory_init(void);
+void adc_init(void);
+esp_err_t adc_calibration_init(void);
+void init_pid_params(PIDParameters_t* params, double kp, double kd, double ki);
+double pid_update(PIDParameters_t* params, PIDResult_t* values, double ref, double actual);
+void pid_reset(PIDResult_t* pid);
+void pid_timer_init(void);
+void pid_callback(void* args);
+void handle_pid_update(pid_config_packet_t* packet);
+
+void timer_task_callback_init(int periodUS, void (*cb)(void*));
+void battery_callback(void* args);
+void remote_data_callback(void* args);
 
 #endif
