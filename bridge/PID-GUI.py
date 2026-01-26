@@ -549,9 +549,8 @@ class PIDTunerGUI(QMainWindow):
 
         try:
             packet = struct.pack(
-                '<HHHfffHHHHHHHHH',
-                2, axis, mode, kp, ki, kd,
-                0, 0, 0, 0, 0, 0, 0, 0, 0
+                '<HHHfff',
+                2, axis, mode, kp, ki, kd
             )
 
             self.serial_port.write(packet)

@@ -25,21 +25,26 @@ static void telemetry_task(void* pvParameters) {
 }
 
 static void uart_task(void* pvParameters) {
-
     uint8_t data[BUF_SIZE];
 
     while (1) {
         // Read from UART (laptop)
-        int len = uart_read_bytes(UART_NUM, data, 32, portMAX_DELAY);
+        // 18 bytes -> 3 * uint16_t and 3 * float
+        int len = uart_read_bytes(UART_NUM, data, 18, portMAX_DELAY);
 
-        if (len == 32) {
+        if (len == 18) {
             uint16_t* packet = (uint16_t*) data;
             uint16_t cmd_id = packet[0];
-
             // PID update packet
             if (cmd_id == 2) {
+                ESP_LOGI(TAG, "PID Packet received");
                 // Forward to drone
-                esp_now_send(drone_mac, (uint8_t*) packet, 32);
+                if (xSemaphoreTake(wifiSendSemaphore, pdMS_TO_TICKS(100)) == pdTRUE) {
+                    esp_err_t result = esp_now_send(drone_mac, (uint8_t*) packet, 32);
+                    if (result != ESP_OK) {
+                        ESP_LOGW(TAG, "PID update send failed");
+                    }
+                }
             }
         }
     }
