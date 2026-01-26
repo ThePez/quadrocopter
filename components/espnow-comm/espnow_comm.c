@@ -44,15 +44,17 @@ const uint8_t lmk_key[16] = {0x4A, 0x7E, 0x1D, 0x9C, 0x0F, 0x6B, 0x2A, 0x8E, 0x5
 
 // Queue for recieving packets
 QueueHandle_t wifiQueue = NULL;
+SemaphoreHandle_t wifiSendSemaphore = NULL;
 
 static void espnow_send_cb(const uint8_t* mac_addr, esp_now_send_status_t status) {
+    xSemaphoreGive(wifiSendSemaphore);
     if (status != ESP_NOW_SEND_SUCCESS) {
         ESP_LOGW(TAG, "MESSAGE NOT DELIVERED");
     }
 }
 
 static void espnow_recv_cb(const esp_now_recv_info_t* recv_info, const uint8_t* data, int len) {
-    uint8_t packet[32];
+    static uint8_t packet[32];
     if (len != sizeof(packet)) {
         ESP_LOGI(TAG, "Invalid packet length");
         return;
@@ -91,6 +93,9 @@ static esp_err_t espnow_init(uint8_t* peer_addr[], uint8_t num_peers) {
 
     // Set PMK after initialization
     CHECK_ERR(esp_now_set_pmk(pmk_key), "PMK failed");
+
+    wifiSendSemaphore = xSemaphoreCreateBinary();
+    xSemaphoreGive(wifiSendSemaphore);
 
     // Register the callback functions
     CHECK_ERR(esp_now_register_send_cb(espnow_send_cb), "send cb register failed");

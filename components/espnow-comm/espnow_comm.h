@@ -72,5 +72,6 @@ extern const uint8_t lmk_key[16];
 
 // ESPNOW queue
 extern QueueHandle_t wifiQueue;
+extern SemaphoreHandle_t wifiSendSemaphore;
 
 #endif
