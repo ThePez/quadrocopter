@@ -18,58 +18,9 @@
 
 //////////////////////////// Function Prototypes /////////////////////////////
 
-/**
- * @brief FreeRTOS task that collect and transmits control data.
- *
- * Waits for incoming joystick ADC data from the joystick input queue,
- * forms a control packet, and sends it to the radio transmitter queue.
- * It can also receive and print feedback from the radio receiver queue.
- *
- * Behavior:
- * - Waits until all required queues (joystick, transmitter, receiver) are ready.
- * - Receives 5 ADC values (throttle, pitch, roll, yaw, slider) from `joysticksQueue`.
- * - Builds a 16-element packet:
- *     - Index 0: Command ID (currently fixed to 1 for "setpoint update").
- *     - Index 1–5: Control values. These are currently manually overridden.
- *     - Index 6-15: '0', Filler values.
- * - Sends the packet to `radioTransmitterQueue` for NRF24L01+ transmission.
- * - Optionally receives and prints debug values from `radioReceiverQueue`.
- *
- * Notes:
- * - ADC values received from joystick task are replaced by hardcoded midpoint values (2048),
- *   likely for testing.
- *
- * This task runs indefinitely.
- */
 static void remote_controller(void);
-
-/**
- * @brief GPIO interrupt handler for mode switching button.
- *
- * Handles both falling and rising edge interrupts on GPIO pin 33 to implement
- * button debouncing and mode switching functionality. On falling edge (button press),
- * notifies the joysticks task to toggle between angle and rate modes.
- *
- * @note This function runs in interrupt context (IRAM_ATTR).
- * @note Uses 500us (50ms) debouncing to prevent multiple triggers.
- * @note Falling edge triggers mode change; rising edge re-enables push detection.
- */
 static void intr_handler(void* args);
-
-/**
- * @brief Configure GPIO interrupt for mode switching button.
- *
- * Sets up GPIO pin 33 as input with pull-up enabled and configures interrupt
- * service to trigger on both rising and falling edges. Installs the provided
- * handler function to process button press events.
- *
- * @return ESP_OK on success, appropriate ESP error code on failure.
- *
- * @note Uses internal pull-up resistor assuming active-low button configuration.
- * @note Installs ISR service if not already present (handles ESP_ERR_INVALID_STATE).
- */
 static esp_err_t mode_swap_interrupt_init(void);
-
 static esp_err_t emergancy_interrupt_init(void);
 
 ////////////////////////////// Global Variables //////////////////////////////
@@ -86,12 +37,6 @@ button_state_t emergency_button = {.pin = SHUTOFF_BUTTON_PIN, .pushAllowed = 1};
 
 //////////////////////////////////////////////////////////////////////////////
 
-/**
- * @brief Main entry point for the remote controller firmware.
- *
- * Sets up SPI buses and initializes the radio and joystick modules.
- * Creates and launches the main `remote_controller` task.
- */
 void app_main(void) {
     spi_bus_setup(VSPI_HOST);
 
@@ -185,7 +130,7 @@ static void remote_controller(void) {
             // ESP_LOGI(TAG, "Throttle %d, Pitch %d, Roll %d, Yaw %d", adcValues[2], adcValues[1], adcValues[0],
             //          adcValues[3]);
 
-            // Send the resulting packet to the radio task
+            // Send the resulting packet to the drone
             if (armed) {
                 esp_now_send(drone_mac, (uint8_t*) adcPacket, 32);
             }
@@ -196,20 +141,20 @@ static void remote_controller(void) {
         }
 
         // Was data recieved back from the drone? (No waiting)
-        if (xQueueReceive(wifiQueue, adcPacket, 0) == pdTRUE) {
-            int16_t* data = (int16_t*) adcPacket;
-            // If not armed don't print data
-            if (!armed) {
-                continue;
-            }
+        // if (xQueueReceive(wifiQueue, adcPacket, 0) == pdTRUE) {
+        //     int16_t* data = (int16_t*) adcPacket;
+        //     // If not armed don't print data
+        //     if (!armed) {
+        //         continue;
+        //     }
 
-            ESP_LOGI(TAG,
-                     "Mode: %s, Angles: P=%d R=%d Y=%d, Rates: P=%d R=%d Y=%d, PID: P=%d R=%d Y=%d, Motors: FL=%u "
-                     "BL=%u BR=%u FR=%u BAT=%f",
-                     data[6] ? "ANGLE" : "RATE", data[0], data[1], data[2], data[3], data[4], data[5], data[7], data[8],
-                     data[9], adcPacket[10], adcPacket[11], adcPacket[12], adcPacket[13],
-                     mapf(adcPacket[14], 0, 4096, 0, 16.8));
-        }
+        //     ESP_LOGI(TAG,
+        //              "Mode: %s, Angles: P=%d R=%d Y=%d, Rates: P=%d R=%d Y=%d, PID: P=%d R=%d Y=%d, Motors: FL=%u "
+        //              "BL=%u BR=%u FR=%u BAT=%f",
+        //              data[6] ? "ANGLE" : "RATE", data[0], data[1], data[2], data[3], data[4], data[5], data[7],
+        //              data[8], data[9], adcPacket[10], adcPacket[11], adcPacket[12], adcPacket[13],
+        //              mapf(adcPacket[14], 0, 4096, 0, 16.8));
+        // }
     }
 }
 

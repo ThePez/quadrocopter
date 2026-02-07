@@ -76,13 +76,7 @@ static esp_err_t wifi_init(void) {
     CHECK_ERR(esp_wifi_set_mode(WIFI_MODE_STA), "mode set failed");
     CHECK_ERR(esp_wifi_start(), "wifi not started");
     CHECK_ERR(esp_wifi_set_channel(9, WIFI_SECOND_CHAN_ABOVE), "Wifi channel not set");
-    // Force Long Range Mode (slows down speed, drastically improves signal reliability)
-    // CHECK_ERR(esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_LR), "set protocol failed");
-
-    // Print MAC address
-    uint8_t mac[6];
-    esp_wifi_get_mac(WIFI_IF_STA, mac);
-    ESP_LOGI(TAG, "MAC Address: %02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    
     ESP_LOGI(TAG, "Wifi initialised");
     return ESP_OK;
 }
@@ -93,9 +87,6 @@ static esp_err_t espnow_init(uint8_t* peer_addr[], uint8_t num_peers) {
 
     // Set PMK after initialization
     CHECK_ERR(esp_now_set_pmk(pmk_key), "PMK failed");
-
-    wifiSendSemaphore = xSemaphoreCreateBinary();
-    xSemaphoreGive(wifiSendSemaphore);
 
     // Register the callback functions
     CHECK_ERR(esp_now_register_send_cb(espnow_send_cb), "send cb register failed");
@@ -136,6 +127,9 @@ esp_err_t esp_now_module_init(uint8_t* peer_addr[], uint8_t num_peers) {
     while (!wifiQueue) {
         wifiQueue = xQueueCreate(10, sizeof(uint8_t) * 32);
     }
+
+    wifiSendSemaphore = xSemaphoreCreateBinary();
+    xSemaphoreGive(wifiSendSemaphore);
 
     // Initialize WiFi and ESP-NOW
     wifi_init();
