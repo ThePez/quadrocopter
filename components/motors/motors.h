@@ -16,8 +16,6 @@
 #include "driver/mcpwm_prelude.h"
 
 // Motor/ESC's GPIO Pins
-// Ensure these are sequential as the PWM setup requires this.
-// If not possible alter the esc_pwm_init() function.
 #define MOTOR_A_CW 17  // Front left
 #define MOTOR_B_CCW 16 // Rear left
 #define MOTOR_C_CW 27  // Rear right

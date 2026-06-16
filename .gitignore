@@ -5,3 +5,4 @@
 components/esp32_BNO08x/*
 components/un-used/esp32_BNO08x-no_hal/*
 .idea
+**/.cache
