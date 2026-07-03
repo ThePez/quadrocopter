@@ -3,34 +3,19 @@
  * File: motor.c
  * Author: Jack Cairns
  * Date: 13-07-2025
- * Brief:
- * REFERENCE: None
  *****************************************************************************
  */
 
 #include "motors.h"
+
 #include "common_functions.h"
-#include "esp_log.h"
 
-static const char* TAG = "PWM";
-static mcpwm_cmpr_handle_t esc_pwm_comparators[4] = {NULL};
+#include <driver/mcpwm_prelude.h>
+#include <esp_log.h>
 
-#define CHECK_ERR(code, msg)                                                                                           \
-    do {                                                                                                               \
-        esp_err_t err = (code);                                                                                        \
-        if (err != ESP_OK) {                                                                                           \
-            ESP_LOGE(TAG, msg);                                                                                        \
-            return err;                                                                                                \
-        }                                                                                                              \
-    } while (0)
+#define TAG "PWM"
 
-#define CHECK_ERR_NO_LOG(code)                                                                                         \
-    do {                                                                                                               \
-        esp_err_t err = (code);                                                                                        \
-        if (err != ESP_OK) {                                                                                           \
-            return err;                                                                                                \
-        }                                                                                                              \
-    } while (0)
+static mcpwm_cmpr_handle_t esc_pwm_comparators[4] = {NULL, NULL, NULL, NULL};
 
 esp_err_t esc_pwm_init(void) {
     // Create and configure the timers
@@ -52,8 +37,10 @@ esp_err_t esc_pwm_init(void) {
     // Operator must be in the same group as timer
     mcpwm_operator_config_t operator_configs[2] = {{.group_id = 0}, {.group_id = 1}};
     for (uint8_t i = 0; i < 4; i++) {
-        CHECK_ERR(mcpwm_new_operator(&operator_configs[i % 2], &operators[i]), "Failed to create PWM operator");
-        CHECK_ERR(mcpwm_operator_connect_timer(operators[i], pwm_timers[i % 2]), "Failed to connect operator to timer");
+        CHECK_ERR(mcpwm_new_operator(&operator_configs[i % 2], &operators[i]),
+                  "Failed to create PWM operator");
+        CHECK_ERR(mcpwm_operator_connect_timer(operators[i], pwm_timers[i % 2]),
+                  "Failed to connect operator to timer");
     }
 
     // Create and configure the Comparators and Generators
@@ -75,13 +62,15 @@ esp_err_t esc_pwm_init(void) {
     // Configure generator actions: HIGH on timer period, LOW on compare match
     for (uint8_t i = 0; i < 4; i++) {
         CHECK_ERR(mcpwm_generator_set_action_on_timer_event(
-                      generators[i], MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY,
-                                                                  MCPWM_GEN_ACTION_HIGH)),
+                      generators[i],
+                      MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP,
+                                                   MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_HIGH)),
                   "Failed to set timer action for generator");
 
         CHECK_ERR(mcpwm_generator_set_action_on_compare_event(
-                      generators[i], MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, esc_pwm_comparators[i],
-                                                                    MCPWM_GEN_ACTION_LOW)),
+                      generators[i],
+                      MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP,
+                                                     esc_pwm_comparators[i], MCPWM_GEN_ACTION_LOW)),
                   "Failed to set compare action for generator");
 
         // Set the initial compare values to MOTOR_SPEED_MIN
@@ -91,12 +80,13 @@ esp_err_t esc_pwm_init(void) {
     // Enable and start the timers
     for (uint8_t i = 0; i < 2; i++) {
         CHECK_ERR(mcpwm_timer_enable(pwm_timers[i]), "Failed to enable PWM timer");
-        CHECK_ERR(mcpwm_timer_start_stop(pwm_timers[i], MCPWM_TIMER_START_NO_STOP), "Failed to start PWM timer");
+        CHECK_ERR(mcpwm_timer_start_stop(pwm_timers[i], MCPWM_TIMER_START_NO_STOP),
+                  "Failed to start PWM timer");
     }
 
     // Ensure all motors are completely off on startup.
     for (uint8_t i = 0; i < NUMBER_OF_MOTORS; i++) {
-        
+
         esc_pwm_set_duty_cycle(i, MOTOR_SPEED_MIN);
     }
 
