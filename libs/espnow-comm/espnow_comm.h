@@ -13,11 +13,6 @@
 #include <freertos/FreeRTOS.h>
 #include <stdint.h>
 
-struct task_params_t {
-    uint8_t mac[6];
-    int frequency;
-};
-
 struct sensor_telemetry_t {
     float pitch_angle;
     float roll_angle;
