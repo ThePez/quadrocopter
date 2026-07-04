@@ -163,11 +163,13 @@ static void mcpx_task(void* pvParams) {
     }
 }
 
-void mcpx_task_init(SemaphoreHandle_t* spiMutex, uint8_t channels, spi_host_device_t spiHost,
-                    uint8_t cs) {
+esp_err_t mcpx_task_init(SemaphoreHandle_t* spiMutex, uint8_t channels, spi_host_device_t spiHost,
+                         uint8_t cs) {
     params.spiMutex = spiMutex;
     params.channels = channels;
     params.host = spiHost;
     MCP3208_CS_PIN = cs;
-    xTaskCreate((void*) &mcpx_task, "MCPxTask", MCPx_STACK, NULL, MCPx_PRIORITY, &mcpxTaskHandle);
+    BaseType_t result = xTaskCreate((void*) &mcpx_task, "MCPxTask", MCPx_STACK, NULL,
+                                    MCPx_PRIORITY, &mcpxTaskHandle);
+    return (result == pdPASS) ? ESP_OK : ESP_FAIL;
 }

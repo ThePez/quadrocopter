@@ -12,6 +12,7 @@
 #define MCP3208_H
 
 #include <driver/spi_master.h>
+#include <esp_err.h>
 #include <freertos/FreeRTOS.h>
 
 #define MCPx_CS_PIN_DRONE 33  // Drone
@@ -45,8 +46,8 @@
  * @param channels Bitmask defining which channels should be sampled.
  * @param spiHost SPI host ID where the MCP3208 is connected.
  */
-void mcpx_task_init(SemaphoreHandle_t* spiMutex, uint8_t channels, spi_host_device_t spiHost,
-                    uint8_t cs);
+esp_err_t mcpx_task_init(SemaphoreHandle_t* spiMutex, uint8_t channels, spi_host_device_t spiHost,
+                         uint8_t cs);
 
 extern TaskHandle_t mcpxTaskHandle;
 extern QueueHandle_t mcpxQueue;

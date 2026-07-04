@@ -41,6 +41,7 @@ QueueHandle_t wifiQueue = NULL;
 SemaphoreHandle_t wifiSendSemaphore = NULL;
 
 static void espnow_send_cb(const uint8_t* mac_addr, esp_now_send_status_t status) {
+    ARG_UNUSED(mac_addr);
     xSemaphoreGive(wifiSendSemaphore);
     if (status != ESP_NOW_SEND_SUCCESS) {
         ESP_LOGW(TAG, "MESSAGE NOT DELIVERED");
@@ -49,6 +50,9 @@ static void espnow_send_cb(const uint8_t* mac_addr, esp_now_send_status_t status
 
 static void espnow_recv_cb(const esp_now_recv_info_t* recv_info, const uint8_t* data, int len) {
 
+    ARG_UNUSED(recv_info);
+    ARG_UNUSED(len);
+    
     // Encoding
     // sensor_packet.crc16 =
     //     esp_rom_crc16_le(0, (uint8_t*) &(sensor_packet.data), sizeof(union ble_data));

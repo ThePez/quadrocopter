@@ -12,6 +12,7 @@
 #include "espnow_comm.h"
 #include "mcp3208.h"
 
+#include <driver/gpio.h>
 #include <esp_log.h>
 #include <esp_now.h>
 #include <esp_rom_crc.h>
@@ -25,6 +26,13 @@ struct button_state_t {
     uint64_t prevRising;
     gpio_num_t pin;
     uint8_t pushAllowed;
+    uint32_t notifyBit;
+};
+
+struct remote_state_t {
+    FlightMode_t flightMode;
+    uint8_t armed;
+    uint8_t emergency;
 };
 
 #define REMOTE_STACK (configMINIMAL_STACK_SIZE * 2)
@@ -42,13 +50,19 @@ struct button_state_t {
 #define MIN_THROTTLE 1000.0
 #define MAX_THROTTLE 2000.0
 
+#define MODE_BUTTON_BIT (1UL << 0)
+#define EMERGENCY_BUTTON_BIT (1UL << 1)
+#define TIMER_BIT (1UL << 31)
+
 ////////////////////////////// Global Variables //////////////////////////////
 
 TaskHandle_t remoteTaskHandle = NULL;
 
 // Button states
-struct button_state_t mode_button = {.pin = MODE_BUTTON_PIN, .pushAllowed = 1};
-struct button_state_t emergency_button = {.pin = SHUTOFF_BUTTON_PIN, .pushAllowed = 1};
+struct button_state_t mode_button = {
+    .pin = MODE_BUTTON_PIN, .pushAllowed = 1, .notifyBit = MODE_BUTTON_BIT};
+struct button_state_t emergency_button = {
+    .pin = SHUTOFF_BUTTON_PIN, .pushAllowed = 1, .notifyBit = EMERGENCY_BUTTON_BIT};
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -63,7 +77,7 @@ static void IRAM_ATTR intr_handler(void* args) {
         // Falling edge
         button->prevFalling = currentTick;
         button->pushAllowed = 0;
-        xTaskNotifyFromISR(remoteTaskHandle, button->pin, eSetValueWithOverwrite,
+        xTaskNotifyFromISR(remoteTaskHandle, button->notifyBit, eSetBits,
                            &xHigherPriorityTaskWoken);
         portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     } else if (state && (currentTick - button->prevFalling >= DEBOUNCE_US)) {
@@ -99,43 +113,124 @@ static esp_err_t interrupt_init(void* handler, struct button_state_t* button) {
     return ESP_OK;
 }
 
-static esp_err_t emergancy_interrupt_init(void) {
-    return interrupt_init(intr_handler, &emergency_button);
+void remote_callback(void* args) {
+    ARG_UNUSED(args);
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    if (remoteTaskHandle) {
+        xTaskNotifyFromISR(remoteTaskHandle, TIMER_BIT, eSetBits, &xHigherPriorityTaskWoken);
+    }
+
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
-static esp_err_t mode_swap_interrupt_init(void) {
-    return interrupt_init(intr_handler, &mode_button);
+esp_err_t remote_timer_init(void) {
+    const esp_timer_create_args_t args = {.callback = remote_callback,
+                                          .dispatch_method = ESP_TIMER_ISR};
+    esp_timer_handle_t remote_timer = NULL;
+    CHECK_ERR(esp_timer_create(&args, &remote_timer), "Timer create failed");
+    CHECK_ERR(esp_timer_start_periodic(remote_timer, 50000), "Timer start failed");
+    ESP_LOGI(TAG, "Remote Timer Initialised");
+    return ESP_OK;
 }
 
 static esp_err_t hardware_init(void) {
     uint8_t* macs[] = {drone_mac};
-    esp_now_module_init(macs, 1);
+    CHECK_ERR_NO_LOG(esp_now_module_init(macs, 1));
+    CHECK_ERR_NO_LOG(interrupt_init(intr_handler, &mode_button));
+    CHECK_ERR_NO_LOG(interrupt_init(intr_handler, &emergency_button));
+    CHECK_ERR(spi_bus_setup(VSPI_HOST), "SPI bus failed init");
+    // Remote MCP3208 cs pin is 25
+    CHECK_ERR(mcpx_task_init(&spiVMutex, 0x1F, VSPI_HOST, MCPx_CS_PIN_REMOTE),
+              "MCPx Task creation failed");
 
-    esp_err_t err = mode_swap_interrupt_init();
+    CHECK_ERR_NO_LOG(remote_timer_init());
 
-    err = emergancy_interrupt_init();
-    return err;
+    return ESP_OK;
+}
+
+static void handle_mode_button(struct remote_state_t* state) {
+    if (!state->armed) {
+        return;
+    }
+
+    state->flightMode = (state->flightMode != ACRO) ? ACRO : STABILISE;
+    gpio_set_level(STATUS_LED, (state->flightMode == STABILISE) ? 1 : 0);
+    ESP_LOGI(TAG, "Flight Mode %s", (state->flightMode == STABILISE) ? "Stabilise" : "Acro");
+
+    // Consume the set MODE bit
+    xTaskNotifyWait(MODE_BUTTON_BIT, 0, NULL, 0);
+}
+
+static void handle_emergency_button(struct remote_state_t* state) {
+    if (!state->armed) {
+        return;
+    }
+
+    state->emergency = 1;
+    ESP_LOGE(TAG, "Emergancy");
+
+    // Consume the set MODE & EMERGENCY bits
+    xTaskNotifyWait(MODE_BUTTON_BIT | EMERGENCY_BUTTON_BIT, 0, NULL, 0);
+}
+
+static void handle_timer_tick(struct remote_state_t* state, uint32_t notifyValue,
+                              struct wifi_packet_t* packet) {
+    // Notify the MCPx task to perform an ADC reading, then wait for the reply
+    xTaskNotify(mcpxTaskHandle, 0, eNoAction);
+    uint16_t adcValues[MCP3208_MAX_CHANNELS];
+    if (xQueueReceive(mcpxQueue, adcValues, REMOTE_DELAY) != pdTRUE) {
+        return;
+    }
+
+    // Check if now armed
+    if (!state->armed && (notifyValue & MODE_BUTTON_BIT) && (notifyValue & EMERGENCY_BUTTON_BIT)) {
+        if (!state->emergency) {
+            state->armed = 1;
+            ESP_LOGW(TAG, "REMOTE ARMED - communication is now enabled.");
+        } else if (adcValues[2] < 50) {
+            state->emergency = 0;
+            state->armed = 1;
+            ESP_LOGW(TAG, "REMOTE REARMED - communication is now enabled.");
+        }
+
+        if (state->armed) {
+            // Consume the ARMING bits now that arming has happened
+            xTaskNotifyWait(MODE_BUTTON_BIT | EMERGENCY_BUTTON_BIT, 0, NULL, 0);
+        }
+    }
+
+    struct remote_telemetry_t* wifiData = &packet->data.remote;
+    wifiData->flight_mode = state->flightMode;
+    wifiData->throttle = (state->emergency) ? 0 : adcValues[2];
+    wifiData->pitch = adcValues[1];
+    wifiData->roll = adcValues[0];
+    wifiData->yaw = adcValues[3];
+    packet->crc16 = esp_rom_crc16_le(0, (uint8_t*) &packet->data, sizeof(union packet_data));
+
+    // Send the resulting packet to the drone
+    if (state->armed) {
+        esp_now_send(drone_mac, (uint8_t*) packet, sizeof(struct wifi_packet_t));
+    }
+
+    if (state->emergency) {
+        state->armed = 0;
+    }
 }
 
 static void remote_controller(void* pvParams) {
     (void) pvParams;
     if (hardware_init()) {
-        esp_restart();
+        // This is unrecoverable -> restart the device
+        esp_restart(); // This function doesn't return
     }
 
-    uint16_t adcValues[5] = {0};
     struct wifi_packet_t packet = {.packet_id = REMOTE};
-    struct remote_telemetry_t* wifiData = &packet.data.remote;
     // Idle until all queue's are created
     while (!mcpxQueue || !wifiQueue) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
-    FlightMode_t flightMode = ACRO;
-    uint8_t modePressed = 0;
-    uint8_t emergencyPressed = 0;
-    uint8_t emergencyShutdown = 0;
-    uint8_t armed = 0;
+    struct remote_state_t state = {.flightMode = ACRO};
     uint32_t notifyValue;
 
     // Initialize status LED
@@ -150,69 +245,23 @@ static void remote_controller(void* pvParams) {
     ESP_LOGW(TAG, "Waiting to be armed, press both joysticks.");
 
     while (1) {
-        // Get adc values from the input queue
-        if (xQueueReceive(mcpxQueue, adcValues, REMOTE_DELAY) == pdTRUE) {
+        xTaskNotifyWait(0, TIMER_BIT, &notifyValue, portMAX_DELAY);
+        if (notifyValue & MODE_BUTTON_BIT) {
+            handle_mode_button(&state);
+        }
 
-            // Was a joystick pressed?
-            if (xTaskNotifyWait(0, 0xFFFFFFFF, &notifyValue, 0) == pdTRUE) {
-                switch (notifyValue) {
-                case MODE_BUTTON_PIN: // Flight Mode
-                    modePressed = 1;
-                    if (armed) {
-                        flightMode = (flightMode != ACRO) ? ACRO : STABILISE;
-                        gpio_set_level(STATUS_LED, (flightMode == STABILISE) ? 1 : 0);
-                        ESP_LOGI(TAG, "Flight Mode %s",
-                                 (flightMode == STABILISE) ? "Stabilise" : "Acro");
-                    }
-                    break;
+        if (notifyValue & EMERGENCY_BUTTON_BIT) {
+            handle_emergency_button(&state);
+        }
 
-                case SHUTOFF_BUTTON_PIN: // Emergancy motor shutoff
-                    emergencyPressed = 1;
-                    if (armed) {
-                        emergencyPressed = 0;
-                        emergencyShutdown = 1;
-                        modePressed = 0;
-                        ESP_LOGE(TAG, "Emergancy");
-                    }
-
-                    break;
-                }
-            }
-
-            // Check if now armed
-            if (!armed && modePressed && emergencyPressed) {
-                if (!emergencyShutdown) {
-                    armed = 1;
-                    ESP_LOGW(TAG, "REMOTE ARMED — communication is now enabled.");
-                } else if (adcValues[2] < 50) {
-                    emergencyShutdown = 0;
-                    armed = 1;
-                    ESP_LOGW(TAG, "REMOTE REARMED — communication is now enabled.");
-                }
-            }
-
-            wifiData->flight_mode = flightMode;
-            wifiData->throttle = (emergencyShutdown) ? 0 : adcValues[2];
-            wifiData->pitch = adcValues[1];
-            wifiData->roll = adcValues[0];
-            wifiData->yaw = adcValues[3];
-            packet.crc16 = esp_rom_crc16_le(0, (uint8_t*) &packet.data, sizeof(union packet_data));
-
-            // Send the resulting packet to the drone
-            if (armed) {
-                esp_now_send(drone_mac, (uint8_t*) &packet, sizeof(struct wifi_packet_t));
-            }
-
-            if (emergencyShutdown) {
-                armed = 0;
-            }
+        if (notifyValue & TIMER_BIT) {
+            handle_timer_tick(&state, notifyValue, &packet);
         }
     }
 }
 
 esp_err_t init_remote(void) {
-    spi_bus_setup(VSPI_HOST);
-    mcpx_task_init(&spiVMutex, 0x1F, VSPI_HOST, MCPx_CS_PIN_REMOTE); // Remote MCP3208 cs pin is 25
-    return xTaskCreate(remote_controller, "REMOTE_TASK", REMOTE_STACK, NULL, REMOTE_PRIO,
-                       &remoteTaskHandle);
+    BaseType_t result = xTaskCreate(remote_controller, "REMOTE_TASK", REMOTE_STACK, NULL,
+                                    REMOTE_PRIO, &remoteTaskHandle);
+    return (result == pdPASS) ? ESP_OK : ESP_FAIL;
 }

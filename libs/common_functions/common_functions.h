@@ -13,6 +13,8 @@
 #include <driver/spi_master.h>
 #include <esp_err.h>
 
+#define ARG_UNUSED(arg) ((void) arg)
+
 // Handle differences between ESP32 and ESP32-S3
 #ifdef CONFIG_IDF_TARGET_ESP32
 
@@ -71,7 +73,6 @@ typedef enum {
     ACRO,
     STABILISE
 } FlightMode_t; // ACRO is rate control (FPV mode), STABILISE is standard mode
-
 
 esp_err_t spi_bus_setup(spi_host_device_t host);
 
