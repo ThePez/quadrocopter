@@ -22,7 +22,7 @@ build target: _idf-check
     esac
 
     # Only set-target if this is a fresh build dir (avoids unnecessary reconfigure)
-    if [ ! -f "{{target}}/build/sdkconfig" ]; then
+    if [ ! -f "{{target}}/build/CMakeCache.txt" ]; then
         idf.py -C {{target}} -B {{target}}/build set-target "$chip"
     fi
 
