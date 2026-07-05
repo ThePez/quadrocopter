@@ -13,7 +13,7 @@
 #include <driver/mcpwm_prelude.h>
 #include <esp_log.h>
 
-#define TAG "PWM"
+#define TAG "MOTORS"
 
 static mcpwm_cmpr_handle_t esc_pwm_comparators[4] = {NULL, NULL, NULL, NULL};
 
@@ -45,7 +45,7 @@ esp_err_t esc_pwm_init(void) {
 
     // Create and configure the Comparators and Generators
     mcpwm_comparator_config_t cmpr_config = {0};
-    mcpwm_gen_handle_t generators[4] = {NULL};
+    mcpwm_gen_handle_t generators[4] = {};
     mcpwm_generator_config_t generator_configs[4] = {};
     generator_configs[0].gen_gpio_num = MOTOR_A_CW;
     generator_configs[1].gen_gpio_num = MOTOR_B_CCW;
@@ -97,7 +97,7 @@ esp_err_t esc_pwm_init(void) {
 esp_err_t esc_pwm_set_duty_cycle(MotorIndex motor, uint16_t duty_cycle) {
 
     // Ensure that the motor index given is valid
-    if (!(motor < NUMBER_OF_MOTORS)) {
+    if (motor >= NUMBER_OF_MOTORS) {
         ESP_LOGE(TAG, "Invalid motor index: %d (max: %d)", motor, NUMBER_OF_MOTORS - 1);
         return ESP_ERR_INVALID_ARG;
     }
