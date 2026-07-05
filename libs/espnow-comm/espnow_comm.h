@@ -38,9 +38,18 @@ struct remote_telemetry_t {
     uint16_t flight_mode;
 };
 
+struct pid_config_telemetry_t {
+    float kp;
+    float ki;
+    float kd;
+    uint16_t axis; // 0 = Pitch & Roll, 1 = Yaw
+    uint16_t mode; // 0 = Rate, 1 = Angle
+};
+
 union packet_data {
     struct sensor_telemetry_t sensor;
     struct remote_telemetry_t remote;
+    struct pid_config_telemetry_t pid_config;
 };
 
 struct wifi_packet_t {
@@ -49,7 +58,7 @@ struct wifi_packet_t {
     uint8_t packet_id;
 };
 
-enum wifi_packet_id { SENSOR, REMOTE };
+enum wifi_packet_id { SENSOR, REMOTE, PID_CONFIG };
 
 /**
  * @brief Initializes NVS, WiFi, and ESP-NOW, and registers the given peers.

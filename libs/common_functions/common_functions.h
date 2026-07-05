@@ -69,10 +69,10 @@
         }                                                                                          \
     } while (0)
 
-typedef enum {
-    ACRO,
-    STABILISE
-} FlightMode_t; // ACRO is rate control (FPV mode), STABILISE is standard mode
+enum flight_mode_t {
+    ACRO,     // ACRO is rate control (FPV mode)
+    STABILISE // STABILISE is standard mode (angles)
+};
 
 esp_err_t spi_bus_setup(spi_host_device_t host);
 
