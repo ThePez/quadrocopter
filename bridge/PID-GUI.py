@@ -116,14 +116,14 @@ class PlotWidget(QWidget):
         self.plot_widget.setLabel('left', 'Value')
         self.plot_widget.setLabel('bottom', 'Time (s)')
 
+        # Add legend
+        self.plot_widget.addLegend()
+
         # Create plot curves
         self.curves: dict[str, pg.PlotDataItem] = {}
         for label, color in zip(labels, colors):
             pen = pg.mkPen(color=color, width=2)
             self.curves[label] = self.plot_widget.plot([], [], pen=pen, name=label)
-
-        # Add legend
-        self.plot_widget.addLegend()
 
         layout.addWidget(self.plot_widget)
 
