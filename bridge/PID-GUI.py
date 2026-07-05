@@ -19,6 +19,18 @@ from PyQt5.QtGui import QFont, QCloseEvent
 
 import pyqtgraph as pg
 
+# Mirrors struct sensor_telemetry_t in libs/espnow-comm/espnow_comm.h:
+# 10 floats (angles/rates/mode/pid outputs) then 5 uint16_t (motor duty cycles, battery mV).
+# The struct isn't packed, so the compiler pads its sizeof() up to a multiple of 4
+# The trailing '2x' skips those 2 pad bytes; bridge.c sends sizeof(struct
+# sensor_telemetry_t) bytes per packet, so this must track that exactly.
+SENSOR_TELEMETRY_FORMAT = '<10f5H2x'
+SENSOR_TELEMETRY_SIZE = struct.calcsize(SENSOR_TELEMETRY_FORMAT)
+
+# Mirrors struct pid_config_telemetry_t in libs/espnow-comm/espnow_comm.h:
+# 3 floats (kp, ki, kd) then 2 uint16_t (axis, mode).
+PID_CONFIG_FORMAT = '<fffHH'
+
 
 class TelemetryThread(QThread):
     """Thread for handling serial communication and telemetry"""
@@ -40,37 +52,34 @@ class TelemetryThread(QThread):
                     data: bytes = self.serial_port.read(self.serial_port.in_waiting)
                     self.buffer.extend(data)
 
-                    # Process complete 32-byte packets
-                    while len(self.buffer) >= 32:
-                        packet: bytearray = self.buffer[:32]
-                        self.buffer = self.buffer[32:]
+                    # Process complete sensor_telemetry_t packets
+                    while len(self.buffer) >= SENSOR_TELEMETRY_SIZE:
+                        packet: bytearray = self.buffer[:SENSOR_TELEMETRY_SIZE]
+                        self.buffer = self.buffer[SENSOR_TELEMETRY_SIZE:]
 
                         # Parse packet
                         try:
-                            values: Tuple[int, ...] = struct.unpack('<16H', packet)
+                            values: Tuple[float, ...] = struct.unpack(SENSOR_TELEMETRY_FORMAT, packet)
 
-                            # Check if it's telemetry (cmd_id = 3 at index 15)
-                            if values[15] == 3:
-                                # Convert to signed where needed
-                                telemetry: Dict[str, Any] = {
-                                    'pitch_angle': struct.unpack('<h', struct.pack('<H', values[0]))[0],
-                                    'roll_angle': struct.unpack('<h', struct.pack('<H', values[1]))[0],
-                                    'yaw_angle': struct.unpack('<h', struct.pack('<H', values[2]))[0],
-                                    'pitch_rate': struct.unpack('<h', struct.pack('<H', values[3]))[0],
-                                    'roll_rate': struct.unpack('<h', struct.pack('<H', values[4]))[0],
-                                    'yaw_rate': struct.unpack('<h', struct.pack('<H', values[5]))[0],
-                                    'mode': values[6],
-                                    'pitch_pid': struct.unpack('<h', struct.pack('<H', values[7]))[0],
-                                    'roll_pid': struct.unpack('<h', struct.pack('<H', values[8]))[0],
-                                    'yaw_pid': struct.unpack('<h', struct.pack('<H', values[9]))[0],
-                                    'motor_fl': values[10],
-                                    'motor_bl': values[11],
-                                    'motor_br': values[12],
-                                    'motor_fr': values[13],
-                                    'battery': values[14],
-                                    'timestamp': datetime.now()
-                                }
-                                self.telemetry_received.emit(telemetry)
+                            telemetry: Dict[str, Any] = {
+                                'pitch_angle': values[0],
+                                'roll_angle': values[1],
+                                'yaw_angle': values[2],
+                                'pitch_rate': values[3],
+                                'roll_rate': values[4],
+                                'yaw_rate': values[5],
+                                'mode': int(values[6]),
+                                'pitch_pid': values[7],
+                                'roll_pid': values[8],
+                                'yaw_pid': values[9],
+                                'motor_fl': values[10],
+                                'motor_bl': values[11],
+                                'motor_br': values[12],
+                                'motor_fr': values[13],
+                                'battery': values[14],
+                                'timestamp': datetime.now()
+                            }
+                            self.telemetry_received.emit(telemetry)
                         except Exception as e:
                             self.response_received.emit(f"Parse error: {e}")
 
@@ -558,10 +567,7 @@ class PIDTunerGUI(QMainWindow):
             return
 
         try:
-            packet: bytes = struct.pack(
-                '<HHHfff', # 3 * uint16_t values, then 3 * float values
-                2, axis, mode, kp, ki, kd # the 6 values
-            )
+            packet: bytes = struct.pack(PID_CONFIG_FORMAT, kp, ki, kd, axis, mode)
 
             self.serial_port.write(packet)
             self.serial_port.flush()
@@ -615,16 +621,16 @@ class PIDTunerGUI(QMainWindow):
         self.angles_plot.add_data(angles_data)
 
         rates_data: Dict[str, int] = {
-            "Pitch Rate": data['pitch_rate'],
-            "Roll Rate": data['roll_rate'],
-            "Yaw Rate": data['yaw_rate']
+            "Pitch": data['pitch_rate'],
+            "Roll": data['roll_rate'],
+            "Yaw": data['yaw_rate']
         }
         self.rates_plot.add_data(rates_data)
 
         pid_data: Dict[str, int] = {
-            "Pitch PID": data['pitch_pid'],
-            "Roll PID": data['roll_pid'],
-            "Yaw PID": data['yaw_pid']
+            "Pitch": data['pitch_pid'],
+            "Roll": data['roll_pid'],
+            "Yaw": data['yaw_pid']
         }
         self.pid_plot.add_data(pid_data)
 
