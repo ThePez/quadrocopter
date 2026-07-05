@@ -30,7 +30,7 @@ struct button_state_t {
 };
 
 struct remote_state_t {
-    FlightMode_t flightMode;
+    enum flight_mode_t flightMode;
     uint8_t armed;
     uint8_t emergency;
 };
