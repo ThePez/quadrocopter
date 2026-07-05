@@ -18,7 +18,7 @@
 #define REPORT_FREQUENCY 2500UL // 2.5ms between readings
 
 #define IMU_QUEUE_LEN 10
-#define IMU_STACK_SIZE (configMINIMAL_STACK_SIZE)
+#define IMU_STACK_SIZE (configMINIMAL_STACK_SIZE * 2)
 #define IMU_PRIORITY (tskIDLE_PRIORITY + 4)
 
 #define RAD_2_DEG(x) ((180.0 / M_PI) * x)
