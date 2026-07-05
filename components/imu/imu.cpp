@@ -3,122 +3,99 @@
  * File: imu.cpp
  * Author: Jack Cairns
  * Date: 20-11-2025
- * Brief:
- * REFERENCE: None
  *****************************************************************************
  */
 
 #include "imu.h"
-#include "BNO08x.hpp"
-#include "esp_timer.h"
 
-#define GYRO_ALPHA 0.4
-#define GYRO_DEADBAND 10
+#include "BNO08x.hpp"
+
+#include <freertos/queue.h>
+#include <math.h>
+
+#define ENABLE_SH2_HAL
+
+#define REPORT_FREQUENCY 2500UL // 2.5ms between readings
+
+#define IMU_QUEUE_LEN 10
+#define IMU_STACK_SIZE (configMINIMAL_STACK_SIZE)
+#define IMU_PRIORITY (tskIDLE_PRIORITY + 4)
 
 #define RAD_2_DEG(x) ((180.0 / M_PI) * x)
-#define DEG_2_RAD(x) ((M_PI / 180.0) * x)
 
-static const char* TAG = "IMU";
-TaskHandle_t imuTaskHandle = NULL;
+#define TAG "IMU"
 
-// IMU data containers
-static Telemitry_t imuBufA;
-static Telemitry_t imuBufB;
-volatile Telemitry_t* imuData = &imuBufA;
-static Telemitry_t* imuBuffer = &imuBufB;
+QueueHandle_t imuQueue = NULL;
 
-static Stabilizedrates_t rates = {};
+// Create IMU object with default wiring scheme
+static BNO08x imu;
 
-static float filter(float raw, float* filtered) {
-    *filtered = (GYRO_ALPHA * raw) + ((1.0 - GYRO_ALPHA) * (*filtered));
-    return (fabsf(*filtered) < GYRO_DEADBAND) ? 0.0f : *filtered;
-}
+static void imu_data_callback(void) {
 
-static void imu_data_callback(BNO08x* imu) {
-    if (!imu) {
-        return;
-    }
+    struct imu_packet_t packet;
 
-    /* No SH2-HAL */
-    // get rates
-    // imuBuffer->rollRate = imu->get_calibrated_gyro_velocity_X();
-    // imuBuffer->pitchRate = imu->get_calibrated_gyro_velocity_Y();
-    // imuBuffer->yawRate = imu->get_calibrated_gyro_velocity_Z();
+    // X-axis -> Roll
+    // Y-axis -> Pitch
+    // Z-axis -> Yaw
+#ifdef ENABLE_SH2_HAL
+    bno08x_gyro_t velocity = imu.rpt.cal_gyro.get();
+    packet.rollRate = RAD_2_DEG(velocity.x);
+    packet.pitchRate = RAD_2_DEG(velocity.y);
+    packet.yawRate = RAD_2_DEG(velocity.z);
 
-    // // Get angles
-    // imuBuffer->rollAngle = imu->get_roll_deg();
-    // imuBuffer->pitchAngle = imu->get_pitch_deg();
-    // imuBuffer->yawAngle = imu->get_yaw_deg();
+    bno08x_euler_angle_t euler = imu.rpt.rv_ARVR_stabilized_game.get_euler(true);
+    packet.pitchAngle = euler.x; // X-axis -> Pitch
+    packet.rollAngle = euler.y;  // Y-axis -> Roll
+    packet.yawAngle = euler.z;   // Z-axis -> Yaw
 
-    /* With SH2-HAL */
-    // Rates
-    bno08x_gyro_t velocity = imu->rpt.cal_gyro.get();
-    imuBuffer->rollRate = filter(RAD_2_DEG(velocity.x), &rates.roll);  // X-axis -> Roll
-    imuBuffer->pitchRate = filter(RAD_2_DEG(velocity.y), &rates.pitch); // Y-axis -> Pitch
-    imuBuffer->yawRate = filter(RAD_2_DEG(velocity.z), &rates.yaw);   // Z-axis -> Yaw
+#else
+    packet.rollRate = imu.get_calibrated_gyro_velocity_X();
+    packet.pitchRate = imu.get_calibrated_gyro_velocity_Y();
+    packet.yawRate = imu.get_calibrated_gyro_velocity_Z();
 
-    // Angles
-    bno08x_euler_angle_t euler = imu->rpt.rv_ARVR_stabilized_game.get_euler();
-    imuBuffer->pitchAngle = euler.x; // X-axis -> Pitch
-    imuBuffer->rollAngle = euler.y;  // Y-axis -> Roll
-    imuBuffer->yawAngle = euler.z;   // Z-axis -> Yaw
+    packet.rollAngle = imu.get_roll_deg();
+    packet.pitchAngle = imu.get_pitch_deg();
+    packet.yawAngle = imu.get_yaw_deg();
+#endif
 
-    // Set active buffer
-    imuData = imuBuffer;
-    // Swap buffer to use on next sensor input
-    imuBuffer = (imuBuffer == &imuBufA) ? &imuBufB : &imuBufA;
+    // Post to queue
+    xQueueSendToBack(imuQueue, &packet, 0);
 }
 
 static void bno08x_task(void* pvParameters) {
 
-    BNO08x imu; // create IMU object with default wiring scheme
-
-    if (!imu.initialize()) {
-        ESP_LOGE(TAG, "IMU Init Failed");
+    imuQueue = xQueueCreate(IMU_QUEUE_LEN, 1);
+    if (!imuQueue) {
+        ESP_LOGE(TAG, "Imu Queue failed init");
         vTaskDelete(NULL);
     }
 
-    ESP_LOGI(TAG, "IMU Initialised");
+    if (!imu.initialize()) {
+        ESP_LOGE(TAG, "Imu failed hardware init");
+        vTaskDelete(NULL);
+    }
 
+    ESP_LOGI(TAG, "Imu Device Initialised");
     // Enable gyro & ARVR game rotation vector
 
-    /* No SH2-HAL */
-    // imu.enable_ARVR_stabilized_game_rotation_vector(2500UL);
-    // imu.enable_calibrated_gyro(2500UL);
-
-    /* With SH2-HAL */
-    imu.rpt.rv_ARVR_stabilized_game.enable(2500UL);
-    imu.rpt.cal_gyro.enable(2500UL);
+#ifdef ENABLE_SH2_HAL
+    imu.rpt.rv_ARVR_stabilized_game.enable(REPORT_FREQUENCY);
+    imu.rpt.cal_gyro.enable(REPORT_FREQUENCY);
+#else
+    imu.enable_ARVR_stabilized_game_rotation_vector(REPORT_FREQUENCY);
+    imu.enable_calibrated_gyro(REPORT_FREQUENCY);
+#endif
     ESP_LOGI(TAG, "Reports enabled");
 
     // Register a callback function
-    imu.register_cb([&imu]() { imu_data_callback(&imu); });
+    imu.register_cb([]() { imu_data_callback(); });
     ESP_LOGI(TAG, "Callback registered");
 
-    while (1) {
-        ESP_LOGI(TAG, "Task suspended");
-        vTaskSuspend(NULL); // Susspend task as callback functions handle the data.
-
-        // Emergency shutdown path
-
-        /* No SH2-HAL */
-        // imu.disable_ARVR_stabilized_game_rotation_vector();
-        // imu.disable_calibrated_gyro();
-
-        /* With SH2-HAL */
-        imu.rpt.rv_ARVR_stabilized_game.disable();
-        imu.rpt.cal_gyro.disable();
-
-        ESP_LOGW(TAG, "IMU reports disabled, shutting down");
-        // Delete the setup task
-        vTaskDelete(NULL);
-    }
+    ESP_LOGI(TAG, "Imu setup complete - Task deleted");
+    vTaskDelete(NULL);
 }
 
-void imu_init(void) {
-    xTaskCreate(bno08x_task, "IMU Task", BNO085_STACK_SIZE, NULL, BNO085_PRIORITY, &imuTaskHandle);
-}
-
-void imu_kill(void) {
-    vTaskResume(imuTaskHandle);
+esp_err_t imu_init(void) {
+    BaseType_t err = xTaskCreate(bno08x_task, "IMU Task", IMU_STACK_SIZE, NULL, IMU_PRIORITY, NULL);
+    return (err == pdPASS) ? ESP_OK : ESP_FAIL;
 }
