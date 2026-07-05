@@ -14,6 +14,7 @@
 #include "pid_task.h"
 
 #include <esp_log.h>
+#include <esp_rom_crc.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -48,6 +49,9 @@ static void handle_remote_update(struct remote_telemetry_t* remote) {
     remoteIn.yaw = (fabs(reading) < 5) ? 0 : reading;
     // Flight mode
     set_flight_mode((remote->flight_mode == ACRO) ? ACRO : STABILISE);
+
+    // ESP_LOGI(TAG, "SETPOINTS: pitch %lf, roll %lf, yaw %lf, throttle %lf", remoteIn.pitch,
+    //          remoteIn.roll, remoteIn.yaw, remoteIn.throttle);
 }
 
 static void input_control(void* pvParams) {
@@ -64,6 +68,13 @@ static void input_control(void* pvParams) {
 
     while (1) {
         if (xQueueReceive(wifiQueue, &packet, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+
+        uint16_t expected =
+            esp_rom_crc16_le(0, (uint8_t*) &(packet.data), sizeof(union packet_data));
+        if (expected != packet.crc16) {
+            // corrupted packet
             continue;
         }
 
@@ -85,8 +96,7 @@ static void input_control(void* pvParams) {
 }
 
 esp_err_t input_task_init(void) {
-    BaseType_t result = xTaskCreatePinnedToCore(input_control, "INPUT_TASK", INPUT_TASK_STACK,
-                                                NULL, INPUT_TASK_PRIO, &inputTaskHandle,
-                                                (BaseType_t) 0);
+    BaseType_t result = xTaskCreatePinnedToCore(input_control, "INPUT_TASK", INPUT_TASK_STACK, NULL,
+                                                INPUT_TASK_PRIO, &inputTaskHandle, (BaseType_t) 0);
     return (result == pdPASS) ? ESP_OK : ESP_FAIL;
 }

@@ -182,6 +182,7 @@ static void system_data_callback(void* args) {
     telemetry->motor_b = motors.motorB;
     telemetry->motor_c = motors.motorC;
     telemetry->motor_d = motors.motorD;
+    telemetry->battery = droneData.battery;
 
     packet.crc16 = esp_rom_crc16_le(0, (uint8_t*) &packet.data, sizeof(union packet_data));
 

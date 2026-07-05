@@ -28,6 +28,7 @@ struct sensor_telemetry_t {
     uint16_t motor_b;
     uint16_t motor_c;
     uint16_t motor_d;
+    uint16_t battery;
 };
 
 struct remote_telemetry_t {

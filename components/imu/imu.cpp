@@ -64,7 +64,7 @@ static void imu_data_callback(void) {
 
 static void bno08x_task(void* pvParameters) {
 
-    imuQueue = xQueueCreate(IMU_QUEUE_LEN, 1);
+    imuQueue = xQueueCreate(IMU_QUEUE_LEN, sizeof(struct imu_packet_t));
     if (!imuQueue) {
         ESP_LOGE(TAG, "Imu Queue failed init");
         vTaskDelete(NULL);
