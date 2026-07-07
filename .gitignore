@@ -9,3 +9,4 @@ components/un-used/esp32_BNO08x-no_hal/*
 compile_commands.json
 .clangd
 gen_compile_commands.py
+**/__pycache__
