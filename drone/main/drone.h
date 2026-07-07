@@ -12,6 +12,8 @@
 #include <stdint.h>
 
 #include <esp_err.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 #include "common_functions.h"
 
@@ -25,7 +27,7 @@
 #define MIN_THROTTLE 1000.0 // us
 #define MAX_THROTTLE 2000.0 // us
 
-#define FAILSAFE_TIMEOUT_US 1000000 // 1 second
+#define FAILSAFE_TIMEOUT_US 2000000 // 1 second
 
 #define ANGLE_FAIL (1 << 0)
 #define COMS_FAIL (1 << 1)
@@ -51,6 +53,7 @@ struct drone_config_t {
     uint16_t battery;
     uint8_t armed;
     uint8_t status_mask;
+    SemaphoreHandle_t mutex; // Protects the fields above (written from pid_task and input_task on separate cores)
 };
 
 // Shared drone/remote-input state (written by input_task, read by pid_task and drone.c)

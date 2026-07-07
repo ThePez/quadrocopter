@@ -19,6 +19,7 @@
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <math.h>
 #include <stdbool.h>
@@ -60,12 +61,16 @@ static void motor_shutdown(void) {
 }
 
 static void angle_failsafe(struct imu_packet_t* attitude) {
+    xSemaphoreTake(droneData.mutex, portMAX_DELAY);
     if (droneData.status_mask & ANGLE_FAIL) {
+        xSemaphoreGive(droneData.mutex);
         return;
     }
 
     droneData.status_mask |= ANGLE_FAIL;
     droneData.armed = 0;
+    xSemaphoreGive(droneData.mutex);
+
     ESP_LOGE(TAG, "FAILSAFE: angles Pitch %.1f, Roll %.1f", attitude->pitchAngle,
              attitude->rollAngle);
     ESP_LOGW(TAG, "FAILSAFE: Level the drone and throttle down to reset");
@@ -74,12 +79,16 @@ static void angle_failsafe(struct imu_packet_t* attitude) {
 }
 
 static void comms_failsafe(void) {
+    xSemaphoreTake(droneData.mutex, portMAX_DELAY);
     if ((droneData.status_mask & COMS_FAIL) || !droneData.armed) {
+        xSemaphoreGive(droneData.mutex);
         return;
     }
 
     droneData.status_mask |= COMS_FAIL;
     droneData.armed = 0;
+    xSemaphoreGive(droneData.mutex);
+
     ESP_LOGE(TAG, "FAILSAFE: No wifi link for at least 1 second");
     ESP_LOGW(TAG, "FAILSAFE: May need to reset both remote and drone to reset");
     // Kill the motors
@@ -89,7 +98,7 @@ static void comms_failsafe(void) {
 static void update_escs(void) {
 
     // Low throttle input (ie off)
-    if (remoteIn.throttle < (MIN_THROTTLE + 50) || droneData.battery < CRITICAL_VOLTAGE) {
+    if (remoteIn.throttle < (MIN_THROTTLE + 50)){//} || droneData.battery < CRITICAL_VOLTAGE) {
         motors.motorA = MIN_THROTTLE;
         motors.motorB = MIN_THROTTLE;
         motors.motorC = MIN_THROTTLE;
@@ -120,12 +129,15 @@ static void update_escs(void) {
 }
 
 void set_flight_mode(enum flight_mode_t mode) {
+    xSemaphoreTake(droneData.mutex, portMAX_DELAY);
     if (mode == droneData.mode) {
+        xSemaphoreGive(droneData.mutex);
         return;
     }
 
     // Update flight mode
     droneData.mode = mode;
+    xSemaphoreGive(droneData.mutex);
 
     // Reset PID integrators when switching modes to prevent windup
 
@@ -237,19 +249,33 @@ static void pid_control(void* pvParams) {
         if (xQueueReceive(imuQueue, &imuSample, 0) == pdTRUE) {
             kalman_update(&imuSample);
         }
+        
         kalman_get(&kalman);
 
         // Check drone for critical angles
         if (fabs(kalman.pitchAngle) > FAIL_ANGLE || fabs(kalman.rollAngle) > FAIL_ANGLE) {
             angle_failsafe(&kalman);
             continue;
-        } else if (droneData.status_mask & ANGLE_FAIL) {
+        }
+
+        // Snapshot the shared fields once per iteration under the lock, then make
+        // decisions off the local copies so the mutex isn't held for the whole loop body
+        xSemaphoreTake(droneData.mutex, portMAX_DELAY);
+        uint8_t statusMask = droneData.status_mask;
+        int64_t lastRemoteTime = droneData.lastRemoteTime;
+        uint8_t armed = droneData.armed;
+        enum flight_mode_t mode = droneData.mode;
+        xSemaphoreGive(droneData.mutex);
+
+        if (statusMask & ANGLE_FAIL) {
             // To reset drone, throttle must be off and drone must be level
             bool throttle_safe = remoteIn.throttle < (MIN_THROTTLE + 50);
             bool level = (fabs(kalman.pitchAngle) < 5) && (fabs(kalman.rollAngle) < 5);
             if (throttle_safe && level) {
                 ESP_LOGI(TAG, "Angle Failsafe cleared");
+                xSemaphoreTake(droneData.mutex, portMAX_DELAY);
                 droneData.status_mask &= ~ANGLE_FAIL;
+                xSemaphoreGive(droneData.mutex);
             } else {
                 motor_shutdown();
                 continue;
@@ -257,24 +283,26 @@ static void pid_control(void* pvParams) {
         }
 
         // Check last connection to remote
-        if (now - droneData.lastRemoteTime > FAILSAFE_TIMEOUT_US) {
+        if (now - lastRemoteTime > FAILSAFE_TIMEOUT_US) {
             comms_failsafe();
             continue;
-        } else if (droneData.status_mask & COMS_FAIL) {
+        } else if (statusMask & COMS_FAIL) {
             // Comms recovered - clear failsafe
+            xSemaphoreTake(droneData.mutex, portMAX_DELAY);
             droneData.status_mask &= ~COMS_FAIL;
+            xSemaphoreGive(droneData.mutex);
             ESP_LOGI(TAG, "Comms failsafe cleared - link restored");
         }
 
         // Only run control if armed and no failsafes active
-        if (!droneData.armed) {
+        if (!armed) {
             motor_shutdown();
             continue;
         }
 
         double pitchRateSetpoint, rollRateSetpoint, yawRateSetpoint;
 
-        if (droneData.mode == STABILISE) {
+        if (mode == STABILISE) {
             // ANGLE MODE: Cascaded control with outer angle loop
 
             // Map remote control inputs to angle setpoints

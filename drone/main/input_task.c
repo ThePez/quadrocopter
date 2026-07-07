@@ -18,6 +18,7 @@
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <math.h>
 
@@ -29,12 +30,14 @@
 static TaskHandle_t inputTaskHandle = NULL;
 
 static void handle_remote_update(struct remote_telemetry_t* remote) {
+    xSemaphoreTake(droneData.mutex, portMAX_DELAY);
     droneData.lastRemoteTime = esp_timer_get_time();
 
     // Only set armed state if not in angle failsafe state
     if (!(droneData.status_mask & ANGLE_FAIL)) {
         droneData.armed = 1;
     }
+    xSemaphoreGive(droneData.mutex);
 
     double reading = mapf(remote->throttle, ADC_MIN, ADC_MAX, MIN_THROTTLE, MAX_THROTTLE);
     remoteIn.throttle = (reading < MIN_THROTTLE + 20) ? MIN_THROTTLE : reading;

@@ -156,7 +156,9 @@ static void battery_callback(void* args) {
     }
 
     // Store as millivolts
+    xSemaphoreTake(droneData.mutex, portMAX_DELAY);
     droneData.battery = (uint16_t) battery_voltage; // mV
+    xSemaphoreGive(droneData.mutex);
 }
 
 static void system_data_callback(void* args) {
@@ -174,7 +176,10 @@ static void system_data_callback(void* args) {
     telemetry->pitch_rate = attitude.pitchRate;
     telemetry->roll_rate = attitude.rollRate;
     telemetry->yaw_rate = attitude.yawRate;
+    xSemaphoreTake(droneData.mutex, portMAX_DELAY);
     telemetry->mode = droneData.mode;
+    telemetry->battery = droneData.battery;
+    xSemaphoreGive(droneData.mutex);
     telemetry->pid_pitch = outputPID.pitch_pid;
     telemetry->pid_roll = outputPID.roll_pid;
     telemetry->pid_yaw = outputPID.yaw_pid;
@@ -182,7 +187,6 @@ static void system_data_callback(void* args) {
     telemetry->motor_b = motors.motorB;
     telemetry->motor_c = motors.motorC;
     telemetry->motor_d = motors.motorD;
-    telemetry->battery = droneData.battery;
 
     packet.crc16 = esp_rom_crc16_le(0, (uint8_t*) &packet.data, sizeof(union packet_data));
 
@@ -218,6 +222,13 @@ esp_err_t init_drone(void) {
     // Wait to ensure the wifiQueue is created before timer callback tasks are registered
     while (!wifiQueue) {
         vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    // Mutex protecting droneData - must exist before the tasks/callbacks that touch it start
+    droneData.mutex = xSemaphoreCreateMutex();
+    if (droneData.mutex == NULL) {
+        ESP_LOGE(TAG, "Failed to create droneData mutex");
+        return ESP_FAIL;
     }
 
     // Initialise a callback for returning info back to the remote
