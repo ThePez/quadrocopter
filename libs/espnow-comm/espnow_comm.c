@@ -52,19 +52,6 @@ static void espnow_recv_cb(const esp_now_recv_info_t* recv_info, const uint8_t* 
 
     ARG_UNUSED(recv_info);
     ARG_UNUSED(len);
-    
-    // Encoding
-    // sensor_packet.crc16 =
-    //     esp_rom_crc16_le(0, (uint8_t*) &(sensor_packet.data), sizeof(union ble_data));
-
-    // Decoding
-    // uint16_t expected =
-    //     esp_rom_crc16_le(0, (uint8_t*) &(sensor_packet.data), sizeof(union ble_data));
-    // if (expected != sensor_packet.crc16) {
-    //     // corrupted packet
-    // }
-
-    // TODO: fix this!
 
     struct wifi_packet_t* packet = (struct wifi_packet_t*) data;
 
