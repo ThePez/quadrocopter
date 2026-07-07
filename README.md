@@ -95,7 +95,16 @@ Each motor output is clamped to [1050, 2000] µs.
 - **Drone → Bridge**: 10 Hz telemetry packets (angles, rates, PID outputs, motor PWM, battery mV)
 - **Bridge → Drone**: PID tuning packets forwarded from PC
 
-MAC addresses are configured in `components/espnow-comm/espnow_comm.c`.
+MAC addresses are configured in `libs/espnow-comm/espnow_comm.c`.
+
+---
+
+## Bridge ↔ PC Link (UART)
+
+The bridge and desktop app talk over a framed, CRC-checked link at 115200 baud: `[0xAA 0x55][payload][crc16]`. Framing (`uart_comm_write_frame()` / `uart_comm_read_frame()`) lives in `bridge/main/bridge.c`; the Python mirror is `bridge/uart_comm.py` — keep both in sync if the format changes. On a CRC failure the decoder discards just the 2 magic bytes and resyncs, rather than dropping a whole frame.
+
+- **Bridge → PC**: `sensor_telemetry_t` packets forwarded from the drone's ESP-NOW telemetry
+- **PC → Bridge → Drone**: `pid_config_telemetry_t` packets carrying live PID gain updates
 
 ---
 
@@ -104,19 +113,24 @@ MAC addresses are configured in `components/espnow-comm/espnow_comm.c`.
 ```
 quadrocopter/
 ├── drone/              # Flight controller firmware (ESP32)
-│   └── main/drone.c
+│   └── main/            # drone.c, pid_task.c, input_task.c
 ├── remote/             # Remote control firmware (ESP32)
 │   └── main/remote.c
-├── bridge/             # Bridge firmware (ESP32-S3)
+├── bridge/             # Bridge firmware (ESP32-S3) + desktop app
 │   ├── main/bridge.c
-│   └── PID-GUI.py      # Desktop telemetry & tuning app
-└── components/
-    ├── motors/         # MCPWM ESC driver
-    ├── imu/            # BNO085 driver (quaternion → Euler, gyro filter)
-    ├── mcp3208/        # SPI ADC driver
-    ├── espnow-comm/    # ESP-NOW peer management & queues
-    ├── common_functions/ # mapf(), constrainf(), SPI/I2C bus init
-    └── esp32_BNO08x/   # Third-party BNO085 SH2-HAL library
+│   ├── PID-GUI.py      # Desktop telemetry & tuning app
+│   └── uart_comm.py    # UART framing/CRC, mirrors bridge/main/bridge.c
+├── libs/                # ESP-IDF components shared across targets
+│   ├── pid/              # PID controller
+│   ├── motors/           # MCPWM ESC driver
+│   ├── kalman/           # Single-axis Kalman filter for attitude (currently disabled)
+│   ├── espnow-comm/      # ESP-NOW peer management, queues & wire structs
+│   └── common_functions/ # mapf(), constrainf(), SPI/I2C bus init
+├── components/          # Sensor driver components
+│   ├── imu/               # BNO085 driver (quaternion → Euler)
+│   ├── mcp3208/           # SPI ADC driver
+│   └── esp32_BNO08x/      # Third-party BNO085 SH2-HAL library
+└── 3d-models/           # STL files for printable frame parts
 ```
 
 ---
@@ -150,7 +164,7 @@ A PyQt5 application for real-time monitoring and PID tuning.
 
 **Dependencies:**
 ```bash
-pip install PyQt5 pyqtgraph pyserial
+pip install PyQt5 pyqtgraph PyOpenGL pyserial numpy
 ```
 
 **Run:**
@@ -160,6 +174,7 @@ cd bridge && python3 PID-GUI.py
 
 **Features:**
 - Live plots of angles, rates, PID outputs, and motor speeds (500-point rolling window)
+- 3D attitude view — a rotating rigid-body model (front arms in red, rear in grey) driven live by pitch/roll/yaw telemetry, with a numeric angle readout
 - Battery voltage display
 - Live Kp/Ki/Kd adjustment for rate and angle loops on each axis — changes are sent to the drone immediately over the bridge
 
@@ -186,7 +201,8 @@ Press **both** the mode button and emergency button simultaneously on the remote
 ## Implementation Notes
 
 - **Dual-core**: Core 0 handles incoming remote packets; Core 1 runs the 400 Hz PID loop at elevated FreeRTOS priority
-- **IMU filtering**: Gyroscope data is low-pass filtered (α = 0.4) with a 10 °/s deadband to reduce noise
+- **Thread safety**: Shared drone state (`droneData`) is guarded by a mutex, since `pid_task` and `input_task` write to it from separate cores
+- **IMU filtering**: A single-axis Kalman filter (`libs/kalman`) exists to fuse gyro rate with the BNO085's fused angle, but is currently disabled (`#ifdef ENABLE`) — attitude passes through the sensor's fused rotation vector unfiltered
 - **ADC calibration**: Battery voltage uses ESP-IDF ADC calibration for mV-level accuracy
 - **Memory**: All dynamic allocations checked at startup; device restarts on malloc failure
 
