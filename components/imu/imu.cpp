@@ -38,12 +38,12 @@ static void imu_data_callback(void) {
     // Y-axis -> Pitch
     // Z-axis -> Yaw
 #ifdef ENABLE_SH2_HAL
-    bno08x_gyro_t velocity = imu.rpt.cal_gyro.get();
+    bno08x_ang_vel_t velocity = imu.rpt.rv_gyro_integrated.get_vel();
     packet.rollRate = RAD_2_DEG(velocity.x);
     packet.pitchRate = RAD_2_DEG(velocity.y);
     packet.yawRate = RAD_2_DEG(velocity.z);
 
-    bno08x_euler_angle_t euler = imu.rpt.rv_ARVR_stabilized_game.get_euler(true);
+    bno08x_euler_angle_t euler = imu.rpt.rv_gyro_integrated.get_euler(true);
     packet.pitchAngle = euler.x; // X-axis -> Pitch
     packet.rollAngle = euler.y;  // Y-axis -> Roll
     packet.yawAngle = euler.z;   // Z-axis -> Yaw
@@ -76,14 +76,12 @@ static void bno08x_task(void* pvParameters) {
     }
 
     ESP_LOGI(TAG, "Imu Device Initialised");
-    // Enable gyro & ARVR game rotation vector
+    // Enable the gyro-integrated rotation vector (angle + rate in one report)
 
 #ifdef ENABLE_SH2_HAL
-    imu.rpt.rv_ARVR_stabilized_game.enable(REPORT_FREQUENCY);
-    imu.rpt.cal_gyro.enable(REPORT_FREQUENCY);
+    imu.rpt.rv_gyro_integrated.enable(REPORT_FREQUENCY);
 #else
-    imu.enable_ARVR_stabilized_game_rotation_vector(REPORT_FREQUENCY);
-    imu.enable_calibrated_gyro(REPORT_FREQUENCY);
+    imu.enable_rv_gyro_integrated(REPORT_FREQUENCY);
 #endif
     ESP_LOGI(TAG, "Reports enabled");
 
