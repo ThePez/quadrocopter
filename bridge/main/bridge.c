@@ -34,6 +34,7 @@ struct __packed uart_packet {
 
 static void uart_comm_write_frame(uart_port_t port, struct sensor_telemetry_t* payload) {
     struct uart_packet packet = {.magic = {UART_MAGIC_0, UART_MAGIC_1}};
+    packet.payload = *payload;
     packet.crc = esp_rom_crc16_le(0, (uint8_t*) payload, sizeof(struct sensor_telemetry_t));
     uart_write_bytes(port, &packet, sizeof(struct uart_packet));
 }

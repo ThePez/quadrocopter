@@ -13,7 +13,8 @@ CRC_SIZE = 2
 
 def crc16(data: bytes) -> int:
     """CRC-16/X-25 (poly 0x8408 reflected, init/xorout 0xFFFF) - matches esp_rom_crc16_le(0, ...)
-    as called from uart_comm_write_frame()/uart_comm_read_frame() in bridge/main/bridge.c"""
+    as called from uart_comm_write_frame()/uart_comm_read_frame() in bridge/main/bridge.c
+    """
     crc = 0xFFFF
     for byte in data:
         crc ^= byte
@@ -31,7 +32,7 @@ def frame_size(payload_size: int) -> int:
 
 def encode(payload: bytes) -> bytes:
     """Wrap a payload for sending: [magic][payload][crc16]"""
-    return MAGIC + payload + struct.pack('<H', crc16(payload))
+    return MAGIC + payload + struct.pack("<H", crc16(payload))
 
 
 class FrameDecoder:
@@ -67,15 +68,17 @@ class FrameDecoder:
             if len(self.buffer) < self.frame_size:
                 break
 
-            payload = bytes(self.buffer[len(MAGIC):len(MAGIC) + self.payload_size])
-            received_crc, = struct.unpack(
-                '<H', bytes(self.buffer[len(MAGIC) + self.payload_size:self.frame_size]))
+            payload = bytes(self.buffer[len(MAGIC) : len(MAGIC) + self.payload_size])
+            (received_crc,) = struct.unpack(
+                "<H",
+                bytes(self.buffer[len(MAGIC) + self.payload_size : self.frame_size]),
+            )
 
             if crc16(payload) != received_crc:
-                del self.buffer[:len(MAGIC)]
+                del self.buffer[: len(MAGIC)]
                 continue
 
-            del self.buffer[:self.frame_size]
+            del self.buffer[: self.frame_size]
             payloads.append(payload)
 
         return payloads

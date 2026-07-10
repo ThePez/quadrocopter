@@ -10,10 +10,23 @@ import serial.tools.list_ports
 from collections import deque
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional, Deque, Any
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
-                             QHBoxLayout, QGridLayout, QLabel, QPushButton,
-                             QComboBox, QTextEdit, QGroupBox, QTabWidget,
-                             QDoubleSpinBox, QMessageBox, QCheckBox)
+from PyQt5.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QGridLayout,
+    QLabel,
+    QPushButton,
+    QComboBox,
+    QTextEdit,
+    QGroupBox,
+    QTabWidget,
+    QDoubleSpinBox,
+    QMessageBox,
+    QCheckBox,
+)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QCloseEvent
 
@@ -28,16 +41,17 @@ import uart_comm
 # The struct isn't packed, so the compiler pads its sizeof() up to a multiple of 4
 # The trailing '2x' skips those 2 pad bytes; bridge.c sends sizeof(struct
 # sensor_telemetry_t) bytes per packet, so this must track that exactly.
-SENSOR_TELEMETRY_FORMAT = '<10f5H2x'
+SENSOR_TELEMETRY_FORMAT = "<10f5H2x"
 SENSOR_TELEMETRY_SIZE = struct.calcsize(SENSOR_TELEMETRY_FORMAT)
 
 # Mirrors struct pid_config_telemetry_t in libs/espnow-comm/espnow_comm.h:
 # 3 floats (kp, ki, kd) then 2 uint16_t (axis, mode).
-PID_CONFIG_FORMAT = '<fffHH'
+PID_CONFIG_FORMAT = "<fffHH"
 
 
 class TelemetryThread(QThread):
     """Thread for handling serial communication and telemetry"""
+
     response_received = pyqtSignal(str)
     telemetry_received = pyqtSignal(dict)
 
@@ -45,7 +59,9 @@ class TelemetryThread(QThread):
         super().__init__()
         self.serial_port: serial.Serial = serial_port
         self.running: bool = True
-        self.decoder: uart_comm.FrameDecoder = uart_comm.FrameDecoder(SENSOR_TELEMETRY_SIZE)
+        self.decoder: uart_comm.FrameDecoder = uart_comm.FrameDecoder(
+            SENSOR_TELEMETRY_SIZE
+        )
 
     def run(self) -> None:
         """Listen for responses and telemetry from the bridge"""
@@ -58,25 +74,27 @@ class TelemetryThread(QThread):
                     # Process complete, CRC-valid sensor_telemetry_t packets
                     for packet in self.decoder.feed(data):
                         try:
-                            values: Tuple[float, ...] = struct.unpack(SENSOR_TELEMETRY_FORMAT, packet)
+                            values: Tuple[float, ...] = struct.unpack(
+                                SENSOR_TELEMETRY_FORMAT, packet
+                            )
 
                             telemetry: Dict[str, Any] = {
-                                'pitch_angle': values[0],
-                                'roll_angle': values[1],
-                                'yaw_angle': values[2],
-                                'pitch_rate': values[3],
-                                'roll_rate': values[4],
-                                'yaw_rate': values[5],
-                                'mode': int(values[6]),
-                                'pitch_pid': values[7],
-                                'roll_pid': values[8],
-                                'yaw_pid': values[9],
-                                'motor_fl': values[10],
-                                'motor_bl': values[11],
-                                'motor_br': values[12],
-                                'motor_fr': values[13],
-                                'battery': values[14],
-                                'timestamp': datetime.now()
+                                "pitch_angle": values[0],
+                                "roll_angle": values[1],
+                                "yaw_angle": values[2],
+                                "pitch_rate": values[3],
+                                "roll_rate": values[4],
+                                "yaw_rate": values[5],
+                                "mode": int(values[6]),
+                                "pitch_pid": values[7],
+                                "roll_pid": values[8],
+                                "yaw_pid": values[9],
+                                "motor_fl": values[10],
+                                "motor_bl": values[11],
+                                "motor_br": values[12],
+                                "motor_fr": values[13],
+                                "battery": values[14],
+                                "timestamp": datetime.now(),
                             }
                             self.telemetry_received.emit(telemetry)
                         except Exception as e:
@@ -94,7 +112,9 @@ class TelemetryThread(QThread):
 class PlotWidget(QWidget):
     """Widget for displaying real-time plots"""
 
-    def __init__(self, title: str, labels: List[str], colors: List[str], max_points: int = 500) -> None:
+    def __init__(
+        self, title: str, labels: List[str], colors: List[str], max_points: int = 500
+    ) -> None:
         super().__init__()
         self.max_points: int = max_points
         self.labels: List[str] = labels
@@ -102,7 +122,9 @@ class PlotWidget(QWidget):
 
         # Data storage
         self.time_data: Deque[float] = deque(maxlen=max_points)
-        self.data: dict[str, Deque[float]] = {label: deque(maxlen=max_points) for label in labels}
+        self.data: dict[str, Deque[float]] = {
+            label: deque(maxlen=max_points) for label in labels
+        }
         self.start_time: datetime = datetime.now()
 
         # Create layout
@@ -110,10 +132,10 @@ class PlotWidget(QWidget):
 
         # Create plot widget
         self.plot_widget: pg.PlotWidget = pg.PlotWidget(title=title)
-        self.plot_widget.setBackground('w')
+        self.plot_widget.setBackground("w")
         self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
-        self.plot_widget.setLabel('left', 'Value')
-        self.plot_widget.setLabel('bottom', 'Time (s)')
+        self.plot_widget.setLabel("left", "Value")
+        self.plot_widget.setLabel("bottom", "Time (s)")
 
         # Add legend
         self.plot_widget.addLegend()
@@ -210,41 +232,44 @@ class Attitude3DWidget(QWidget):
         # so the model's heading is visually obvious as it yaws.
         self.front_arms: gl.GLLinePlotItem = gl.GLLinePlotItem(
             pos=np.array([origin, self.fl, origin, self.fr]),
-            color=(1, 0, 0, 1), width=4, mode='lines', antialias=True)
+            color=(1, 0, 0, 1),
+            width=4,
+            mode="lines",
+            antialias=True,
+        )
         self.rear_arms: gl.GLLinePlotItem = gl.GLLinePlotItem(
             pos=np.array([origin, self.bl, origin, self.br]),
-            color=(0.5, 0.5, 0.5, 1), width=4, mode='lines', antialias=True)
+            color=(0.5, 0.5, 0.5, 1),
+            width=4,
+            mode="lines",
+            antialias=True,
+        )
         self.gl_view.addItem(self.front_arms)
         self.gl_view.addItem(self.rear_arms)
 
         # Motor tip markers, colors matching the Motors plot (FL, BL, BR, FR)
         self.motor_markers: gl.GLScatterPlotItem = gl.GLScatterPlotItem(
             pos=np.array([self.fl, self.bl, self.br, self.fr]),
-            color=np.array([
-                [1, 0, 0, 1],     # FL - red
-                [1, 0.65, 0, 1],  # BL - orange
-                [0.5, 0, 0.5, 1], # BR - purple
-                [0, 1, 1, 1],     # FR - cyan
-            ]),
-            size=15, pxMode=True)
+            color=np.array(
+                [
+                    [1, 0, 0, 1],  # FL - red
+                    [1, 0.65, 0, 1],  # BL - orange
+                    [0.5, 0, 0.5, 1],  # BR - purple
+                    [0, 1, 1, 1],  # FR - cyan
+                ]
+            ),
+            size=15,
+            pxMode=True,
+        )
         self.gl_view.addItem(self.motor_markers)
 
         # All the pieces above represent one rigid body, so the same transform
         # gets applied to each of them every update.
         self.rigid_body_items: List[gl.GLGraphicsItem] = [
-            self.front_arms, self.rear_arms, self.motor_markers]
-
-        # Numeric readout
-        readout_layout: QHBoxLayout = QHBoxLayout()
-        self.angle_labels: Dict[str, QLabel] = {}
-        for name in ("Pitch", "Roll", "Yaw"):
-            readout_layout.addWidget(QLabel(f"{name}:"))
-            value_label: QLabel = QLabel("0.0°")
-            value_label.setStyleSheet("font-weight: bold; color: #2196F3;")
-            self.angle_labels[name] = value_label
-            readout_layout.addWidget(value_label)
-        readout_layout.addStretch()
-        layout.addLayout(readout_layout)
+            self.front_arms,
+            self.rear_arms,
+            self.motor_markers,
+        ]
 
     def update_attitude(self, pitch: float, roll: float, yaw: float) -> None:
         """Rotate the drone model to the given angles (degrees)"""
@@ -260,10 +285,6 @@ class Attitude3DWidget(QWidget):
         for item in self.rigid_body_items:
             item.setTransform(tr)
 
-        self.angle_labels["Pitch"].setText(f"{pitch:.1f}°")
-        self.angle_labels["Roll"].setText(f"{roll:.1f}°")
-        self.angle_labels["Yaw"].setText(f"{yaw:.1f}°")
-
 
 class PIDTunerGUI(QMainWindow):
     def __init__(self) -> None:
@@ -278,8 +299,8 @@ class PIDTunerGUI(QMainWindow):
             1: {0: None, 1: None},
         }
 
-        self.axis_names: list[str] = ['Pitch / Roll', 'Yaw']
-        self.mode_names: list[str] = ['Rate', 'Angle']
+        self.axis_names: list[str] = ["Pitch / Roll", "Yaw"]
+        self.mode_names: list[str] = ["Rate", "Angle"]
 
         # Telemetry storage
         self.telemetry_enabled: bool = True
@@ -316,7 +337,7 @@ class PIDTunerGUI(QMainWindow):
 
     def init_ui(self) -> None:
         """Initialize the user interface"""
-        self.setWindowTitle('Drone PID Tuner & Telemetry')
+        self.setWindowTitle("Drone PID Tuner & Telemetry")
         self.setGeometry(100, 100, 1400, 900)
 
         # Central widget
@@ -324,28 +345,28 @@ class PIDTunerGUI(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout: QVBoxLayout = QVBoxLayout(central_widget)
 
-        # Main tabs
-        self.main_tabs = QTabWidget()
-
-        # Console tab (This must be created first for logging purposes)
+        # Creat Console tab (This must be created first for logging purposes)
         console_tab: QWidget = self.create_console_tab()
-        self.main_tabs.addTab(console_tab, "Console")
 
-        # Connection section
+        # Create Connection section
         connection_group: QGroupBox = self.create_connection_section()
         main_layout.addWidget(connection_group)
 
-        # Telemetry tab
+        # Creat Telemetry tab
         telemetry_tab: QWidget = self.create_telemetry_tab()
-        self.main_tabs.addTab(telemetry_tab, "Telemetry")
 
-        # PID tuning tabs
+        # Create PID tuning tabs
         pid_tabs: QTabWidget = QTabWidget()
         self.pitch_roll_tab = self.create_axis_tab(0)
         self.yaw_tab = self.create_axis_tab(1)
         pid_tabs.addTab(self.pitch_roll_tab, "Pitch + Roll")
         pid_tabs.addTab(self.yaw_tab, "Yaw")
+
+        # Now add the Tabs in the correct order
+        self.main_tabs = QTabWidget()
+        self.main_tabs.addTab(telemetry_tab, "Telemetry")
         self.main_tabs.addTab(pid_tabs, "PID Tuning")
+        self.main_tabs.addTab(console_tab, "Console")
 
         # Add the main tabs widget to the layout manager
         main_layout.addWidget(self.main_tabs)
@@ -355,10 +376,10 @@ class PIDTunerGUI(QMainWindow):
     def create_telemetry_tab(self) -> QWidget:
         """Create the telemetry visualization tab"""
         labels: list[str] = ["Pitch", "Roll", "Yaw"]
-        colours: list[str] = ['r', 'g', 'b']
+        colours: list[str] = ["r", "g", "b"]
 
-        m_labels: list[str] = ["FL", "BL", "BR", "FR"]
-        m_colours: list[str] = ['r', 'orange', 'purple', 'cyan']
+        m_labels: list[str] = ["Front Left", "Front Right", "Back Right", "Back Left"]
+        m_colours: list[str] = ["r", "purple", "orange", "cyan"]
 
         widget: QWidget = QWidget()
         layout: QVBoxLayout = QVBoxLayout(widget)
@@ -412,10 +433,10 @@ class PIDTunerGUI(QMainWindow):
             ("Pitch Angle:", "pitch_angle", "°"),
             ("Roll Angle:", "roll_angle", "°"),
             ("Yaw Angle:", "yaw_angle", "°"),
+            ("Mode:", "mode", ""),
             ("Pitch Rate:", "pitch_rate", "°/s"),
             ("Roll Rate:", "roll_rate", "°/s"),
             ("Yaw Rate:", "yaw_rate", "°/s"),
-            ("Mode:", "mode", ""),
             ("Battery:", "battery", "V"),
         ]
 
@@ -452,13 +473,15 @@ class PIDTunerGUI(QMainWindow):
 
         layout.addWidget(QLabel("Baudrate:"))
         self.baudrate_combo = QComboBox()
-        self.baudrate_combo.addItems(['9600', '115200', '230400', '460800'])
-        self.baudrate_combo.setCurrentText('115200')
+        self.baudrate_combo.addItems(["9600", "115200", "230400", "460800"])
+        self.baudrate_combo.setCurrentText("115200")
         layout.addWidget(self.baudrate_combo)
 
         self.connect_btn = QPushButton("Connect")
         self.connect_btn.clicked.connect(self.toggle_connection)
-        self.connect_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        self.connect_btn.setStyleSheet(
+            "background-color: #4CAF50; color: white; font-weight: bold;"
+        )
         layout.addWidget(self.connect_btn)
 
         self.status_label = QLabel("Disconnected")
@@ -499,7 +522,7 @@ class PIDTunerGUI(QMainWindow):
         current_value: QLabel = QLabel("DEFAULT")
         current_value.setStyleSheet("color: #888; font-weight: bold;")
         layout.addWidget(current_value, 0, 1, 1, 3)
-        setattr(self, f'current_label_{axis}_{mode}', current_value)
+        setattr(self, f"current_label_{axis}_{mode}", current_value)
 
         layout.addWidget(QLabel("Kp:"), 1, 0)
         kp_spin: QDoubleSpinBox = QDoubleSpinBox()
@@ -526,14 +549,19 @@ class PIDTunerGUI(QMainWindow):
         layout.addWidget(kd_spin, 2, 1)
 
         send_btn: QPushButton = QPushButton(f"Send to Drone")
-        send_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
-        send_btn.clicked.connect(lambda: self.send_pid(axis, mode, kp_spin.value(),
-                                                       ki_spin.value(), kd_spin.value()))
+        send_btn.setStyleSheet(
+            "background-color: #2196F3; color: white; font-weight: bold;"
+        )
+        send_btn.clicked.connect(
+            lambda: self.send_pid(
+                axis, mode, kp_spin.value(), ki_spin.value(), kd_spin.value()
+            )
+        )
         layout.addWidget(send_btn, 2, 2, 1, 2)
 
-        setattr(self, f'kp_spin_{axis}_{mode}', kp_spin)
-        setattr(self, f'ki_spin_{axis}_{mode}', ki_spin)
-        setattr(self, f'kd_spin_{axis}_{mode}', kd_spin)
+        setattr(self, f"kp_spin_{axis}_{mode}", kp_spin)
+        setattr(self, f"ki_spin_{axis}_{mode}", ki_spin)
+        setattr(self, f"kd_spin_{axis}_{mode}", kd_spin)
 
         group.setLayout(layout)
         return group
@@ -607,7 +635,9 @@ class PIDTunerGUI(QMainWindow):
             self.status_label.setText("Connected")
             self.status_label.setStyleSheet("color: green; font-weight: bold;")
             self.connect_btn.setText("Disconnect")
-            self.connect_btn.setStyleSheet("background-color: #f44336; color: white; font-weight: bold;")
+            self.connect_btn.setStyleSheet(
+                "background-color: #f44336; color: white; font-weight: bold;"
+            )
 
         except Exception as e:
             QMessageBox.critical(self, "Connection Error", f"Failed to connect: {e}")
@@ -626,7 +656,9 @@ class PIDTunerGUI(QMainWindow):
         self.status_label.setText("Disconnected")
         self.status_label.setStyleSheet("color: red; font-weight: bold;")
         self.connect_btn.setText("Connect")
-        self.connect_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        self.connect_btn.setStyleSheet(
+            "background-color: #4CAF50; color: white; font-weight: bold;"
+        )
 
         self.telemetry_status.setText("⚫ No telemetry")
         self.telemetry_status.setStyleSheet("font-weight: bold; color: #888;")
@@ -641,7 +673,9 @@ class PIDTunerGUI(QMainWindow):
             self.last_telemetry_time = None
             return
 
-        elapsed_ms: float = (datetime.now() - self.last_telemetry_time).total_seconds() * 1000
+        elapsed_ms: float = (
+            datetime.now() - self.last_telemetry_time
+        ).total_seconds() * 1000
 
         if elapsed_ms > self.telemetry_timeout_ms:
             self.telemetry_status.setText("Telemetry timeout")
@@ -650,7 +684,9 @@ class PIDTunerGUI(QMainWindow):
     def send_pid(self, axis: int, mode: int, kp: float, ki: float, kd: float) -> None:
         """Send PID configuration to drone"""
         if not self.serial_port or not self.serial_port.is_open:
-            QMessageBox.warning(self, "Not Connected", "Please connect to serial port first.")
+            QMessageBox.warning(
+                self, "Not Connected", "Please connect to serial port first."
+            )
             return
 
         if axis == 1 and mode != 0:
@@ -664,15 +700,17 @@ class PIDTunerGUI(QMainWindow):
             self.serial_port.write(packet)
             self.serial_port.flush()
 
-            self.pid_config[axis][mode] = {'kp': kp, 'ki': ki, 'kd': kd}
+            self.pid_config[axis][mode] = {"kp": kp, "ki": ki, "kd": kd}
 
-            current_label: QLabel = getattr(self, f'current_label_{axis}_{mode}')
+            current_label: QLabel = getattr(self, f"current_label_{axis}_{mode}")
             current_label.setText(f"Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}")
             current_label.setStyleSheet("color: #2196F3; font-weight: bold;")
 
             axis_name: str = self.axis_names[axis]
             mode_name: str = self.mode_names[mode]
-            self.log_message(f"→ Sent {axis_name} {mode_name}: Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}")
+            self.log_message(
+                f"→ Sent {axis_name} {mode_name}: Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}"
+            )
 
         except Exception as e:
             QMessageBox.critical(self, "Send Error", f"Failed to send: {e}")
@@ -690,51 +728,53 @@ class PIDTunerGUI(QMainWindow):
         self.telemetry_status.setText("Receiving telemetry")
         self.telemetry_status.setStyleSheet("font-weight: bold; color: green;")
 
-        # Update value labels
+        # Update Current value labels
         for key, (label, unit) in self.value_labels.items():
             if key in data:
                 text: str
-                if key == 'mode':
+                if key == "mode":
                     text = "STABILISE" if data[key] else "ACRO"
-                elif key == 'battery':
+                elif key == "battery":
                     # voltage sent as mV
-                    voltage: float = (data[key] / 1000)
-                    text = f"{voltage:.2f}{unit}"
+                    voltage: float = data[key] / 1000
+                    text = f"{voltage:.3f}{unit}"
                 else:
-                    text = f"{data[key]}{unit}"
+                    text = f"{data[key]:.3f}{unit}"
                 label.setText(text)
 
         # Update plots
         angles_data: Dict[str, int] = {
-            "Pitch": data['pitch_angle'],
-            "Roll": data['roll_angle'],
-            "Yaw": data['yaw_angle']
+            "Pitch": data["pitch_angle"],
+            "Roll": data["roll_angle"],
+            "Yaw": data["yaw_angle"],
         }
         self.angles_plot.add_data(angles_data)
 
         rates_data: Dict[str, int] = {
-            "Pitch": data['pitch_rate'],
-            "Roll": data['roll_rate'],
-            "Yaw": data['yaw_rate']
+            "Pitch": data["pitch_rate"],
+            "Roll": data["roll_rate"],
+            "Yaw": data["yaw_rate"],
         }
         self.rates_plot.add_data(rates_data)
 
         pid_data: Dict[str, int] = {
-            "Pitch": data['pitch_pid'],
-            "Roll": data['roll_pid'],
-            "Yaw": data['yaw_pid']
+            "Pitch": data["pitch_pid"],
+            "Roll": data["roll_pid"],
+            "Yaw": data["yaw_pid"],
         }
         self.pid_plot.add_data(pid_data)
 
         motors_data: Dict[str, int] = {
-            "FL": data['motor_fl'],
-            "BL": data['motor_bl'],
-            "BR": data['motor_br'],
-            "FR": data['motor_fr']
+            "Front Left": data["motor_fl"],
+            "Back Left": data["motor_bl"],
+            "Back Right": data["motor_br"],
+            "Front Right": data["motor_fr"],
         }
         self.motors_plot.add_data(motors_data)
 
-        self.attitude_3d.update_attitude(data['pitch_angle'], data['roll_angle'], data['yaw_angle'])
+        self.attitude_3d.update_attitude(
+            data["pitch_angle"], data["roll_angle"], data["yaw_angle"]
+        )
 
     def handle_response(self, response: str) -> None:
         """Handle text response from serial port"""
@@ -755,7 +795,7 @@ class PIDTunerGUI(QMainWindow):
 
 def main() -> None:
     app: QApplication = QApplication(sys.argv)
-    app.setStyle('Fusion')
+    app.setStyle("Fusion")
 
     window: PIDTunerGUI = PIDTunerGUI()
     window.show()
@@ -763,5 +803,5 @@ def main() -> None:
     sys.exit(app.exec_())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
