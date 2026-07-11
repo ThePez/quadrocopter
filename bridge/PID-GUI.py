@@ -3,6 +3,8 @@ PID Tuning GUI for Drone with Real-time Telemetry Plotting
 PyQt5 interface for sending PID coefficients and viewing telemetry
 """
 
+import os
+import re
 import sys
 import struct
 import serial
@@ -48,12 +50,92 @@ SENSOR_TELEMETRY_SIZE = struct.calcsize(SENSOR_TELEMETRY_FORMAT)
 # 3 floats (kp, ki, kd) then 2 uint16_t (axis, mode).
 PID_CONFIG_FORMAT = "<fffHH"
 
+_DEFINE_RE = re.compile(r"^\s*#define\s+(\w+)\s+([0-9.eE+-]+)\s*$")
+
+
+def load_pid_defaults() -> Dict[str, float]:
+    """Parse libs/pid/pid_defaults.h so the GUI's default gains stay in sync
+    with the firmware instead of being hand-copied into two places."""
+    header_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..",
+        "libs",
+        "pid",
+        "pid_defaults.h",
+    )
+    defaults: Dict[str, float] = {}
+    try:
+        with open(header_path, "r") as f:
+            for line in f:
+                match = _DEFINE_RE.match(line)
+                if match:
+                    defaults[match.group(1)] = float(match.group(2))
+    except OSError as exc:
+        print(f"Warning: could not read PID defaults from {header_path}: {exc}")
+    return defaults
+
+
+# Populated at import time from pid_defaults.h
+PID_DEFAULTS: Dict[str, float] = load_pid_defaults()
+
+# Maps each (axis, mode) tab to the #define prefix used in pid_defaults.h
+PID_DEFAULT_KEYS: Dict[Tuple[int, int], str] = {
+    (0, 0): "RATE_PITCH_ROLL",
+    (1, 0): "RATE_YAW",
+    (0, 1): "ANGLE_PITCH_ROLL",
+}
+
+
+def format_gain(value: float) -> str:
+    """Render a gain the way pid_defaults.h already writes them (e.g. 1.0, 0.175)."""
+    text = f"{value:.4f}".rstrip("0")
+    return text + "0" if text.endswith(".") else text
+
+
+def save_pid_defaults(axis: int, mode: int, kp: float, ki: float, kd: float) -> bool:
+    """Write the given gains back into pid_defaults.h as the new defaults for
+    this axis/mode, so the next GUI launch and the next firmware build both
+    start from values already validated on the drone."""
+    prefix = PID_DEFAULT_KEYS.get((axis, mode))
+    if prefix is None:
+        return False
+
+    header_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..",
+        "libs",
+        "pid",
+        "pid_defaults.h",
+    )
+    updates = {f"{prefix}_KP": kp, f"{prefix}_KI": ki, f"{prefix}_KD": kd}
+
+    try:
+        with open(header_path, "r") as f:
+            lines = f.readlines()
+
+        for i, line in enumerate(lines):
+            match = _DEFINE_RE.match(line)
+            if match and match.group(1) in updates:
+                lines[i] = (
+                    f"#define {match.group(1)} {format_gain(updates[match.group(1)])}\n"
+                )
+
+        with open(header_path, "w") as f:
+            f.writelines(lines)
+    except OSError as exc:
+        print(f"Warning: could not write PID defaults to {header_path}: {exc}")
+        return False
+
+    PID_DEFAULTS.update(updates)
+    return True
+
 
 class TelemetryThread(QThread):
     """Thread for handling serial communication and telemetry"""
 
     response_received = pyqtSignal(str)
     telemetry_received = pyqtSignal(dict)
+    connection_lost = pyqtSignal(str)
 
     def __init__(self, serial_port: serial.Serial) -> None:
         super().__init__()
@@ -67,43 +149,46 @@ class TelemetryThread(QThread):
         """Listen for responses and telemetry from the bridge"""
         while self.running and self.serial_port and self.serial_port.is_open:
             try:
-                # Read available bytes
-                if self.serial_port.in_waiting:
-                    data: bytes = self.serial_port.read(self.serial_port.in_waiting)
 
-                    # Process complete, CRC-valid sensor_telemetry_t packets
-                    for packet in self.decoder.feed(data):
-                        try:
-                            values: Tuple[float, ...] = struct.unpack(
-                                SENSOR_TELEMETRY_FORMAT, packet
-                            )
+                data: bytes = self.serial_port.read(4096)
 
-                            telemetry: Dict[str, Any] = {
-                                "pitch_angle": values[0],
-                                "roll_angle": values[1],
-                                "yaw_angle": values[2],
-                                "pitch_rate": values[3],
-                                "roll_rate": values[4],
-                                "yaw_rate": values[5],
-                                "mode": int(values[6]),
-                                "pitch_pid": values[7],
-                                "roll_pid": values[8],
-                                "yaw_pid": values[9],
-                                "motor_fl": values[10],
-                                "motor_bl": values[11],
-                                "motor_br": values[12],
-                                "motor_fr": values[13],
-                                "battery": values[14],
-                                "timestamp": datetime.now(),
-                            }
-                            self.telemetry_received.emit(telemetry)
-                        except Exception as e:
-                            self.response_received.emit(f"Parse error: {e}")
+                # Process complete, CRC-valid sensor_telemetry_t packets
+                for packet in self.decoder.feed(data):
+                    try:
+                        values: Tuple[float, ...] = struct.unpack(
+                            SENSOR_TELEMETRY_FORMAT, packet
+                        )
+
+                        telemetry: Dict[str, Any] = {
+                            "pitch_angle": values[0],
+                            "roll_angle": values[1],
+                            "yaw_angle": values[2],
+                            "pitch_rate": values[3],
+                            "roll_rate": values[4],
+                            "yaw_rate": values[5],
+                            "mode": int(values[6]),
+                            "pitch_pid": values[7],
+                            "roll_pid": values[8],
+                            "yaw_pid": values[9],
+                            "motor_fl": values[10],
+                            "motor_bl": values[11],
+                            "motor_br": values[12],
+                            "motor_fr": values[13],
+                            "battery": values[14],
+                            "timestamp": datetime.now(),
+                        }
+                        self.telemetry_received.emit(telemetry)
+                    except Exception as e:
+                        self.response_received.emit(f"Parse error: {e}")
+
+            except serial.SerialException as e:
+
+                self.connection_lost.emit(str(e))
+                self.running = False
+                break
 
             except Exception as e:
                 self.response_received.emit(f"Error: {e}")
-
-            self.msleep(10)
 
     def stop(self) -> None:
         self.running = False
@@ -516,6 +601,11 @@ class PIDTunerGUI(QMainWindow):
         group: QGroupBox = QGroupBox(title)
         layout: QGridLayout = QGridLayout()
 
+        prefix = PID_DEFAULT_KEYS.get((axis, mode))
+        default_kp = PID_DEFAULTS.get(f"{prefix}_KP", 0.0) if prefix else 0.0
+        default_ki = PID_DEFAULTS.get(f"{prefix}_KI", 0.0) if prefix else 0.0
+        default_kd = PID_DEFAULTS.get(f"{prefix}_KD", 0.0) if prefix else 0.0
+
         current_label: QLabel = QLabel("Current:")
         layout.addWidget(current_label, 0, 0)
 
@@ -529,7 +619,7 @@ class PIDTunerGUI(QMainWindow):
         kp_spin.setRange(0, 100)
         kp_spin.setDecimals(4)
         kp_spin.setSingleStep(0.001)
-        kp_spin.setValue(0.0)
+        kp_spin.setValue(default_kp)
         layout.addWidget(kp_spin, 1, 1)
 
         layout.addWidget(QLabel("Ki:"), 1, 2)
@@ -537,7 +627,7 @@ class PIDTunerGUI(QMainWindow):
         ki_spin.setRange(0, 100)
         ki_spin.setDecimals(4)
         ki_spin.setSingleStep(0.001)
-        ki_spin.setValue(0.0)
+        ki_spin.setValue(default_ki)
         layout.addWidget(ki_spin, 1, 3)
 
         layout.addWidget(QLabel("Kd:"), 2, 0)
@@ -545,7 +635,7 @@ class PIDTunerGUI(QMainWindow):
         kd_spin.setRange(0, 100)
         kd_spin.setDecimals(4)
         kd_spin.setSingleStep(0.001)
-        kd_spin.setValue(0.0)
+        kd_spin.setValue(default_kd)
         layout.addWidget(kd_spin, 2, 1)
 
         send_btn: QPushButton = QPushButton(f"Send to Drone")
@@ -558,6 +648,17 @@ class PIDTunerGUI(QMainWindow):
             )
         )
         layout.addWidget(send_btn, 2, 2, 1, 2)
+
+        save_btn: QPushButton = QPushButton("Save as Default")
+        save_btn.setStyleSheet(
+            "background-color: #FF9800; color: white; font-weight: bold;"
+        )
+        save_btn.clicked.connect(
+            lambda: self.save_pid_as_default(
+                axis, mode, title, kp_spin.value(), ki_spin.value(), kd_spin.value()
+            )
+        )
+        layout.addWidget(save_btn, 3, 2, 1, 2)
 
         setattr(self, f"kp_spin_{axis}_{mode}", kp_spin)
         setattr(self, f"ki_spin_{axis}_{mode}", ki_spin)
@@ -629,6 +730,7 @@ class PIDTunerGUI(QMainWindow):
             self.telemetry_thread = TelemetryThread(self.serial_port)
             self.telemetry_thread.response_received.connect(self.handle_response)
             self.telemetry_thread.telemetry_received.connect(self.handle_telemetry)
+            self.telemetry_thread.connection_lost.connect(self.handle_connection_lost)
             self.telemetry_thread.start()
 
             # Update UI
@@ -648,6 +750,7 @@ class PIDTunerGUI(QMainWindow):
         if self.telemetry_thread:
             self.telemetry_thread.stop()
             self.telemetry_thread.wait()
+            self.telemetry_thread = None
 
         if self.serial_port and self.serial_port.is_open:
             self.serial_port.close()
@@ -716,6 +819,34 @@ class PIDTunerGUI(QMainWindow):
             QMessageBox.critical(self, "Send Error", f"Failed to send: {e}")
             self.log_message(f"Send failed: {e}")
 
+    def save_pid_as_default(
+        self, axis: int, mode: int, title: str, kp: float, ki: float, kd: float
+    ) -> None:
+        """Write the current spin-box values into pid_defaults.h as the new
+        boot-time defaults for this loop."""
+        axis_name: str = self.axis_names[axis]
+
+        reply = QMessageBox.question(
+            self,
+            "Save as Default",
+            f"Overwrite the {axis_name} {title} defaults in pid_defaults.h with\n"
+            f"Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        if save_pid_defaults(axis, mode, kp, ki, kd):
+            self.log_message(
+                f"Saved {axis_name} {title} as default: Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}"
+            )
+        else:
+            QMessageBox.critical(
+                self, "Save Error", "Failed to write pid_defaults.h - see console."
+            )
+            self.log_message(f"Failed to save {axis_name} {title} defaults")
+
     def handle_telemetry(self, data: Dict[str, Any]) -> None:
         """Handle received telemetry data"""
         if not self.record_checkbox.isChecked():
@@ -779,6 +910,16 @@ class PIDTunerGUI(QMainWindow):
     def handle_response(self, response: str) -> None:
         """Handle text response from serial port"""
         self.log_message(f"← {response}")
+
+    def handle_connection_lost(self, error: str) -> None:
+        """Handle the serial port disappearing (e.g. USB unplugged)"""
+        self.log_message(f"Serial connection lost: {error}")
+        self.disconnect()
+        QMessageBox.warning(
+            self,
+            "Connection Lost",
+            f"The serial connection was lost:\n{error}",
+        )
 
     def log_message(self, message: str) -> None:
         """Add message to log"""
