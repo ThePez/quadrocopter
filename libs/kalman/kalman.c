@@ -11,6 +11,15 @@
 #include <esp_timer.h>
 #include <stdbool.h>
 
+struct lp_filter {
+    double alpha;
+    double value;
+};
+
+static struct lp_filter gyro_pitch = {0.9, 0};
+static struct lp_filter gyro_roll = {0.9, 0};
+static struct lp_filter gyro_yaw = {0.9, 0};
+
 // #define ENABLE
 
 #ifdef ENABLE
@@ -27,7 +36,7 @@ struct kalman_axis_t {
 static struct kalman_axis_t pitchKalman;
 static struct kalman_axis_t rollKalman;
 static uint64_t lastUpdateUs;
-static bool initialised;
+static bool initialised = false;
 #endif
 static struct imu_packet_t latest;
 
@@ -51,7 +60,21 @@ static void kalman_1d(float* angle, float* uncertainty, float rate, float measur
 }
 #endif
 
+void low_pass_filter(struct lp_filter* axis, double reading) {
+    axis->value = ((1 - axis->alpha) * axis->value) + (axis->alpha * reading);
+}
+
 void kalman_update(struct imu_packet_t* sample) {
+    // Filter pitch rate
+    low_pass_filter(&gyro_pitch, sample->pitchRate);
+    sample->pitchRate = gyro_pitch.value;
+    // Filter roll rate
+    low_pass_filter(&gyro_roll, sample->rollRate);
+    sample->rollRate = gyro_roll.value;
+    // Filter yaw rate
+    low_pass_filter(&gyro_yaw, sample->yawRate);
+    sample->yawRate = gyro_yaw.value;
+
 #ifdef ENABLE
     uint64_t now = (uint64_t) esp_timer_get_time();
 
