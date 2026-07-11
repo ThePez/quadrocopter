@@ -231,8 +231,8 @@ esp_err_t init_drone(void) {
         return ESP_FAIL;
     }
 
-    // Initialise a callback for returning info back to the remote
-    timer_task_callback_init(50000, system_data_callback); // Interval of 50ms
+    // Initialise a callback for returning info back to the PC app
+    timer_task_callback_init(100000, system_data_callback); // Interval of 50ms
 
     // Initialise a callback for checking battery voltage
     timer_task_callback_init(1000000, battery_callback); // Interval of 1 second
