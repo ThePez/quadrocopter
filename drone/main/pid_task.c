@@ -14,6 +14,7 @@
 #include "kalman.h"
 #include "motors.h"
 #include "pid.h"
+#include "pid_defaults.h"
 
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -231,9 +232,11 @@ static void pid_control(void* pvParams) {
     ARG_UNUSED(pvParams);
 
     // Set Co-efficients for the PID control loops
-    pid_init_params(&ratePid, 0.175, 0, 0); // kp, kd, ki
-    pid_init_params(&rateZPid, 0.1, 0, 0);  // kp, kd, ki
-    pid_init_params(&anglePid, 1, 0, 0);    // kp, kd, ki
+    pid_init_params(&ratePid, RATE_PITCH_ROLL_KP, RATE_PITCH_ROLL_KD,
+                    RATE_PITCH_ROLL_KI); // kp, kd, ki
+    pid_init_params(&rateZPid, RATE_YAW_KP, RATE_YAW_KD, RATE_YAW_KI); // kp, kd, ki
+    pid_init_params(&anglePid, ANGLE_PITCH_ROLL_KP, ANGLE_PITCH_ROLL_KD,
+                    ANGLE_PITCH_ROLL_KI); // kp, kd, ki
 
     ESP_LOGI(TAG, "PID Task Setup");
 
