@@ -17,6 +17,7 @@ void pid_init_params(struct pid_parameters_t* params, double kp, double kd, doub
     params->kp = kp;
     params->kd = kd;
     params->ki = ki;
+    params->dtermAlpha = 1.0; // Unfiltered by default; lower towards 0 to smooth the D term
 }
 
 double pid_update(struct pid_parameters_t* params, struct pid_result_t* values, double ref,
@@ -28,11 +29,17 @@ double pid_update(struct pid_parameters_t* params, struct pid_result_t* values, 
     // I
     values->intergral = constrainf(values->intergral + params->ki * error * dt, -params->intLimit,
                                    params->intLimit);
-    // D
-    values->derivative =
-        constrainf(params->kd * (error - values->error) / dt, -params->divLimit, params->divLimit);
-    // Update Error
-    values->error = error;
+    // D - derivative-on-measurement (not on error) so a setpoint step doesn't
+    // spike the output, then low-pass filtered since differentiation amplifies
+    // sensor noise.
+    double rawDerivative = constrainf(-params->kd * (actual - values->lastMeasurement) / dt,
+                                      -params->divLimit, params->divLimit);
+    values->dtermFiltered =
+        (params->dtermAlpha * rawDerivative) + ((1 - params->dtermAlpha) * values->dtermFiltered);
+    values->derivative = values->dtermFiltered;
+
+    // Update state
+    values->lastMeasurement = actual;
 
     return values->proportional + values->intergral + values->derivative;
 }
@@ -42,6 +49,7 @@ void pid_reset(struct pid_result_t* pid) {
         pid->proportional = 0.0;
         pid->intergral = 0.0;
         pid->derivative = 0.0;
-        pid->error = 0.0;
+        pid->lastMeasurement = 0.0;
+        pid->dtermFiltered = 0.0;
     }
 }

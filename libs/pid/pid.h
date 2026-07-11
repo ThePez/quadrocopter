@@ -14,19 +14,21 @@
 #define PID_DIV_LIMIT 50
 
 struct pid_parameters_t {
-    double kp;       // Proportional scaler
-    double ki;       // Intergral scaler
-    double kd;       // Derivative scaler
-    double intLimit; // Intergral limiting term
-    double divLimit; // Derivative limiting term
-    double dt;       // Time delta
+    double kp;         // Proportional scaler
+    double ki;         // Intergral scaler
+    double kd;         // Derivative scaler
+    double intLimit;   // Intergral limiting term
+    double divLimit;   // Derivative limiting term
+    double dt;         // Time delta
+    double dtermAlpha; // D-term low-pass filter coefficient (1 = unfiltered)
 };
 
 struct pid_result_t {
-    double proportional; // Current "P" Output
-    double derivative;   // Current "D" Output
-    double intergral;    // Current "I" Output (is a running total)
-    double error;        // Previous error
+    double proportional;    // Current "P" Output
+    double derivative;      // Current "D" Output
+    double intergral;       // Current "I" Output (is a running total)
+    double lastMeasurement; // Previous "actual" value, for derivative-on-measurement
+    double dtermFiltered;   // Low-pass filtered D-term state
 };
 
 void pid_init_params(struct pid_parameters_t* params, double kp, double kd, double ki);
