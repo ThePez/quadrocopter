@@ -80,7 +80,10 @@ static esp_err_t wifi_init(void) {
 
     CHECK_ERR(esp_wifi_start(), "wifi not started");
 
-    CHECK_ERR(esp_wifi_set_channel(9, WIFI_SECOND_CHAN_ABOVE), "Wifi channel not set");
+    // Disable modem sleep - power save delays/drops ESP-NOW RX between DTIM wakeups
+    CHECK_ERR(esp_wifi_set_ps(WIFI_PS_NONE), "Wifi power save disable failed");
+
+    CHECK_ERR(esp_wifi_set_channel(9, WIFI_SECOND_CHAN_NONE), "Wifi channel not set");
 
     ESP_LOGI(TAG, "Wifi initialised");
 

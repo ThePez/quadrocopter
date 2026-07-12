@@ -29,9 +29,7 @@ double pid_update(struct pid_parameters_t* params, struct pid_result_t* values, 
     // I
     values->intergral = constrainf(values->intergral + params->ki * error * dt, -params->intLimit,
                                    params->intLimit);
-    // D - derivative-on-measurement (not on error) so a setpoint step doesn't
-    // spike the output, then low-pass filtered since differentiation amplifies
-    // sensor noise.
+    // D
     double rawDerivative = constrainf(-params->kd * (actual - values->lastMeasurement) / dt,
                                       -params->divLimit, params->divLimit);
     values->dtermFiltered =

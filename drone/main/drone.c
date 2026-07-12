@@ -159,6 +159,25 @@ static void battery_callback(void* args) {
     xSemaphoreTake(droneData.mutex, portMAX_DELAY);
     droneData.battery = (uint16_t) battery_voltage; // mV
     xSemaphoreGive(droneData.mutex);
+
+    // If battery volatage is too low -> send a signal to the remote
+    if (battery_voltage < LOW_VOLTAGE) {
+        struct wifi_packet_t packet = {.packet_id = POWER};
+        packet.data.power.battery = battery_voltage;
+        packet.crc16 = esp_rom_crc16_le(0, (uint8_t*) &packet.data, sizeof(union packet_data));
+
+        // Only allow sending after the previous message was sent
+        if (xSemaphoreTake(wifiSendSemaphore, 0) == pdTRUE) {
+            esp_err_t result =
+                esp_now_send(remote_mac, (uint8_t*) &packet, sizeof(struct wifi_packet_t));
+            if (result != ESP_OK) {
+                ESP_LOGW(TAG, "Power callback send failed");
+                xSemaphoreGive(wifiSendSemaphore);
+            }
+        } else {
+            ESP_LOGW(TAG, "wifi semaphore unavailable");
+        }
+    }
 }
 
 static void system_data_callback(void* args) {
@@ -196,6 +215,7 @@ static void system_data_callback(void* args) {
             esp_now_send(bridge_mac, (uint8_t*) &packet, sizeof(struct wifi_packet_t));
         if (result != ESP_OK) {
             ESP_LOGW(TAG, "data callback send failed");
+            xSemaphoreGive(wifiSendSemaphore);
         }
     } else {
         ESP_LOGW(TAG, "wifi semaphore unavailable");
@@ -213,7 +233,7 @@ esp_err_t init_drone(void) {
     // Start the C++ imu task
     CHECK_ERR(imu_init(), "IMU init failed");
     // Wait for the IMU initialisation to finish
-    vTaskDelay(pdMS_TO_TICKS(500));
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     // Setup ESP-NOW (pair the bridge and remote)
     uint8_t* macs[] = {remote_mac, bridge_mac};
@@ -224,12 +244,15 @@ esp_err_t init_drone(void) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
-    // Mutex protecting droneData - must exist before the tasks/callbacks that touch it start
+    // Mutex protecting droneData - must exist before task startup
     droneData.mutex = xSemaphoreCreateMutex();
     if (droneData.mutex == NULL) {
         ESP_LOGE(TAG, "Failed to create droneData mutex");
         return ESP_FAIL;
     }
+
+    // Mutex protecting kalman's shared state - must be called before task startup
+    CHECK_ERR(kalman_init(), "Failed to create kalman mutex");
 
     // Initialise a callback for returning info back to the PC app
     timer_task_callback_init(100000, system_data_callback); // Interval of 50ms

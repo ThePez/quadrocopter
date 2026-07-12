@@ -90,7 +90,7 @@ static void comms_failsafe(void) {
     droneData.armed = 0;
     xSemaphoreGive(droneData.mutex);
 
-    ESP_LOGE(TAG, "FAILSAFE: No wifi link for at least 1 second");
+    ESP_LOGE(TAG, "FAILSAFE: No wifi link for %d second", (FAILSAFE_TIMEOUT_US / 1000000));
     ESP_LOGW(TAG, "FAILSAFE: May need to reset both remote and drone to reset");
     // Kill the motors
     motor_shutdown();
@@ -99,7 +99,7 @@ static void comms_failsafe(void) {
 static void update_escs(void) {
 
     // Low throttle input (ie off)
-    if (remoteIn.throttle < (MIN_THROTTLE + 50)){//} || droneData.battery < CRITICAL_VOLTAGE) {
+    if (remoteIn.throttle < (MIN_THROTTLE + 50) || droneData.battery < CRITICAL_VOLTAGE) {
         motors.motorA = MIN_THROTTLE;
         motors.motorB = MIN_THROTTLE;
         motors.motorC = MIN_THROTTLE;
@@ -232,11 +232,9 @@ static void pid_control(void* pvParams) {
     ARG_UNUSED(pvParams);
 
     // Set Co-efficients for the PID control loops
-    pid_init_params(&ratePid, RATE_PITCH_ROLL_KP, RATE_PITCH_ROLL_KD,
-                    RATE_PITCH_ROLL_KI); // kp, kd, ki
-    pid_init_params(&rateZPid, RATE_YAW_KP, RATE_YAW_KD, RATE_YAW_KI); // kp, kd, ki
-    pid_init_params(&anglePid, ANGLE_PITCH_ROLL_KP, ANGLE_PITCH_ROLL_KD,
-                    ANGLE_PITCH_ROLL_KI); // kp, kd, ki
+    pid_init_params(&ratePid, RATE_PITCH_ROLL_KP, RATE_PITCH_ROLL_KD, RATE_PITCH_ROLL_KI);
+    pid_init_params(&rateZPid, RATE_YAW_KP, RATE_YAW_KD, RATE_YAW_KI);
+    pid_init_params(&anglePid, ANGLE_PITCH_ROLL_KP, ANGLE_PITCH_ROLL_KD, ANGLE_PITCH_ROLL_KI);
 
     ESP_LOGI(TAG, "PID Task Setup");
 
@@ -252,7 +250,7 @@ static void pid_control(void* pvParams) {
         if (xQueueReceive(imuQueue, &imuSample, 0) == pdTRUE) {
             kalman_update(&imuSample);
         }
-        
+
         kalman_get(&kalman);
 
         // Check drone for critical angles
@@ -330,8 +328,7 @@ static void pid_control(void* pvParams) {
 
         outputPID.pitch_pid =
             pid_update(&ratePid, &pidRate.pitch, pitchRateSetpoint, kalman.pitchRate);
-        outputPID.roll_pid =
-            pid_update(&ratePid, &pidRate.roll, rollRateSetpoint, kalman.rollRate);
+        outputPID.roll_pid = pid_update(&ratePid, &pidRate.roll, rollRateSetpoint, kalman.rollRate);
         outputPID.yaw_pid = pid_update(&rateZPid, &pidRate.yaw, yawRateSetpoint, kalman.yawRate);
 
         // Update ESCs

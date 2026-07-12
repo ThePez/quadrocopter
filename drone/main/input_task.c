@@ -74,13 +74,6 @@ static void input_control(void* pvParams) {
             continue;
         }
 
-        uint16_t expected =
-            esp_rom_crc16_le(0, (uint8_t*) &(packet.data), sizeof(union packet_data));
-        if (expected != packet.crc16) {
-            // corrupted packet
-            continue;
-        }
-
         switch (packet.packet_id) {
         case REMOTE:
             handle_remote_update(&packet.data.remote);

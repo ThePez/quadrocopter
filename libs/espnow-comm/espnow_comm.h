@@ -47,10 +47,15 @@ struct pid_config_telemetry_t {
     uint16_t mode; // 0 = Rate, 1 = Angle
 };
 
+struct power_data_t {
+    uint16_t battery;
+};
+
 union packet_data {
     struct sensor_telemetry_t sensor;
     struct remote_telemetry_t remote;
     struct pid_config_telemetry_t pid_config;
+    struct power_data_t power;
 };
 
 struct wifi_packet_t {
@@ -59,7 +64,7 @@ struct wifi_packet_t {
     uint8_t packet_id;
 };
 
-enum wifi_packet_id { SENSOR, REMOTE, PID_CONFIG };
+enum wifi_packet_id { SENSOR, REMOTE, PID_CONFIG, POWER };
 
 /**
  * @brief Initializes NVS, WiFi, and ESP-NOW, and registers the given peers.

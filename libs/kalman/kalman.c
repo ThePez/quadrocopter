@@ -9,7 +9,12 @@
 #include "kalman.h"
 
 #include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <stdbool.h>
+
+// This will enable a 1D Kalman filter for the Pitch and Roll angles
+// #define ENABLE
 
 struct lp_filter {
     double alpha;
@@ -20,7 +25,8 @@ static struct lp_filter gyro_pitch = {0.9, 0};
 static struct lp_filter gyro_roll = {0.9, 0};
 static struct lp_filter gyro_yaw = {0.9, 0};
 
-// #define ENABLE
+static SemaphoreHandle_t kalmanMutex = NULL;
+static bool init_mutex = false;
 
 #ifdef ENABLE
 // Process noise scales with dt^2 (random-walk angle model); measurement noise
@@ -60,6 +66,20 @@ static void kalman_1d(float* angle, float* uncertainty, float rate, float measur
 }
 #endif
 
+esp_err_t kalman_init(void) {
+    if (init_mutex) {
+        return ESP_OK;
+    }
+
+    kalmanMutex = xSemaphoreCreateMutex();
+    if (kalmanMutex) {
+        init_mutex = true;
+        return ESP_OK;
+    }
+
+    return ESP_FAIL;
+}
+
 void low_pass_filter(struct lp_filter* axis, double reading) {
     axis->value = ((1 - axis->alpha) * axis->value) + (axis->alpha * reading);
 }
@@ -95,16 +115,20 @@ void kalman_update(struct imu_packet_t* sample) {
                   dt);
     }
 
+    xSemaphoreTake(kalmanMutex, portMAX_DELAY);
     latest = *sample;
     latest.pitchAngle = pitchKalman.angle;
     latest.rollAngle = rollKalman.angle;
-    // Yaw has no absolute reference to correct against (no magnetometer in the
-    // game rotation vector), so it passes through unfiltered.
+    xSemaphoreGive(kalmanMutex);
 #else
+    xSemaphoreTake(kalmanMutex, portMAX_DELAY);
     latest = *sample;
+    xSemaphoreGive(kalmanMutex);
 #endif
 }
 
 void kalman_get(struct imu_packet_t* out) {
+    xSemaphoreTake(kalmanMutex, portMAX_DELAY);
     *out = latest;
+    xSemaphoreGive(kalmanMutex);
 }
