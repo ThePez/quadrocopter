@@ -242,7 +242,7 @@ static void pid_control(void* pvParams) {
 
     while (1) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        uint64_t now = esp_timer_get_time();
+        int64_t now = esp_timer_get_time();
 
         // Non-blocking: if no new IMU sample has arrived this cycle, kalman_get()
         // below keeps returning the last known estimate rather than stalling.
