@@ -17,7 +17,7 @@
 
 static mcpwm_cmpr_handle_t esc_pwm_comparators[4] = {NULL, NULL, NULL, NULL};
 
-esp_err_t esc_pwm_init(void) {
+esp_err_t esc_pwm_init(uint16_t initial_duty_cycle) {
     // Create and configure the timers
     mcpwm_timer_handle_t pwm_timers[2] = {NULL};
     for (uint8_t i = 0; i < 2; i++) {
@@ -73,8 +73,8 @@ esp_err_t esc_pwm_init(void) {
                                                      esc_pwm_comparators[i], MCPWM_GEN_ACTION_LOW)),
                   "Failed to set compare action for generator");
 
-        // Set the initial compare values to MOTOR_SPEED_MIN
-        esc_pwm_set_duty_cycle(i, MOTOR_SPEED_MIN);
+        // Set the initial compare values
+        esc_pwm_set_duty_cycle(i, initial_duty_cycle);
     }
 
     // Enable and start the timers
@@ -84,10 +84,10 @@ esp_err_t esc_pwm_init(void) {
                   "Failed to start PWM timer");
     }
 
-    // Ensure all motors are completely off on startup.
+    // Re-apply the requested startup duty cycle now the timers are running.
     for (uint8_t i = 0; i < NUMBER_OF_MOTORS; i++) {
 
-        esc_pwm_set_duty_cycle(i, MOTOR_SPEED_MIN);
+        esc_pwm_set_duty_cycle(i, initial_duty_cycle);
     }
 
     ESP_LOGI(TAG, "ESC PWM initialization completed successfully");

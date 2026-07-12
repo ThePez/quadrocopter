@@ -44,3 +44,23 @@ clean target: _idf-check
 all target port=default_port:
     just build {{target}}
     just flash {{target}} {{port}}
+
+# ESC programming mode - drone build that bypasses flight control and drives
+# all 4 ESCs directly from the remote's throttle channel, for ESC calibration.
+build-esc-program: _idf-check
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f "drone/sdkconfig.esc-program" ]; then
+        cp drone/sdkconfig drone/sdkconfig.esc-program
+    fi
+    idf.py -C drone -B drone/build-esc-program -D SDKCONFIG=sdkconfig.esc-program -D ESC_PROGRAMMING_MODE=1 build
+
+flash-esc-program port=default_port: _idf-check
+    idf.py -C drone -B drone/build-esc-program \
+        {{ if port != "" { "-p " + port } else { "" } }} \
+        flash
+
+monitor-esc-program port=default_port: _idf-check
+    idf.py -C drone -B drone/build-esc-program \
+        {{ if port != "" { "-p " + port } else { "" } }} \
+        monitor

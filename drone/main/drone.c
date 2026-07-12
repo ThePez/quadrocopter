@@ -224,8 +224,8 @@ static void system_data_callback(void* args) {
 
 esp_err_t init_drone(void) {
 
-    // Setup PWM
-    CHECK_ERR_NO_LOG(esc_pwm_init());
+    // Setup PWM - motors off until the flight loop takes over
+    CHECK_ERR_NO_LOG(esc_pwm_init(MOTOR_SPEED_MIN));
 
     // ADC for measuring the battery voltage
     CHECK_ERR_NO_LOG(adc_init());
@@ -265,4 +265,58 @@ esp_err_t init_drone(void) {
     CHECK_ERR(pid_task_init(), "PID task init failed");
 
     return ESP_OK;
+}
+
+/* ESC programming mode - bypasses flight control entirely so the throttle
+ * channel drives all 4 ESCs directly, allowing entry to the ESC's own
+ * programming menu (which requires seeing max throttle on power-up). */
+
+static void esc_program_task(void* pvParams) {
+    ARG_UNUSED(pvParams);
+
+    while (1) {
+        xSemaphoreTake(droneData.mutex, portMAX_DELAY);
+        int64_t lastRemoteTime = droneData.lastRemoteTime;
+        xSemaphoreGive(droneData.mutex);
+
+        // Leave the startup duty cycle untouched until the remote actually
+        // connects - otherwise remoteIn.throttle's zeroed default would
+        // immediately stomp the max-throttle signal the ESCs need to see.
+        if (lastRemoteTime != 0) {
+            uint16_t duty = (uint16_t) remoteIn.throttle;
+            for (uint8_t i = 0; i < NUMBER_OF_MOTORS; i++) {
+                esc_pwm_set_duty_cycle((MotorIndex) i, duty);
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+
+esp_err_t init_esc_programming(void) {
+
+    // Motors up at max throttle immediately - most ESCs enter their
+    // programming menu by seeing max throttle as the first signal on power-up
+    CHECK_ERR_NO_LOG(esc_pwm_init(MOTOR_SPEED_MAX));
+
+    // Only the remote is needed for this
+    uint8_t* macs[] = {remote_mac};
+    CHECK_ERR_NO_LOG(esp_now_module_init(macs, 1));
+
+    while (!wifiQueue) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    droneData.mutex = xSemaphoreCreateMutex();
+    if (droneData.mutex == NULL) {
+        ESP_LOGE(TAG, "Failed to create droneData mutex");
+        return ESP_FAIL;
+    }
+
+    // Reuse the input task to keep remoteIn.throttle updated from REMOTE packets
+    CHECK_ERR(input_task_init(), "Input task init failed");
+
+    BaseType_t result = xTaskCreate(esc_program_task, "ESC_PROGRAM_TASK",
+                                    configMINIMAL_STACK_SIZE * 2, NULL, tskIDLE_PRIORITY + 2, NULL);
+    return (result == pdPASS) ? ESP_OK : ESP_FAIL;
 }

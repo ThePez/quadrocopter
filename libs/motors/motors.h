@@ -44,11 +44,14 @@ typedef enum { MOTOR_A, MOTOR_B, MOTOR_C, MOTOR_D } MotorIndex;
  * @note Must be called once during startup before using esc_pwm_set_duty_cycle().
  * @note Assumes MOTOR_* constants define valid GPIO pins.
  *
+ * @param initial_duty_cycle Duty cycle (us) applied to all motors as soon as the
+ *                           timers start - the very first signal the ESCs see.
+ *
  * @global esc_pwm_comparators[] Will be populated with comparator handles.
  *
  * @return ESP_OK on success, or error code on failure
  */
-esp_err_t esc_pwm_init(void);
+esp_err_t esc_pwm_init(uint16_t initial_duty_cycle);
 
 /**
  * @brief Updates the duty cycle (pulse width) of the selected motor's ESC.

@@ -61,5 +61,6 @@ extern struct drone_config_t droneData;
 extern struct target_parameters_t remoteIn;
 
 esp_err_t init_drone(void);
+esp_err_t init_esc_programming(void);
 
 #endif

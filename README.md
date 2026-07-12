@@ -82,7 +82,7 @@ Each motor output is clamped to [1050, 2000] µs.
 | Condition                         | Response                                                |
 |-----------------------------------|---------------------------------------------------------|
 | Pitch or roll > ±30°              | Motors killed; must throttle down and level to re-arm  |
-| No remote signal for > 1 s        | Motors killed immediately                               |
+| No remote signal for > 2 s        | Motors killed immediately                               |
 | Battery ≤ 14 V (warn) / 13.6 V   | Warning / critical alert via telemetry                 |
 
 ---
@@ -155,6 +155,23 @@ Each target has its own `sdkconfig` and `CMakeLists.txt`. The bridge target must
 ```bash
 cd bridge && idf.py set-target esp32s3 && idf.py build flash
 ```
+
+---
+
+## ESC Programming Mode
+
+A separate drone build that bypasses flight control entirely and drives all 4 ESCs directly from the remote's throttle channel — no PID, no mixing, no arming gate. This is needed because normal flight firmware always brings the ESCs up at minimum throttle on boot as a safety floor, which prevents entering most ESCs' factory programming/calibration menu (that requires the ESC to see *max* throttle as its first signal on power-up).
+
+Selected at compile time via `ESC_PROGRAMMING_MODE`, which switches `main.c` to call `init_esc_programming()` instead of `init_drone()`. It uses its own build directory and sdkconfig (`drone/sdkconfig.esc-program`, seeded from the real one) so it can never interfere with the normal drone build.
+
+**Build & flash:**
+```bash
+just build-esc-program
+just flash-esc-program [port]
+just monitor-esc-program [port]
+```
+
+**Procedure:** set the transmitter throttle to max *before* powering on the drone — the ESCs need to see max throttle as their very first signal. Once powered, follow your ESC's normal programming-menu sequence via the throttle stick as you normally would.
 
 ---
 
