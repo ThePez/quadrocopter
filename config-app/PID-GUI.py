@@ -65,8 +65,8 @@ def load_pid_defaults() -> Dict[str, float]:
     )
     defaults: Dict[str, float] = {}
     try:
-        with open(header_path, "r") as f:
-            for line in f:
+        with open(header_path, "r") as header:
+            for line in header:
                 match = _DEFINE_RE.match(line)
                 if match:
                     defaults[match.group(1)] = float(match.group(2))
@@ -110,8 +110,8 @@ def save_pid_defaults(axis: int, mode: int, kp: float, ki: float, kd: float) -> 
     updates = {f"{prefix}_KP": kp, f"{prefix}_KI": ki, f"{prefix}_KD": kd}
 
     try:
-        with open(header_path, "r") as f:
-            lines = f.readlines()
+        with open(header_path, "r") as header:
+            lines: list[str] = header.readlines()
 
         for i, line in enumerate(lines):
             match = _DEFINE_RE.match(line)
@@ -120,8 +120,9 @@ def save_pid_defaults(axis: int, mode: int, kp: float, ki: float, kd: float) -> 
                     f"#define {match.group(1)} {format_gain(updates[match.group(1)])}\n"
                 )
 
-        with open(header_path, "w") as f:
-            f.writelines(lines)
+        with open(header_path, "w") as header:
+            header.writelines(lines)
+
     except OSError as exc:
         print(f"Warning: could not write PID defaults to {header_path}: {exc}")
         return False
