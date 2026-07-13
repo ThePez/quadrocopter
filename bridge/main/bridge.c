@@ -6,12 +6,14 @@
  *****************************************************************************
  */
 
+#include "common_functions.h"
 #include "espnow_comm.h"
 
 #include <driver/uart.h>
 #include <esp_log.h>
 #include <esp_now.h>
 #include <esp_rom_crc.h>
+#include <esp_system.h>
 
 #define TAG "BRIDGE"
 #define UART_NUM UART_NUM_0
@@ -121,14 +123,14 @@ static void uart_task(void* pvParameters) {
             esp_err_t result = esp_now_send_packet(drone_mac, &packet);
             if (result != ESP_OK) {
                 ESP_LOGW(TAG, "PID update send failed");
+                xSemaphoreGive(wifiSendSemaphore);
             }
         }
     }
 }
 
-void app_main(void) {
-    ESP_LOGI(TAG, "ESP32-S3 Bridge Starting...");
-
+// Initialises hardware for the bridge device.
+static esp_err_t hardware_init(void) {
     // Configure UART
     uart_config_t uart_config = {
         .baud_rate = 115200,
@@ -138,14 +140,26 @@ void app_main(void) {
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
     };
 
-    uart_param_config(UART_NUM, &uart_config);
-    uart_driver_install(UART_NUM, BUF_SIZE * 2, 0, 0, NULL, 0);
+    CHECK_ERR(uart_param_config(UART_NUM, &uart_config), "Uart param config failed");
+    CHECK_ERR(uart_driver_install(UART_NUM, BUF_SIZE * 2, 0, 0, NULL, 0),
+              "Uart driver install failed");
+
     uint8_t* macs[] = {drone_mac};
     // Initialize ESP-NOW (connect to drone)
-    esp_now_module_init(macs, 1);
+    CHECK_ERR_NO_LOG(esp_now_module_init(macs, 1));
+    // Success
+    return ESP_OK;
+}
 
-    ESP_LOGI(TAG, "Bridge initialized");
+void app_main(void) {
+    ESP_LOGI(TAG, "ESP32-S3 Bridge Starting...");
+    if (hardware_init() != ESP_OK) {
+        ESP_LOGE(TAG, "Hardware initialisation failed, restarting");
+        esp_restart();
+    }
 
+    ESP_LOGI(TAG, "Bridge initialised");
+    // Disable all future logging
     esp_log_level_set("*", ESP_LOG_NONE);
 
     // Start Tasks

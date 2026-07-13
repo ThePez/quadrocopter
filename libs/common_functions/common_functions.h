@@ -12,6 +12,7 @@
 #include <driver/i2c_master.h>
 #include <driver/spi_master.h>
 #include <esp_err.h>
+#include <esp_log.h>
 
 #define ARG_UNUSED(arg) ((void) arg)
 
@@ -52,20 +53,20 @@
 
 #endif
 
-#define CHECK_ERR(code, msg)                                                                       \
+#define CHECK_ERR(code, msg, ...)                                                                  \
     do {                                                                                           \
-        esp_err_t err = (code);                                                                    \
-        if (err != ESP_OK) {                                                                       \
-            ESP_LOGE(TAG, msg);                                                                    \
-            return err;                                                                            \
+        esp_err_t _err = (code);                                                                   \
+        if (_err != ESP_OK) {                                                                      \
+            ESP_LOGE(TAG, msg, ##__VA_ARGS__);                                                     \
+            return _err;                                                                            \
         }                                                                                          \
     } while (0)
 
 #define CHECK_ERR_NO_LOG(code)                                                                     \
     do {                                                                                           \
-        esp_err_t err = (code);                                                                    \
-        if (err != ESP_OK) {                                                                       \
-            return err;                                                                            \
+        esp_err_t _err = (code);                                                                   \
+        if (_err != ESP_OK) {                                                                      \
+            return _err;                                                                            \
         }                                                                                          \
     } while (0)
 
