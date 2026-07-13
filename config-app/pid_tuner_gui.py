@@ -1,19 +1,12 @@
-"""
-PID Tuning GUI for Drone with Real-time Telemetry Plotting
-PyQt5 interface for sending PID coefficients and viewing telemetry
-"""
+"""Main window: serial connection, PID tuning tabs, and telemetry display."""
 
-import os
-import re
-import sys
 import struct
 import serial
 import serial.tools.list_ports
-from collections import deque
 from datetime import datetime
-from typing import Dict, List, Tuple, Optional, Deque, Any
+from typing import Dict, List, Optional, Any
+
 from PyQt5.QtWidgets import (
-    QApplication,
     QMainWindow,
     QWidget,
     QVBoxLayout,
@@ -29,347 +22,15 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QCheckBox,
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont, QCloseEvent
 
-import numpy as np
-import pyqtgraph as pg
-import pyqtgraph.opengl as gl
-
 import uart_comm
-
-# Mirrors struct sensor_telemetry_t in libs/espnow-comm/espnow_comm.h:
-# 10 floats (angles/rates/mode/pid outputs) then 5 uint16_t (motor duty cycles, battery mV).
-# The struct isn't packed, so the compiler pads its sizeof() up to a multiple of 4
-# The trailing '2x' skips those 2 pad bytes; bridge.c sends sizeof(struct
-# sensor_telemetry_t) bytes per packet, so this must track that exactly.
-SENSOR_TELEMETRY_FORMAT = "<10f5H2x"
-SENSOR_TELEMETRY_SIZE = struct.calcsize(SENSOR_TELEMETRY_FORMAT)
-
-# Mirrors struct pid_config_telemetry_t in libs/espnow-comm/espnow_comm.h:
-# 3 floats (kp, ki, kd) then 2 uint16_t (axis, mode).
-PID_CONFIG_FORMAT = "<fffHH"
-
-_DEFINE_RE = re.compile(r"^\s*#define\s+(\w+)\s+([0-9.eE+-]+)\s*$")
-
-
-def load_pid_defaults() -> Dict[str, float]:
-    """Parse libs/pid/pid_defaults.h so the GUI's default gains stay in sync
-    with the firmware instead of being hand-copied into two places."""
-    header_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "..",
-        "libs",
-        "pid",
-        "pid_defaults.h",
-    )
-    defaults: Dict[str, float] = {}
-    try:
-        with open(header_path, "r") as header:
-            for line in header:
-                match = _DEFINE_RE.match(line)
-                if match:
-                    defaults[match.group(1)] = float(match.group(2))
-    except OSError as exc:
-        print(f"Warning: could not read PID defaults from {header_path}: {exc}")
-    return defaults
-
-
-# Populated at import time from pid_defaults.h
-PID_DEFAULTS: Dict[str, float] = load_pid_defaults()
-
-# Maps each (axis, mode) tab to the #define prefix used in pid_defaults.h
-PID_DEFAULT_KEYS: Dict[Tuple[int, int], str] = {
-    (0, 0): "RATE_PITCH_ROLL",
-    (1, 0): "RATE_YAW",
-    (0, 1): "ANGLE_PITCH_ROLL",
-}
-
-
-def format_gain(value: float) -> str:
-    """Render a gain the way pid_defaults.h already writes them (e.g. 1.0, 0.175)."""
-    text = f"{value:.4f}".rstrip("0")
-    return text + "0" if text.endswith(".") else text
-
-
-def save_pid_defaults(axis: int, mode: int, kp: float, ki: float, kd: float) -> bool:
-    """Write the given gains back into pid_defaults.h as the new defaults for
-    this axis/mode, so the next GUI launch and the next firmware build both
-    start from values already validated on the drone."""
-    prefix = PID_DEFAULT_KEYS.get((axis, mode))
-    if prefix is None:
-        return False
-
-    header_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "..",
-        "libs",
-        "pid",
-        "pid_defaults.h",
-    )
-    updates = {f"{prefix}_KP": kp, f"{prefix}_KI": ki, f"{prefix}_KD": kd}
-
-    try:
-        with open(header_path, "r") as header:
-            lines: list[str] = header.readlines()
-
-        for i, line in enumerate(lines):
-            match = _DEFINE_RE.match(line)
-            if match and match.group(1) in updates:
-                lines[i] = (
-                    f"#define {match.group(1)} {format_gain(updates[match.group(1)])}\n"
-                )
-
-        with open(header_path, "w") as header:
-            header.writelines(lines)
-
-    except OSError as exc:
-        print(f"Warning: could not write PID defaults to {header_path}: {exc}")
-        return False
-
-    PID_DEFAULTS.update(updates)
-    return True
-
-
-class TelemetryThread(QThread):
-    """Thread for handling serial communication and telemetry"""
-
-    response_received = pyqtSignal(str)
-    telemetry_received = pyqtSignal(dict)
-    connection_lost = pyqtSignal(str)
-
-    def __init__(self, serial_port: serial.Serial) -> None:
-        super().__init__()
-        self.serial_port: serial.Serial = serial_port
-        self.running: bool = True
-        self.decoder: uart_comm.FrameDecoder = uart_comm.FrameDecoder(
-            SENSOR_TELEMETRY_SIZE
-        )
-
-    def run(self) -> None:
-        """Listen for responses and telemetry from the bridge"""
-        while self.running and self.serial_port and self.serial_port.is_open:
-            try:
-
-                data: bytes = self.serial_port.read(4096)
-
-                # Process complete, CRC-valid sensor_telemetry_t packets
-                for packet in self.decoder.feed(data):
-                    try:
-                        values: Tuple[float, ...] = struct.unpack(
-                            SENSOR_TELEMETRY_FORMAT, packet
-                        )
-
-                        telemetry: Dict[str, Any] = {
-                            "pitch_angle": values[0],
-                            "roll_angle": values[1],
-                            "yaw_angle": values[2],
-                            "pitch_rate": values[3],
-                            "roll_rate": values[4],
-                            "yaw_rate": values[5],
-                            "mode": int(values[6]),
-                            "pitch_pid": values[7],
-                            "roll_pid": values[8],
-                            "yaw_pid": values[9],
-                            "motor_fl": values[10],
-                            "motor_bl": values[11],
-                            "motor_br": values[12],
-                            "motor_fr": values[13],
-                            "battery": values[14],
-                            "timestamp": datetime.now(),
-                        }
-                        self.telemetry_received.emit(telemetry)
-                    except Exception as e:
-                        self.response_received.emit(f"Parse error: {e}")
-
-            except serial.SerialException as e:
-
-                self.connection_lost.emit(str(e))
-                self.running = False
-                break
-
-            except Exception as e:
-                self.response_received.emit(f"Error: {e}")
-
-    def stop(self) -> None:
-        self.running = False
-
-
-class PlotWidget(QWidget):
-    """Widget for displaying real-time plots"""
-
-    def __init__(
-        self, title: str, labels: List[str], colors: List[str], max_points: int = 500
-    ) -> None:
-        super().__init__()
-        self.max_points: int = max_points
-        self.labels: List[str] = labels
-        self.colors: List[str] = colors
-
-        # Data storage
-        self.time_data: Deque[float] = deque(maxlen=max_points)
-        self.data: dict[str, Deque[float]] = {
-            label: deque(maxlen=max_points) for label in labels
-        }
-        self.start_time: datetime = datetime.now()
-
-        # Create layout
-        layout: QVBoxLayout = QVBoxLayout(self)
-
-        # Create plot widget
-        self.plot_widget: pg.PlotWidget = pg.PlotWidget(title=title)
-        self.plot_widget.setBackground("w")
-        self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
-        self.plot_widget.setLabel("left", "Value")
-        self.plot_widget.setLabel("bottom", "Time (s)")
-
-        # Add legend
-        self.plot_widget.addLegend()
-
-        # Create plot curves
-        self.curves: dict[str, pg.PlotDataItem] = {}
-        for label, color in zip(labels, colors):
-            pen = pg.mkPen(color=color, width=2)
-            self.curves[label] = self.plot_widget.plot([], [], pen=pen, name=label)
-
-        layout.addWidget(self.plot_widget)
-
-        # Control buttons
-        control_layout: QHBoxLayout = QHBoxLayout()
-
-        self.pause_btn: QPushButton = QPushButton("Pause")
-        self.pause_btn.setCheckable(True)
-        self.pause_btn.clicked.connect(self.toggle_pause)
-        control_layout.addWidget(self.pause_btn)
-
-        clear_btn: QPushButton = QPushButton("Clear")
-        clear_btn.clicked.connect(self.clear_data)
-        control_layout.addWidget(clear_btn)
-
-        control_layout.addStretch()
-        layout.addLayout(control_layout)
-
-        self.paused: bool = False
-
-    def toggle_pause(self) -> None:
-        self.paused = self.pause_btn.isChecked()
-        self.pause_btn.setText("Resume" if self.paused else "Pause")
-
-    def clear_data(self) -> None:
-        self.time_data.clear()
-        for label in self.labels:
-            self.data[label].clear()
-        self.start_time = datetime.now()
-        self.update_plot()
-
-    def add_data(self, data_dict: Dict[str, float]) -> None:
-        if self.paused:
-            return
-
-        # Calculate elapsed time
-        elapsed: float = (datetime.now() - self.start_time).total_seconds()
-        self.time_data.append(elapsed)
-
-        # Add data for each label
-        for label in self.labels:
-            if label in data_dict:
-                self.data[label].append(data_dict[label])
-            else:
-                self.data[label].append(0)
-
-        self.update_plot()
-
-    def update_plot(self) -> None:
-        time_list: tuple[float, ...] = tuple(self.time_data)
-        for label in self.labels:
-            data_list: tuple[float, ...] = tuple(self.data[label])
-            self.curves[label].setData(time_list, data_list)
-
-
-class Attitude3DWidget(QWidget):
-    """3D visualization of the drone's current orientation"""
-
-    ARM_LENGTH = 1.0
-
-    def __init__(self) -> None:
-        super().__init__()
-        layout: QVBoxLayout = QVBoxLayout(self)
-
-        self.gl_view: gl.GLViewWidget = gl.GLViewWidget()
-        self.gl_view.setCameraPosition(distance=6, elevation=25, azimuth=45)
-        layout.addWidget(self.gl_view)
-
-        # Ground reference grid
-        grid: gl.GLGridItem = gl.GLGridItem()
-        grid.setSize(x=10, y=10)
-        grid.setSpacing(x=1, y=1)
-        grid.translate(0, 0, -1.5)
-        self.gl_view.addItem(grid)
-
-        # Arm endpoints in an X configuration. Scene axes: X=right, Y=forward (nose), Z=up.
-        s: float = self.ARM_LENGTH * 0.7071  # sin/cos(45 deg)
-        self.fl: np.ndarray = np.array([-s, s, 0])
-        self.fr: np.ndarray = np.array([s, s, 0])
-        self.bl: np.ndarray = np.array([-s, -s, 0])
-        self.br: np.ndarray = np.array([s, -s, 0])
-        origin: np.ndarray = np.array([0, 0, 0])
-
-        # Front arms (red, matches the Motors plot's FL/FR coloring) vs rear arms (grey),
-        # so the model's heading is visually obvious as it yaws.
-        self.front_arms: gl.GLLinePlotItem = gl.GLLinePlotItem(
-            pos=np.array([origin, self.fl, origin, self.fr]),
-            color=(1, 0, 0, 1),
-            width=4,
-            mode="lines",
-            antialias=True,
-        )
-        self.rear_arms: gl.GLLinePlotItem = gl.GLLinePlotItem(
-            pos=np.array([origin, self.bl, origin, self.br]),
-            color=(0.5, 0.5, 0.5, 1),
-            width=4,
-            mode="lines",
-            antialias=True,
-        )
-        self.gl_view.addItem(self.front_arms)
-        self.gl_view.addItem(self.rear_arms)
-
-        # Motor tip markers, colors matching the Motors plot (FL, BL, BR, FR)
-        self.motor_markers: gl.GLScatterPlotItem = gl.GLScatterPlotItem(
-            pos=np.array([self.fl, self.bl, self.br, self.fr]),
-            color=np.array(
-                [
-                    [1, 0, 0, 1],  # FL - red
-                    [1, 0.65, 0, 1],  # BL - orange
-                    [0.5, 0, 0.5, 1],  # BR - purple
-                    [0, 1, 1, 1],  # FR - cyan
-                ]
-            ),
-            size=15,
-            pxMode=True,
-        )
-        self.gl_view.addItem(self.motor_markers)
-
-        # All the pieces above represent one rigid body, so the same transform
-        # gets applied to each of them every update.
-        self.rigid_body_items: List[gl.GLGraphicsItem] = [
-            self.front_arms,
-            self.rear_arms,
-            self.motor_markers,
-        ]
-
-    def update_attitude(self, pitch: float, roll: float, yaw: float) -> None:
-        """Rotate the drone model to the given angles (degrees)"""
-        # QMatrix4x4.rotate() post-multiplies (self = self * R), so calling it
-        # in this order composes as Ryaw * Rpitch * Rroll applied to a point -
-        # i.e. roll happens first, then pitch, then yaw. That's the standard
-        # aerospace ZYX Euler convention.
-        tr: pg.Transform3D = pg.Transform3D()
-        tr.rotate(yaw, 0, 0, 1)
-        tr.rotate(pitch, 1, 0, 0)
-        tr.rotate(roll, 0, 1, 0)
-
-        for item in self.rigid_body_items:
-            item.setTransform(tr)
+from telemetry_thread import TelemetryThread
+from constants import PID_CONFIG_FORMAT
+from pid_defaults import PID_DEFAULTS, PID_DEFAULT_KEYS, save_pid_defaults
+from plot_widget import PlotWidget
+from attitude_widget import Attitude3DWidget
 
 
 class PIDTunerGUI(QMainWindow):
@@ -515,7 +176,7 @@ class PIDTunerGUI(QMainWindow):
         values_layout: QGridLayout = QGridLayout()
 
         self.value_labels = {}
-        legend: List[Tuple[str, str, str]] = [
+        legend: List[tuple[str, str, str]] = [
             ("Pitch Angle:", "pitch_angle", "°"),
             ("Roll Angle:", "roll_angle", "°"),
             ("Yaw Angle:", "yaw_angle", "°"),
@@ -933,17 +594,3 @@ class PIDTunerGUI(QMainWindow):
         """Handle window close event"""
         self.disconnect()
         event.accept()
-
-
-def main() -> None:
-    app: QApplication = QApplication(sys.argv)
-    app.setStyle("Fusion")
-
-    window: PIDTunerGUI = PIDTunerGUI()
-    window.show()
-
-    sys.exit(app.exec_())
-
-
-if __name__ == "__main__":
-    main()
