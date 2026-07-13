@@ -111,12 +111,9 @@ static void uart_task(void* pvParameters) {
 
         ESP_LOGI(TAG, "PID Packet received");
 
-        packet.crc16 = esp_rom_crc16_le(0, (uint8_t*) &packet.data, sizeof(union packet_data));
-
         // Forward to drone
         if (xSemaphoreTake(wifiSendSemaphore, pdMS_TO_TICKS(100)) == pdTRUE) {
-            esp_err_t result =
-                esp_now_send(drone_mac, (uint8_t*) &packet, sizeof(struct wifi_packet_t));
+            esp_err_t result = esp_now_send_packet(drone_mac, &packet);
             if (result != ESP_OK) {
                 ESP_LOGW(TAG, "PID update send failed");
             }

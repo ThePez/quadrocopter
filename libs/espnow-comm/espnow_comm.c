@@ -147,3 +147,9 @@ esp_err_t esp_now_module_init(uint8_t* peer_addr[], uint8_t num_peers) {
 
     return ESP_OK;
 }
+
+esp_err_t esp_now_send_packet(const uint8_t* addr, struct wifi_packet_t* packet) {
+    // Add the CRC before sending
+    packet->crc16 = esp_rom_crc16_le(0, (uint8_t*) &packet->data, sizeof(union packet_data));
+    return esp_now_send(addr, (uint8_t*) packet, sizeof(struct wifi_packet_t));
+}

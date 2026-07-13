@@ -14,8 +14,6 @@
 
 #include <driver/gpio.h>
 #include <esp_log.h>
-#include <esp_now.h>
-#include <esp_rom_crc.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -205,11 +203,10 @@ static void handle_timer_tick(struct remote_state_t* state, uint32_t notifyValue
     wifiData->pitch = adcValues[1];
     wifiData->roll = adcValues[0];
     wifiData->yaw = adcValues[3];
-    packet->crc16 = esp_rom_crc16_le(0, (uint8_t*) &packet->data, sizeof(union packet_data));
 
     // Send the resulting packet to the drone
     if (state->armed) {
-        esp_now_send(drone_mac, (uint8_t*) packet, sizeof(struct wifi_packet_t));
+        esp_now_send_packet(drone_mac, packet);
     }
 
     if (state->emergency) {

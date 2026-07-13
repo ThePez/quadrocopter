@@ -90,6 +90,21 @@ enum wifi_packet_id { SENSOR, REMOTE, PID_CONFIG, POWER };
  */
 esp_err_t esp_now_module_init(uint8_t* peer_addr[], uint8_t num_peers);
 
+/**
+ * @brief Computes and stores the packet's CRC16, then sends it via ESP-NOW.
+ *
+ * Wraps esp_now_send() so callers don't need to calculate the CRC
+ * themselves; the value is written into packet->crc16 over the data
+ * union before transmission.
+ *
+ * @param addr   MAC address (6 bytes) of the peer to send to, or NULL to
+ *               send to all registered peers.
+ * @param packet Packet to checksum and send. Modified in place (crc16 field).
+ *
+ * @return ESP_OK on success, or error code from esp_now_send() on failure.
+ */
+esp_err_t esp_now_send_packet(const uint8_t* addr, struct wifi_packet_t* packet);
+
 // DRONE's MAC ADDRESS
 extern uint8_t drone_mac[6];
 // REMOTE's MAC ADDRESS

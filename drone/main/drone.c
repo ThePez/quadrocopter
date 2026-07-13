@@ -22,8 +22,6 @@
 #include <esp_adc/adc_cali_scheme.h>
 #include <esp_adc/adc_oneshot.h>
 #include <esp_log.h>
-#include <esp_now.h>
-#include <esp_rom_crc.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -164,12 +162,10 @@ static void battery_callback(void* args) {
     if (battery_voltage < LOW_VOLTAGE) {
         struct wifi_packet_t packet = {.packet_id = POWER};
         packet.data.power.battery = battery_voltage;
-        packet.crc16 = esp_rom_crc16_le(0, (uint8_t*) &packet.data, sizeof(union packet_data));
 
         // Only allow sending after the previous message was sent
         if (xSemaphoreTake(wifiSendSemaphore, 0) == pdTRUE) {
-            esp_err_t result =
-                esp_now_send(remote_mac, (uint8_t*) &packet, sizeof(struct wifi_packet_t));
+            esp_err_t result = esp_now_send_packet(remote_mac, &packet);
             if (result != ESP_OK) {
                 ESP_LOGW(TAG, "Power callback send failed");
                 xSemaphoreGive(wifiSendSemaphore);
@@ -207,12 +203,9 @@ static void system_data_callback(void* args) {
     telemetry->motor_c = motors.motorC;
     telemetry->motor_d = motors.motorD;
 
-    packet.crc16 = esp_rom_crc16_le(0, (uint8_t*) &packet.data, sizeof(union packet_data));
-
     // Only allow sending after the previous message was sent
     if (xSemaphoreTake(wifiSendSemaphore, 0) == pdTRUE) {
-        esp_err_t result =
-            esp_now_send(bridge_mac, (uint8_t*) &packet, sizeof(struct wifi_packet_t));
+        esp_err_t result = esp_now_send_packet(bridge_mac, &packet);
         if (result != ESP_OK) {
             ESP_LOGW(TAG, "data callback send failed");
             xSemaphoreGive(wifiSendSemaphore);
