@@ -9,6 +9,7 @@
 #include "espnow_comm.h"
 
 #include "common_functions.h"
+#include "nvs.h"
 
 #include <esp_event.h>
 #include <esp_log.h>
@@ -16,7 +17,6 @@
 #include <esp_now.h>
 #include <esp_rom_crc.h>
 #include <esp_wifi.h>
-#include <nvs_flash.h>
 #include <string.h>
 
 #define TAG "ESPNOW"
@@ -132,14 +132,8 @@ static esp_err_t espnow_init(uint8_t* peer_addr[], uint8_t num_peers) {
 
 esp_err_t esp_now_module_init(uint8_t* peer_addr[], uint8_t num_peers) {
 
-    // Initialize NVS
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        CHECK_ERR_NO_LOG(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-
-    CHECK_ERR(ret, "nvs flash code failed");
+    // Ensure NVS is initialised
+    CHECK_ERR_NO_LOG(nvs_init());
 
     // Initialise WiFi and ESP-NOW
     wifi_init();
