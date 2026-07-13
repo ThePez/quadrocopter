@@ -64,6 +64,8 @@ struct button_state_t emergency_button = {
 
 //////////////////////////////////////////////////////////////////////////////
 
+// Debounced GPIO ISR for a button pin: on a valid falling edge, notifies
+// remote_controller() via the button's notify bit.
 static void IRAM_ATTR intr_handler(void* args) {
 
     struct button_state_t* button = (struct button_state_t*) args;
@@ -85,6 +87,7 @@ static void IRAM_ATTR intr_handler(void* args) {
     }
 }
 
+// Configures a button's GPIO as an interrupt input and installs the given ISR handler.
 static esp_err_t interrupt_init(void* handler, struct button_state_t* button) {
 
     gpio_config_t config = {
@@ -111,7 +114,7 @@ static esp_err_t interrupt_init(void* handler, struct button_state_t* button) {
     return ESP_OK;
 }
 
-void remote_callback(void* args) {
+void IRAM_ATTR remote_callback(void* args) {
     ARG_UNUSED(args);
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     if (remoteTaskHandle) {
@@ -131,6 +134,8 @@ esp_err_t remote_timer_init(void) {
     return ESP_OK;
 }
 
+// One-time hardware bring-up: ESP-NOW paired to the drone, button
+// interrupts, the SPI bus and MCP3208 ADC task, and the polling timer.
 static esp_err_t hardware_init(void) {
     uint8_t* macs[] = {drone_mac};
     CHECK_ERR_NO_LOG(esp_now_module_init(macs, 1));
@@ -146,6 +151,7 @@ static esp_err_t hardware_init(void) {
     return ESP_OK;
 }
 
+// Toggles flight mode (and the status LED) on a mode-button press, if armed.
 static void handle_mode_button(struct remote_state_t* state) {
     if (!state->armed) {
         return;
@@ -159,6 +165,7 @@ static void handle_mode_button(struct remote_state_t* state) {
     xTaskNotifyWait(MODE_BUTTON_BIT, 0, NULL, 0);
 }
 
+// Sets the emergency flag on an emergency-button press, if armed.
 static void handle_emergency_button(struct remote_state_t* state) {
     if (!state->armed) {
         return;
@@ -171,6 +178,8 @@ static void handle_emergency_button(struct remote_state_t* state) {
     xTaskNotifyWait(MODE_BUTTON_BIT | EMERGENCY_BUTTON_BIT, 0, NULL, 0);
 }
 
+// Periodic tick: triggers an ADC read, handles arm/re-arm logic from the
+// joystick-press gesture, and sends the resulting REMOTE packet to the drone.
 static void handle_timer_tick(struct remote_state_t* state, uint32_t notifyValue,
                               struct wifi_packet_t* packet) {
     // Notify the MCPx task to perform an ADC reading, then wait for the reply
@@ -214,6 +223,8 @@ static void handle_timer_tick(struct remote_state_t* state, uint32_t notifyValue
     }
 }
 
+// Main remote task: performs hardware init, then loops waiting on button and
+// timer notifications and dispatching them to their handlers.
 static void remote_controller(void* pvParams) {
     (void) pvParams;
     if (hardware_init()) {

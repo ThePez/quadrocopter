@@ -30,6 +30,7 @@ QueueHandle_t imuQueue = NULL;
 // Create IMU object with default wiring scheme
 static BNO08x imu;
 
+// Reads the latest rotation-vector report from the BNO08x and posts it to imuQueue.
 static void imu_data_callback(void) {
 
     struct imu_packet_t packet;
@@ -62,6 +63,8 @@ static void imu_data_callback(void) {
     xQueueSendToBack(imuQueue, &packet, 0);
 }
 
+// One-shot setup task: creates imuQueue, initializes the BNO08x, enables its
+// gyro-integrated rotation vector report, and registers the data callback.
 static void bno08x_task(void* pvParameters) {
 
     imuQueue = xQueueCreate(IMU_QUEUE_LEN, sizeof(struct imu_packet_t));

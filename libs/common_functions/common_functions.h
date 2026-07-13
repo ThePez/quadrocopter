@@ -74,11 +74,55 @@ enum flight_mode_t {
     STABILISE // STABILISE is standard mode (angles)
 };
 
+/**
+ * @brief Initializes the specified SPI bus (HSPI or VSPI) and its access mutex.
+ *
+ * Configures the bus's MISO/MOSI/CLK pins for the current target and calls
+ * spi_bus_initialize(). Each bus is only initialized once per boot - a
+ * repeat call for an already-initialized host returns ESP_ERR_INVALID_ARG.
+ *
+ * @param host The SPI host to initialize (e.g., HSPI_HOST_COMPAT or VSPI_HOST_COMPAT).
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if already initialized, or an error code.
+ */
 esp_err_t spi_bus_setup(spi_host_device_t host);
 
+/**
+ * @brief Initializes the I2C master bus and its access mutex.
+ *
+ * Uses the target-specific I2C_SCL/I2C_SDA pins with internal pull-ups
+ * enabled. The handle is heap-allocated; the caller owns the returned pointer.
+ *
+ * @return Pointer to a newly allocated I2C master bus handle.
+ */
 i2c_master_bus_handle_t* i2c_bus_setup(void);
+
+/**
+ * @brief Logs a snapshot of all FreeRTOS tasks (name, state, priority, stack, ID) via printf.
+ *
+ * @return ESP_OK on success, ESP_FAIL if the buffer allocation for vTaskList() failed.
+ */
 esp_err_t print_task_stats(void);
+
+/**
+ * @brief Linearly maps a value from one range to another.
+ *
+ * @param x       Input value.
+ * @param in_min  Lower bound of the input range.
+ * @param in_max  Upper bound of the input range.
+ * @param out_min Lower bound of the output range.
+ * @param out_max Upper bound of the output range.
+ * @return x rescaled from [in_min, in_max] into [out_min, out_max].
+ */
 float mapf(float x, float in_min, float in_max, float out_min, float out_max);
+
+/**
+ * @brief Clamps a value to the inclusive range [min, max].
+ *
+ * @param value Input value.
+ * @param min   Lower bound.
+ * @param max   Upper bound.
+ * @return value, or min/max if it falls outside the range.
+ */
 float constrainf(float value, float min, float max);
 
 extern SemaphoreHandle_t spiHMutex;

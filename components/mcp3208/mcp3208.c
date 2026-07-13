@@ -113,6 +113,8 @@ static uint16_t mcp3208_read_adc_channel(uint8_t channel, uint8_t type) {
     return output;
 }
 
+// Waits for a notification, samples all channels selected in the channel
+// mask over SPI, and posts the results to mcpxQueue.
 static void mcpx_task(void* pvParams) {
     (void) pvParams;
     SemaphoreHandle_t spiMutex = *params.spiMutex;

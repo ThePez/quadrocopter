@@ -32,6 +32,7 @@ struct __packed uart_packet {
     uint16_t crc;
 };
 
+// Frames a sensor telemetry payload with a magic header and CRC16, then writes it to UART.
 static void uart_comm_write_frame(uart_port_t port, struct sensor_telemetry_t* payload) {
     struct uart_packet packet = {.magic = {UART_MAGIC_0, UART_MAGIC_1}};
     packet.payload = *payload;
@@ -39,6 +40,8 @@ static void uart_comm_write_frame(uart_port_t port, struct sensor_telemetry_t* p
     uart_write_bytes(port, &packet, sizeof(struct uart_packet));
 }
 
+// Blocking state machine that reads a PID-config frame off UART: syncs to
+// the magic bytes, reads the payload, then validates its CRC16 before returning.
 static void uart_comm_read_frame(uart_port_t port, struct pid_config_telemetry_t* payload,
                                  TickType_t byte_timeout) {
     uint8_t byte = 0;
@@ -85,6 +88,7 @@ static void uart_comm_read_frame(uart_port_t port, struct pid_config_telemetry_t
     }
 }
 
+// Forwards SENSOR packets received from the drone over ESP-NOW out to the laptop via UART.
 static void telemetry_task(void* pvParameters) {
 
     struct wifi_packet_t telemetry;
@@ -100,6 +104,7 @@ static void telemetry_task(void* pvParameters) {
     }
 }
 
+// Reads PID-config frames from the laptop over UART and forwards each to the drone over ESP-NOW.
 static void uart_task(void* pvParameters) {
 
     struct wifi_packet_t packet = {.packet_id = PID_CONFIG};

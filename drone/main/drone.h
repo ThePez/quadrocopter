@@ -60,7 +60,28 @@ struct drone_config_t {
 extern struct drone_config_t droneData;
 extern struct target_parameters_t remoteIn;
 
+/**
+ * @brief Brings up the full drone flight system.
+ *
+ * Initializes ESC PWM output, the battery-voltage ADC, the IMU task, ESP-NOW
+ * (paired with the remote and bridge), the droneData/kalman mutexes, the
+ * periodic telemetry and battery-check timer callbacks, and finally starts
+ * the input and PID control tasks.
+ *
+ * @return ESP_OK on success, or an error code from the first failing step.
+ */
 esp_err_t init_drone(void);
+
+/**
+ * @brief Brings up ESC programming mode instead of normal flight.
+ *
+ * Drives all 4 ESCs to max throttle immediately on startup (required by most
+ * ESCs to enter their programming menu), pairs ESP-NOW with the remote only,
+ * and starts the input task plus a task that mirrors the remote's throttle
+ * input straight to the ESCs, bypassing flight control entirely.
+ *
+ * @return ESP_OK on success, or an error code from the first failing step.
+ */
 esp_err_t init_esc_programming(void);
 
 #endif

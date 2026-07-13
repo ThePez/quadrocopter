@@ -29,6 +29,8 @@
 
 static TaskHandle_t inputTaskHandle = NULL;
 
+// Maps a raw REMOTE packet's ADC values into remoteIn setpoints (with
+// deadzones on the sticks), applies the flight mode, and marks the drone armed.
 static void handle_remote_update(struct remote_telemetry_t* remote) {
     xSemaphoreTake(droneData.mutex, portMAX_DELAY);
     droneData.lastRemoteTime = esp_timer_get_time();
@@ -57,6 +59,8 @@ static void handle_remote_update(struct remote_telemetry_t* remote) {
     //          remoteIn.roll, remoteIn.yaw, remoteIn.throttle);
 }
 
+// Main input task loop: blocks on wifiQueue and dispatches REMOTE and
+// PID_CONFIG packets to their respective handlers.
 static void input_control(void* pvParams) {
     ARG_UNUSED(pvParams);
 

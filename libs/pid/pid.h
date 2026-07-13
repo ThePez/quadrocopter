@@ -31,9 +31,44 @@ struct pid_result_t {
     double dtermFiltered;   // Low-pass filtered D-term state
 };
 
+/**
+ * @brief Sets up a PID controller's gains and fixed loop parameters.
+ *
+ * Loop period (dt), and the integral/derivative clamp limits are taken from
+ * PID_LOOP_FREQ/PID_INT_LIMIT/PID_DIV_LIMIT. dtermAlpha defaults to 1.0
+ * (unfiltered D-term).
+ *
+ * @param params Parameter struct to initialize.
+ * @param kp     Proportional gain.
+ * @param kd     Derivative gain.
+ * @param ki     Integral gain.
+ */
 void pid_init_params(struct pid_parameters_t* params, double kp, double kd, double ki);
+
+/**
+ * @brief Runs one iteration of the PID loop and returns the control output.
+ *
+ * Computes proportional, clamped integral, and low-pass-filtered
+ * derivative-on-measurement terms, updates values in place (including
+ * lastMeasurement for the next call), and returns their sum.
+ *
+ * @param params Fixed gains/limits for this controller.
+ * @param values Running state for this controller; updated in place.
+ * @param ref    Setpoint (reference) value.
+ * @param actual Current measured value.
+ * @return Combined P+I+D control output.
+ */
 double pid_update(struct pid_parameters_t* params, struct pid_result_t* values, double ref,
                   double actual);
+
+/**
+ * @brief Zeroes a PID controller's running state (P/I/D terms and last measurement).
+ *
+ * Used when switching flight modes or updating gains, to avoid stale
+ * integrator/derivative state carrying over.
+ *
+ * @param pid State to reset; no-op if NULL.
+ */
 void pid_reset(struct pid_result_t* pid);
 
 #endif

@@ -44,6 +44,8 @@ static adc_cali_handle_t adcCaliHandle;
 
 /* Setup Functions */
 
+// Sets up ADC calibration for the battery channel, preferring curve fitting
+// and falling back to line fitting if the target doesn't support it.
 static esp_err_t adc_calibration_init(void) {
     adc_cali_handle_t handle = NULL;
     esp_err_t ret = ESP_FAIL;
@@ -94,6 +96,7 @@ static esp_err_t adc_calibration_init(void) {
     return ESP_ERR_NOT_SUPPORTED;
 }
 
+// Configures the oneshot ADC unit/channel used for battery voltage sensing.
 static esp_err_t adc_init(void) {
 
     adc_oneshot_unit_init_cfg_t unitConfig = {.unit_id = ADC_UNIT_1};
@@ -115,6 +118,7 @@ static esp_err_t adc_init(void) {
     return ESP_OK;
 }
 
+// Creates and starts a periodic esp_timer that invokes cb every periodUS microseconds.
 static void timer_task_callback_init(int periodUS, void (*cb)(void*)) {
 
     esp_timer_create_args_t config = {
@@ -130,6 +134,8 @@ static void timer_task_callback_init(int periodUS, void (*cb)(void*)) {
 
 /* Functions run in the ESP-TIMER-TASK */
 
+// Periodic timer callback: reads and stores the battery voltage, and warns
+// the remote over ESP-NOW if it drops below LOW_VOLTAGE.
 static void battery_callback(void* args) {
     ARG_UNUSED(args);
 
@@ -176,6 +182,8 @@ static void battery_callback(void* args) {
     }
 }
 
+// Periodic timer callback: assembles the current attitude/PID/motor/battery
+// state into a SENSOR packet and sends it to the bridge over ESP-NOW.
 static void system_data_callback(void* args) {
     ARG_UNUSED(args);
 

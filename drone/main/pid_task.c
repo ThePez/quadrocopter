@@ -50,6 +50,7 @@ static struct pid_feedback_t pidAngle;
 struct pid_final_t outputPID;
 struct pwm_t motors;
 
+// Drives all 4 ESCs to minimum throttle and zeroes the reported duty cycles.
 static void motor_shutdown(void) {
     for (uint8_t i = 0; i < NUMBER_OF_MOTORS; i++) {
         esc_pwm_set_duty_cycle((MotorIndex) i, MIN_THROTTLE);
@@ -61,6 +62,8 @@ static void motor_shutdown(void) {
     motors.motorD = MIN_THROTTLE;
 }
 
+// Latches the angle failsafe (disarms and kills the motors) once pitch/roll
+// exceeds FAIL_ANGLE. No-op if the failsafe is already active.
 static void angle_failsafe(struct imu_packet_t* attitude) {
     xSemaphoreTake(droneData.mutex, portMAX_DELAY);
     if (droneData.status_mask & ANGLE_FAIL) {
@@ -79,6 +82,8 @@ static void angle_failsafe(struct imu_packet_t* attitude) {
     motor_shutdown();
 }
 
+// Latches the comms failsafe (disarms and kills the motors) once the link to
+// the remote has been silent for longer than FAILSAFE_TIMEOUT_US.
 static void comms_failsafe(void) {
     xSemaphoreTake(droneData.mutex, portMAX_DELAY);
     if ((droneData.status_mask & COMS_FAIL) || !droneData.armed) {
@@ -96,6 +101,9 @@ static void comms_failsafe(void) {
     motor_shutdown();
 }
 
+// Mixes throttle with the latest PID outputs into each motor's duty cycle
+// (or forces minimum throttle if the stick is low or the battery is critical)
+// and writes the results to the ESCs.
 static void update_escs(void) {
 
     // Low throttle input (ie off)
@@ -208,6 +216,7 @@ void pid_handle_config_update(struct pid_config_telemetry_t* packet) {
     ESP_LOGI(TAG, "PID coefficients updated successfully");
 }
 
+// ISR: wakes pid_control() for its next control cycle.
 static IRAM_ATTR void pid_timer_callback(void* args) {
     ARG_UNUSED(args);
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
@@ -218,6 +227,7 @@ static IRAM_ATTR void pid_timer_callback(void* args) {
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
+// Creates and starts the ISR timer that ticks the PID loop at PID_LOOP_FREQ.
 static esp_err_t pid_timer_init(void) {
     const esp_timer_create_args_t args = {.callback = pid_timer_callback,
                                           .dispatch_method = ESP_TIMER_ISR};
@@ -228,6 +238,9 @@ static esp_err_t pid_timer_init(void) {
     return ESP_OK;
 }
 
+// Main PID task loop: on each timer tick, updates the attitude estimate,
+// checks failsafes, runs the cascaded rate/angle PID controllers for the
+// current flight mode, and pushes the results to the ESCs.
 static void pid_control(void* pvParams) {
     ARG_UNUSED(pvParams);
 
