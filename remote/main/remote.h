@@ -9,10 +9,14 @@
 #ifndef REMOTE_H
 #define REMOTE_H
 
+#include "device_config.h"
+
 #include <esp_err.h>
 
 #define MODE_BUTTON_PIN 25
 #define SHUTOFF_BUTTON_PIN 32
+
+extern struct nvs_remote_cfg_t remoteCfg;
 
 /**
  * @brief Starts the task that runs the whole remote (buttons, joystick ADC, ESP-NOW link).

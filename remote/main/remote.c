@@ -9,14 +9,17 @@
 #include "remote.h"
 
 #include "common_functions.h"
+#include "device_config.h"
 #include "espnow_comm.h"
 #include "mcp3208.h"
+#include "remote_defaults.h"
 
 #include <driver/gpio.h>
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <nvs_flash.h>
 #include <string.h>
 
 struct button_state_t {
@@ -45,9 +48,6 @@ struct remote_state_t {
 #define ADC_MIN 0
 #define ADC_MAX 4095
 
-#define MIN_THROTTLE 1000.0
-#define MAX_THROTTLE 2000.0
-
 #define MODE_BUTTON_BIT (1UL << 0)
 #define EMERGENCY_BUTTON_BIT (1UL << 1)
 #define TIMER_BIT (1UL << 31)
@@ -61,6 +61,20 @@ struct button_state_t mode_button = {
     .pin = MODE_BUTTON_PIN, .pushAllowed = 1, .notifyBit = MODE_BUTTON_BIT};
 struct button_state_t emergency_button = {
     .pin = SHUTOFF_BUTTON_PIN, .pushAllowed = 1, .notifyBit = EMERGENCY_BUTTON_BIT};
+
+struct nvs_remote_cfg_t remoteCfg;
+
+// Default remote config - identity joystick calibration and a neutral
+// voltage multiplier, since no calibration or battery hardware exists yet
+static struct nvs_remote_cfg_t remoteDefaults = {
+    .version = NVS_REMOTE_CFG_VERSION,
+    .voltage_cal_multiplier = VOLTAGE_CAL_MULTIPLIER,
+    .low_voltage = LOW_VOLTAGE,
+    .critical_voltage = CRITICAL_VOLTAGE,
+    .throttle = {.min = JOYSTICK_CAL_MIN, .centre = JOYSTICK_CAL_CENTRE, .max = JOYSTICK_CAL_MAX},
+    .pitch = {.min = JOYSTICK_CAL_MIN, .centre = JOYSTICK_CAL_CENTRE, .max = JOYSTICK_CAL_MAX},
+    .roll = {.min = JOYSTICK_CAL_MIN, .centre = JOYSTICK_CAL_CENTRE, .max = JOYSTICK_CAL_MAX},
+    .yaw = {.min = JOYSTICK_CAL_MIN, .centre = JOYSTICK_CAL_CENTRE, .max = JOYSTICK_CAL_MAX}};
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -139,6 +153,17 @@ esp_err_t remote_timer_init(void) {
 static esp_err_t hardware_init(void) {
     uint8_t* macs[] = {drone_mac};
     CHECK_ERR_NO_LOG(esp_now_module_init(macs, 1));
+
+    esp_err_t err = device_config_load("remoteCfg", &remoteCfg, sizeof(struct nvs_remote_cfg_t),
+                                       NVS_REMOTE_CFG_VERSION, &remoteDefaults);
+    if (err == ESP_ERR_NVS_TYPE_MISMATCH) {
+        // Either first boot or struct update has occured
+        remoteCfg = remoteDefaults;
+    } else if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Unable to load remote config from flash");
+        return err;
+    }
+
     CHECK_ERR_NO_LOG(interrupt_init(intr_handler, &mode_button));
     CHECK_ERR_NO_LOG(interrupt_init(intr_handler, &emergency_button));
     CHECK_ERR(spi_bus_setup(VSPI_HOST), "SPI bus failed init");
@@ -178,6 +203,16 @@ static void handle_emergency_button(struct remote_state_t* state) {
     xTaskNotifyWait(MODE_BUTTON_BIT | EMERGENCY_BUTTON_BIT, 0, NULL, 0);
 }
 
+// Remaps a raw ADC reading through its per-channel calibration back into the
+// nominal ADC_MIN..ADC_MAX range, split around `centre` so an off-centre rest
+// position doesn't skew the low and high halves of travel.
+static uint16_t apply_joystick_cal(uint16_t raw, struct nvs_joystick_cal_t cal) {
+    double adcMid = (ADC_MIN + ADC_MAX) / 2.0;
+    double corrected = (raw < cal.centre) ? mapf(raw, cal.min, cal.centre, ADC_MIN, adcMid)
+                                          : mapf(raw, cal.centre, cal.max, adcMid, ADC_MAX);
+    return (uint16_t) constrainf(corrected, ADC_MIN, ADC_MAX);
+}
+
 // Periodic tick: triggers an ADC read, handles arm/re-arm logic from the
 // joystick-press gesture, and sends the resulting REMOTE packet to the drone.
 static void handle_timer_tick(struct remote_state_t* state, uint32_t notifyValue,
@@ -188,6 +223,20 @@ static void handle_timer_tick(struct remote_state_t* state, uint32_t notifyValue
     if (xQueueReceive(mcpxQueue, adcValues, REMOTE_DELAY) != pdTRUE) {
         return;
     }
+
+    // Correct each channel's raw reading for its calibrated centre/travel
+    // before anything downstream (arming check, packet fill) uses it
+    xSemaphoreTake(cfgMutex, portMAX_DELAY);
+    struct nvs_joystick_cal_t throttleCal = remoteCfg.throttle;
+    struct nvs_joystick_cal_t pitchCal = remoteCfg.pitch;
+    struct nvs_joystick_cal_t rollCal = remoteCfg.roll;
+    struct nvs_joystick_cal_t yawCal = remoteCfg.yaw;
+    xSemaphoreGive(cfgMutex);
+
+    adcValues[0] = apply_joystick_cal(adcValues[0], rollCal);
+    adcValues[1] = apply_joystick_cal(adcValues[1], pitchCal);
+    adcValues[2] = apply_joystick_cal(adcValues[2], throttleCal);
+    adcValues[3] = apply_joystick_cal(adcValues[3], yawCal);
 
     // Check if now armed
     if (!state->armed && (notifyValue & MODE_BUTTON_BIT) && (notifyValue & EMERGENCY_BUTTON_BIT)) {
