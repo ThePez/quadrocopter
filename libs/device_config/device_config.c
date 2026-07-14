@@ -1,19 +1,21 @@
 /*
  ******************************************************************************
- * File: nvs.c
+ * File: device_config.c
  * Author: Jack Cairns
- * Date: 14-07-2026
+ * Date: 15-07-2026
  ******************************************************************************
  */
 
-#include "nvs.h"
+#include "device_config.h"
 
 #include "common_functions.h"
 
 #include <nvs_flash.h>
 #include <stdbool.h>
+#include <string.h>
 
-#define TAG "NVS"
+#define TAG "CONFIG"
+static const char* const key = "cfg"; // device config key
 
 static bool initialised = false;
 
@@ -37,7 +39,7 @@ esp_err_t nvs_init(void) {
     return ESP_OK;
 }
 
-esp_err_t nvs_read(const char* namespace, const char* key, void* data, size_t len) {
+static esp_err_t blob_read(const char* namespace, const char* key, void* data, size_t len) {
     if (!initialised) {
         return ESP_ERR_NVS_NOT_INITIALIZED;
     }
@@ -56,7 +58,8 @@ esp_err_t nvs_read(const char* namespace, const char* key, void* data, size_t le
     return ESP_OK;
 }
 
-esp_err_t nvs_write(const char* namespace, const char* key, const void* data, size_t len) {
+static esp_err_t blob_write(const char* namespace, const char* key, const void* data,
+                             size_t len) {
     if (!initialised) {
         return ESP_ERR_NVS_NOT_INITIALIZED;
     }
@@ -78,4 +81,24 @@ esp_err_t nvs_write(const char* namespace, const char* key, const void* data, si
 
     nvs_close(handle);
     return err;
+}
+
+esp_err_t device_config_load(const char* namespace, void* cfg, size_t len, uint16_t version,
+                             const void* defaults) {
+
+    if (len < sizeof(uint16_t)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t err = blob_read(namespace, key, cfg, len);
+
+    // Config data was either found but stale or no data was found -> Store defaults
+    if ((err == ESP_OK && *(uint16_t*) cfg != version) || err != ESP_OK) {
+        // Write in the defaults loaded from compile-time
+        CHECK_ERR(blob_write(namespace, key, defaults, len), "flash config update failed");
+        return ESP_ERR_NVS_TYPE_MISMATCH;
+    }
+
+    // Valid config data found
+    return ESP_OK;
 }
