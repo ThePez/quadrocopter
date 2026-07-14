@@ -9,7 +9,7 @@
 #include "espnow_comm.h"
 
 #include "common_functions.h"
-#include "nvs.h"
+#include "device_config.h"
 
 #include <esp_event.h>
 #include <esp_log.h>
