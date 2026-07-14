@@ -35,15 +35,16 @@ struct pid_result_t {
  * @brief Sets up a PID controller's gains and fixed loop parameters.
  *
  * Loop period (dt), and the integral/derivative clamp limits are taken from
- * PID_LOOP_FREQ/PID_INT_LIMIT/PID_DIV_LIMIT. dtermAlpha defaults to 1.0
- * (unfiltered D-term).
+ * PID_LOOP_FREQ/PID_INT_LIMIT/PID_DIV_LIMIT.
  *
- * @param params Parameter struct to initialize.
- * @param kp     Proportional gain.
- * @param kd     Derivative gain.
- * @param ki     Integral gain.
+ * @param params     Parameter struct to initialize.
+ * @param kp         Proportional gain.
+ * @param kd         Derivative gain.
+ * @param ki         Integral gain.
+ * @param dtermAlpha D-term low-pass filter coefficient (1 = unfiltered, lower towards 0 to smooth).
  */
-void pid_init_params(struct pid_parameters_t* params, double kp, double kd, double ki);
+void pid_init_params(struct pid_parameters_t* params, double kp, double kd, double ki,
+                     double dtermAlpha);
 
 /**
  * @brief Runs one iteration of the PID loop and returns the control output.

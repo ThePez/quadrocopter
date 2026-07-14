@@ -10,14 +10,15 @@
 
 #include "common_functions.h"
 
-void pid_init_params(struct pid_parameters_t* params, double kp, double kd, double ki) {
+void pid_init_params(struct pid_parameters_t* params, double kp, double kd, double ki,
+                     double dtermAlpha) {
     params->divLimit = PID_DIV_LIMIT;
     params->intLimit = PID_INT_LIMIT;
     params->dt = PID_LOOP_FREQ;
     params->kp = kp;
     params->kd = kd;
     params->ki = ki;
-    params->dtermAlpha = 1.0; // Unfiltered by default; lower towards 0 to smooth the D term
+    params->dtermAlpha = dtermAlpha;
 }
 
 double pid_update(struct pid_parameters_t* params, struct pid_result_t* values, double ref,
