@@ -18,6 +18,9 @@
 static const char* const key = "cfg"; // device config key
 
 static bool initialised = false;
+static bool configLoaded = false;
+
+SemaphoreHandle_t cfgMutex = NULL;
 
 esp_err_t nvs_init(void) {
 
@@ -39,6 +42,7 @@ esp_err_t nvs_init(void) {
     return ESP_OK;
 }
 
+// Reads a blob value from NVS, failing if the stored size doesn't match len.
 static esp_err_t blob_read(const char* namespace, const char* key, void* data, size_t len) {
     if (!initialised) {
         return ESP_ERR_NVS_NOT_INITIALIZED;
@@ -58,8 +62,8 @@ static esp_err_t blob_read(const char* namespace, const char* key, void* data, s
     return ESP_OK;
 }
 
-static esp_err_t blob_write(const char* namespace, const char* key, const void* data,
-                             size_t len) {
+// Writes and commits a blob value to NVS.
+static esp_err_t blob_write(const char* namespace, const char* key, const void* data, size_t len) {
     if (!initialised) {
         return ESP_ERR_NVS_NOT_INITIALIZED;
     }
@@ -90,6 +94,14 @@ esp_err_t device_config_load(const char* namespace, void* cfg, size_t len, uint1
         return ESP_ERR_INVALID_ARG;
     }
 
+    if (configLoaded) {
+        return ESP_OK;
+    }
+
+    configLoaded = true;
+
+    cfgMutex = xSemaphoreCreateMutex();
+
     esp_err_t err = blob_read(namespace, key, cfg, len);
 
     // Config data was either found but stale or no data was found -> Store defaults
@@ -101,4 +113,18 @@ esp_err_t device_config_load(const char* namespace, void* cfg, size_t len, uint1
 
     // Valid config data found
     return ESP_OK;
+}
+
+esp_err_t device_config_save(const char* namespace, void* cfg, const void* new_data, size_t len) {
+    if (cfgMutex == NULL) {
+        return ESP_ERR_NVS_NOT_INITIALIZED;
+    }
+
+    xSemaphoreTake(cfgMutex, portMAX_DELAY);
+    // Copy new into cfg for the RAM
+    memcpy(cfg, new_data, len);
+    xSemaphoreGive(cfgMutex);
+
+    // Now complete the flash write outside of mutex as it's slower
+    return blob_write(namespace, key, new_data, len);
 }

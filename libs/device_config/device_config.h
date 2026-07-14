@@ -10,6 +10,8 @@
 #define DEVICE_CONFIG_H
 
 #include <esp_err.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <stdint.h>
 
 /**
@@ -29,9 +31,7 @@ struct __packed nvs_pid_cfg_t {
     double dtermAlpha;
 };
 
-// Calibrated raw ADC range for one joystick channel, recorded by a
-// calibration routine rather than assumed, to correct for per-unit
-// centering/tolerance drift before the reading is used.
+// Calibrated raw ADC range for one joystick channel.
 struct __packed nvs_joystick_cal_t {
     uint16_t min, centre, max;
 };
@@ -55,6 +55,9 @@ struct __packed nvs_remote_cfg_t {
 #define NVS_DRONE_CFG_VERSION 1
 #define NVS_REMOTE_CFG_VERSION 1
 
+// Protects whichever config blob device_config_load() loaded.
+extern SemaphoreHandle_t cfgMutex;
+
 /**
  * @brief Initializes the NVS flash partition.
  *
@@ -72,7 +75,9 @@ esp_err_t nvs_init(void);
  *
  * Falls back to defaults if the read fails for any reason (not found, size
  * mismatch from a layout change) or if the stored blob's version field
- * doesn't match `version`.
+ * doesn't match `version`. Creates cfgMutex on this call. Only the first
+ * call actually loads anything - subsequent calls are a no-op that just
+ * return ESP_OK.
  *
  * @param namespace NVS namespace to open.
  * @param cfg       Destination buffer; must start with a uint16_t version
@@ -85,5 +90,29 @@ esp_err_t nvs_init(void);
  */
 esp_err_t device_config_load(const char* namespace, void* cfg, size_t len, uint16_t version,
                              const void* defaults);
+
+/**
+ * @brief Updates the live config blob in place, then persists it to NVS.
+ *
+ * Takes cfgMutex only for the RAM copy into `cfg`, so a concurrent reader
+ * (taking the same mutex) never sees a torn mix of old and new field
+ * values. The flash write happens afterwards, outside the mutex, since
+ * it's much slower than a RAM copy and would otherwise block a fast reader
+ * (eg. the 400Hz PID loop) for the duration of the write. This means `cfg`
+ * updates in RAM immediately regardless of whether the flash write - which
+ * happens second - succeeds.
+ *
+ * @param namespace NVS namespace to write to - the same one passed to
+ *                  device_config_load() for this blob.
+ * @param cfg       Live config buffer to update in place; must be the same
+ *                  buffer previously passed to device_config_load().
+ * @param new_data  Complete replacement blob, `len` bytes.
+ * @param len       Size of the config blob in bytes.
+ *
+ * @return ESP_OK on success, ESP_ERR_NVS_NOT_INITIALIZED if
+ *         device_config_load() hasn't been called yet, or an error code
+ *         from the flash write.
+ */
+esp_err_t device_config_save(const char* namespace, void* cfg, const void* new_data, size_t len);
 
 #endif
