@@ -41,16 +41,22 @@ static void handle_remote_update(struct remote_telemetry_t* remote) {
     }
     xSemaphoreGive(droneData.mutex);
 
-    double reading = mapf(remote->throttle, ADC_MIN, ADC_MAX, MIN_THROTTLE, MAX_THROTTLE);
-    remoteIn.throttle = (reading < MIN_THROTTLE + 20) ? MIN_THROTTLE : reading;
+    xSemaphoreTake(cfgMutex, portMAX_DELAY);
+    double minThrottle = droneCfg.min_throttle;
+    double maxThrottle = droneCfg.max_throttle;
+    double maxRate = droneCfg.max_rate;
+    xSemaphoreGive(cfgMutex);
+
+    double reading = mapf(remote->throttle, ADC_MIN, ADC_MAX, minThrottle, maxThrottle);
+    remoteIn.throttle = (reading < minThrottle + 20) ? minThrottle : reading;
     // Pitch Input
-    reading = mapf(remote->pitch, ADC_MIN, ADC_MAX, -MAX_RATE, MAX_RATE);
+    reading = mapf(remote->pitch, ADC_MIN, ADC_MAX, -maxRate, maxRate);
     remoteIn.pitch = (fabs(reading) < 5) ? 0 : reading;
     // Roll Input
-    reading = mapf(remote->roll, ADC_MIN, ADC_MAX, -MAX_RATE, MAX_RATE);
+    reading = mapf(remote->roll, ADC_MIN, ADC_MAX, -maxRate, maxRate);
     remoteIn.roll = (fabs(reading) < 5) ? 0 : reading;
     // Yaw Input (inverted due to physical position of joystick on remote)
-    reading = -mapf(remote->yaw, ADC_MIN, ADC_MAX, -MAX_RATE, MAX_RATE);
+    reading = -mapf(remote->yaw, ADC_MIN, ADC_MAX, -maxRate, maxRate);
     remoteIn.yaw = (fabs(reading) < 5) ? 0 : reading;
     // Flight mode
     set_flight_mode((remote->flight_mode == ACRO) ? ACRO : STABILISE);

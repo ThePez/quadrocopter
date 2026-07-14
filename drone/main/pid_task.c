@@ -9,12 +9,12 @@
 #include "pid_task.h"
 
 #include "common_functions.h"
+#include "device_config.h"
 #include "drone.h"
 #include "imu.h"
 #include "kalman.h"
 #include "motors.h"
 #include "pid.h"
-#include "pid_defaults.h"
 
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -52,18 +52,22 @@ struct pwm_t motors;
 
 // Drives all 4 ESCs to minimum throttle and zeroes the reported duty cycles.
 static void motor_shutdown(void) {
+    xSemaphoreTake(cfgMutex, portMAX_DELAY);
+    uint16_t minThrottle = (uint16_t) droneCfg.min_throttle;
+    xSemaphoreGive(cfgMutex);
+
     for (uint8_t i = 0; i < NUMBER_OF_MOTORS; i++) {
-        esc_pwm_set_duty_cycle((MotorIndex) i, MIN_THROTTLE);
+        esc_pwm_set_duty_cycle((MotorIndex) i, minThrottle);
     }
 
-    motors.motorA = MIN_THROTTLE;
-    motors.motorB = MIN_THROTTLE;
-    motors.motorC = MIN_THROTTLE;
-    motors.motorD = MIN_THROTTLE;
+    motors.motorA = minThrottle;
+    motors.motorB = minThrottle;
+    motors.motorC = minThrottle;
+    motors.motorD = minThrottle;
 }
 
 // Latches the angle failsafe (disarms and kills the motors) once pitch/roll
-// exceeds FAIL_ANGLE. No-op if the failsafe is already active.
+// exceeds droneCfg.fail_angle. No-op if the failsafe is already active.
 static void angle_failsafe(struct imu_packet_t* attitude) {
     xSemaphoreTake(droneData.mutex, portMAX_DELAY);
     if (droneData.status_mask & ANGLE_FAIL) {
@@ -83,7 +87,7 @@ static void angle_failsafe(struct imu_packet_t* attitude) {
 }
 
 // Latches the comms failsafe (disarms and kills the motors) once the link to
-// the remote has been silent for longer than FAILSAFE_TIMEOUT_US.
+// the remote has been silent for longer than droneCfg.coms_timeout_us.
 static void comms_failsafe(void) {
     xSemaphoreTake(droneData.mutex, portMAX_DELAY);
     if ((droneData.status_mask & COMS_FAIL) || !droneData.armed) {
@@ -95,7 +99,11 @@ static void comms_failsafe(void) {
     droneData.armed = 0;
     xSemaphoreGive(droneData.mutex);
 
-    ESP_LOGE(TAG, "FAILSAFE: No wifi link for %d second", (FAILSAFE_TIMEOUT_US / 1000000));
+    xSemaphoreTake(cfgMutex, portMAX_DELAY);
+    int64_t comsTimeoutUs = droneCfg.coms_timeout_us;
+    xSemaphoreGive(cfgMutex);
+
+    ESP_LOGE(TAG, "FAILSAFE: No wifi link for %lld second", (comsTimeoutUs / 1000000));
     ESP_LOGW(TAG, "FAILSAFE: May need to reset both remote and drone to reset");
     // Kill the motors
     motor_shutdown();
@@ -105,30 +113,41 @@ static void comms_failsafe(void) {
 // (or forces minimum throttle if the stick is low or the battery is critical)
 // and writes the results to the ESCs.
 static void update_escs(void) {
+    xSemaphoreTake(cfgMutex, portMAX_DELAY);
+    double min = droneCfg.min_throttle;
+    double max = droneCfg.max_throttle;
+    uint16_t criticalVoltage = droneCfg.critical_voltage;
+    xSemaphoreGive(cfgMutex);
+
+    double idle = min + 50;
+    double throttle = remoteIn.throttle;
 
     // Low throttle input (ie off)
-    if (remoteIn.throttle < (MIN_THROTTLE + 50) || droneData.battery < CRITICAL_VOLTAGE) {
-        motors.motorA = MIN_THROTTLE;
-        motors.motorB = MIN_THROTTLE;
-        motors.motorC = MIN_THROTTLE;
-        motors.motorD = MIN_THROTTLE;
+    if (throttle < idle || droneData.battery < criticalVoltage) {
+        motors.motorA = min;
+        motors.motorB = min;
+        motors.motorC = min;
+        motors.motorD = min;
     } else {
-        double throttle = remoteIn.throttle;
+        
+        double pitch = outputPID.pitch_pid;
+        double roll = outputPID.roll_pid;
+        double yaw = outputPID.yaw_pid;
         // Front left
-        double speed = throttle - outputPID.pitch_pid + outputPID.roll_pid - outputPID.yaw_pid;
-        motors.motorA = constrainf(speed, MIN_THROTTLE + 50, MAX_THROTTLE);
+        double speed = throttle - pitch + roll - yaw;
+        motors.motorA = constrainf(speed, idle, max);
 
         // Rear left
-        speed = throttle + outputPID.pitch_pid + outputPID.roll_pid + outputPID.yaw_pid;
-        motors.motorB = constrainf(speed, MIN_THROTTLE + 50, MAX_THROTTLE);
+        speed = throttle + pitch + roll + yaw;
+        motors.motorB = constrainf(speed, idle, max);
 
         // Rear right
-        speed = throttle + outputPID.pitch_pid - outputPID.roll_pid - outputPID.yaw_pid;
-        motors.motorC = constrainf(speed, MIN_THROTTLE + 50, MAX_THROTTLE);
+        speed = throttle + pitch - roll - yaw;
+        motors.motorC = constrainf(speed, idle, max);
 
         // Front right
-        speed = throttle - outputPID.pitch_pid - outputPID.roll_pid + outputPID.yaw_pid;
-        motors.motorD = constrainf(speed, MIN_THROTTLE + 50, MAX_THROTTLE);
+        speed = throttle - pitch - roll + yaw;
+        motors.motorD = constrainf(speed, idle, max);
     }
 
     esc_pwm_set_duty_cycle(MOTOR_A, motors.motorA);
@@ -244,10 +263,15 @@ static esp_err_t pid_timer_init(void) {
 static void pid_control(void* pvParams) {
     ARG_UNUSED(pvParams);
 
-    // Set Co-efficients for the PID control loops
-    pid_init_params(&ratePid, RATE_PITCH_ROLL_KP, RATE_PITCH_ROLL_KD, RATE_PITCH_ROLL_KI);
-    pid_init_params(&rateZPid, RATE_YAW_KP, RATE_YAW_KD, RATE_YAW_KI);
-    pid_init_params(&anglePid, ANGLE_PITCH_ROLL_KP, ANGLE_PITCH_ROLL_KD, ANGLE_PITCH_ROLL_KI);
+    // Set Co-efficients for the PID control loops from the loaded config
+    xSemaphoreTake(cfgMutex, portMAX_DELAY);
+    pid_init_params(&ratePid, droneCfg.rate_pitch_roll.kp, droneCfg.rate_pitch_roll.kd,
+                    droneCfg.rate_pitch_roll.ki, droneCfg.rate_pitch_roll.dtermAlpha);
+    pid_init_params(&rateZPid, droneCfg.rate_yaw.kp, droneCfg.rate_yaw.kd, droneCfg.rate_yaw.ki,
+                    droneCfg.rate_yaw.dtermAlpha);
+    pid_init_params(&anglePid, droneCfg.angle_pitch_roll.kp, droneCfg.angle_pitch_roll.kd,
+                    droneCfg.angle_pitch_roll.ki, droneCfg.angle_pitch_roll.dtermAlpha);
+    xSemaphoreGive(cfgMutex);
 
     ESP_LOGI(TAG, "PID Task Setup");
 
@@ -266,8 +290,12 @@ static void pid_control(void* pvParams) {
 
         kalman_get(&kalman);
 
+        xSemaphoreTake(cfgMutex, portMAX_DELAY);
+        double failAngle = droneCfg.fail_angle;
+        xSemaphoreGive(cfgMutex);
+
         // Check drone for critical angles
-        if (fabs(kalman.pitchAngle) > FAIL_ANGLE || fabs(kalman.rollAngle) > FAIL_ANGLE) {
+        if (fabs(kalman.pitchAngle) > failAngle || fabs(kalman.rollAngle) > failAngle) {
             angle_failsafe(&kalman);
             continue;
         }
@@ -281,9 +309,16 @@ static void pid_control(void* pvParams) {
         enum flight_mode_t mode = droneData.mode;
         xSemaphoreGive(droneData.mutex);
 
+        xSemaphoreTake(cfgMutex, portMAX_DELAY);
+        double minThrottle = droneCfg.min_throttle;
+        double maxRate = droneCfg.max_rate;
+        double maxAngle = droneCfg.max_angle;
+        int64_t comsTimeoutUs = droneCfg.coms_timeout_us;
+        xSemaphoreGive(cfgMutex);
+
         if (statusMask & ANGLE_FAIL) {
             // To reset drone, throttle must be off and drone must be level
-            bool throttle_safe = remoteIn.throttle < (MIN_THROTTLE + 50);
+            bool throttle_safe = remoteIn.throttle < (minThrottle + 50);
             bool level = (fabs(kalman.pitchAngle) < 5) && (fabs(kalman.rollAngle) < 5);
             if (throttle_safe && level) {
                 ESP_LOGI(TAG, "Angle Failsafe cleared");
@@ -297,7 +332,7 @@ static void pid_control(void* pvParams) {
         }
 
         // Check last connection to remote
-        if (now - lastRemoteTime > FAILSAFE_TIMEOUT_US) {
+        if (now - lastRemoteTime > comsTimeoutUs) {
             comms_failsafe();
             continue;
         } else if (statusMask & COMS_FAIL) {
@@ -321,9 +356,9 @@ static void pid_control(void* pvParams) {
 
             // Map remote control inputs to angle setpoints
             double pitchAngleSetpoint =
-                mapf(remoteIn.pitch, -MAX_RATE, MAX_RATE, -MAX_ANGLE, MAX_ANGLE);
+                mapf(remoteIn.pitch, -maxRate, maxRate, -maxAngle, maxAngle);
             double rollAngleSetpoint =
-                mapf(remoteIn.roll, -MAX_RATE, MAX_RATE, -MAX_ANGLE, MAX_ANGLE);
+                mapf(remoteIn.roll, -maxRate, maxRate, -maxAngle, maxAngle);
 
             pitchRateSetpoint =
                 pid_update(&anglePid, &pidAngle.pitch, pitchAngleSetpoint, kalman.pitchAngle);
