@@ -27,8 +27,18 @@ from PyQt5.QtGui import QFont, QCloseEvent
 
 import uart_comm
 from telemetry_thread import TelemetryThread
-from constants import PID_CONFIG_FORMAT
+from constants import (
+    PID_CONFIG_FORMAT,
+    DRONE_CONFIG_FORMAT,
+    REMOTE_CONFIG_FORMAT,
+    PID_CONFIG,
+    DRONE_CONFIG,
+    CONFIG_SAVE,
+    REMOTE_CONFIG,
+    REMOTE_CONFIG_SAVE,
+)
 from pid_defaults import PID_DEFAULTS, PID_DEFAULT_KEYS, save_pid_defaults
+from drone_config_defaults import DRONE_DEFAULTS, REMOTE_DEFAULTS
 from plot_widget import PlotWidget
 from attitude_widget import Attitude3DWidget
 
@@ -109,10 +119,16 @@ class PIDTunerGUI(QMainWindow):
         pid_tabs.addTab(self.pitch_roll_tab, "Pitch + Roll")
         pid_tabs.addTab(self.yaw_tab, "Yaw")
 
+        # Create drone/remote config tabs
+        drone_config_tab: QWidget = self.create_drone_config_tab()
+        remote_config_tab: QWidget = self.create_remote_config_tab()
+
         # Now add the Tabs in the correct order
         self.main_tabs = QTabWidget()
         self.main_tabs.addTab(telemetry_tab, "Telemetry")
         self.main_tabs.addTab(pid_tabs, "PID Tuning")
+        self.main_tabs.addTab(drone_config_tab, "Drone Config")
+        self.main_tabs.addTab(remote_config_tab, "Remote Config")
         self.main_tabs.addTab(console_tab, "Console")
 
         # Add the main tabs widget to the layout manager
@@ -329,6 +345,137 @@ class PIDTunerGUI(QMainWindow):
         group.setLayout(layout)
         return group
 
+    def create_drone_config_tab(self) -> QWidget:
+        """Create the tab for the drone's non-PID config (failsafe/throttle/battery)."""
+        widget: QWidget = QWidget()
+        layout: QGridLayout = QGridLayout(widget)
+
+        defaults = DRONE_DEFAULTS
+        fields: List[tuple[str, str, float]] = [
+            ("Max Rate (deg/s):", "max_rate", defaults.get("MAX_RATE", 0.0)),
+            ("Max Angle (deg):", "max_angle", defaults.get("MAX_ANGLE", 0.0)),
+            ("Fail Angle (deg):", "fail_angle", defaults.get("FAIL_ANGLE", 0.0)),
+            ("Min Throttle (us):", "min_throttle", defaults.get("MIN_THROTTLE", 0.0)),
+            ("Max Throttle (us):", "max_throttle", defaults.get("MAX_THROTTLE", 0.0)),
+            (
+                "Coms Timeout (s):",
+                "coms_timeout_s",
+                defaults.get("FAILSAFE_TIMEOUT_US", 0.0) / 1e6,
+            ),
+            ("Low Voltage (mV):", "low_voltage", defaults.get("LOW_VOLTAGE", 0.0)),
+            (
+                "Critical Voltage (mV):",
+                "critical_voltage",
+                defaults.get("CRITICAL_VOLTAGE", 0.0),
+            ),
+        ]
+
+        self.drone_config_spins: Dict[str, QDoubleSpinBox] = {}
+        for i, (label_text, key, default_value) in enumerate(fields):
+            layout.addWidget(QLabel(label_text), i, 0)
+            spin: QDoubleSpinBox = QDoubleSpinBox()
+            spin.setRange(0, 1_000_000)
+            spin.setDecimals(2)
+            spin.setValue(default_value)
+            layout.addWidget(spin, i, 1)
+            self.drone_config_spins[key] = spin
+
+        send_btn: QPushButton = QPushButton("Send to Drone")
+        send_btn.setStyleSheet(
+            "background-color: #2196F3; color: white; font-weight: bold;"
+        )
+        send_btn.clicked.connect(self.send_drone_config)
+        layout.addWidget(send_btn, len(fields), 0)
+
+        save_btn: QPushButton = QPushButton("Save to Flash")
+        save_btn.setStyleSheet(
+            "background-color: #FF9800; color: white; font-weight: bold;"
+        )
+        save_btn.clicked.connect(self.save_drone_config)
+        layout.addWidget(save_btn, len(fields), 1)
+
+        return widget
+
+    def create_remote_config_tab(self) -> QWidget:
+        """Create the tab for the remote's config (joystick calibration/battery)."""
+        widget: QWidget = QWidget()
+        layout: QVBoxLayout = QVBoxLayout(widget)
+
+        defaults = REMOTE_DEFAULTS
+
+        battery_group: QGroupBox = QGroupBox("Battery / Voltage")
+        battery_layout: QGridLayout = QGridLayout()
+        battery_fields: List[tuple[str, str, float]] = [
+            (
+                "Voltage Cal Multiplier:",
+                "voltage_cal_multiplier",
+                defaults.get("VOLTAGE_CAL_MULTIPLIER", 1.0),
+            ),
+            ("Low Voltage (mV):", "low_voltage", defaults.get("LOW_VOLTAGE", 0.0)),
+            (
+                "Critical Voltage (mV):",
+                "critical_voltage",
+                defaults.get("CRITICAL_VOLTAGE", 0.0),
+            ),
+        ]
+        self.remote_voltage_spins: Dict[str, QDoubleSpinBox] = {}
+        for i, (label_text, key, default_value) in enumerate(battery_fields):
+            battery_layout.addWidget(QLabel(label_text), i, 0)
+            spin: QDoubleSpinBox = QDoubleSpinBox()
+            spin.setRange(0, 100_000)
+            spin.setDecimals(3)
+            spin.setValue(default_value)
+            battery_layout.addWidget(spin, i, 1)
+            self.remote_voltage_spins[key] = spin
+        battery_group.setLayout(battery_layout)
+        layout.addWidget(battery_group)
+
+        channel_defaults: tuple[float, float, float] = (
+            defaults.get("JOYSTICK_CAL_MIN", 0.0),
+            defaults.get("JOYSTICK_CAL_CENTRE", 2048.0),
+            defaults.get("JOYSTICK_CAL_MAX", 4095.0),
+        )
+        self.joystick_spins: Dict[str, Dict[str, QDoubleSpinBox]] = {}
+        for channel in ["throttle", "pitch", "roll", "yaw"]:
+            group: QGroupBox = QGroupBox(f"{channel.capitalize()} Calibration")
+            grid: QGridLayout = QGridLayout()
+            self.joystick_spins[channel] = {}
+            for col, (label_text, sub_key, default_value) in enumerate(
+                zip(
+                    ["Min:", "Centre:", "Max:"],
+                    ["min", "centre", "max"],
+                    channel_defaults,
+                )
+            ):
+                grid.addWidget(QLabel(label_text), 0, col * 2)
+                spin = QDoubleSpinBox()
+                spin.setRange(0, 4095)
+                spin.setDecimals(0)
+                spin.setValue(default_value)
+                grid.addWidget(spin, 0, col * 2 + 1)
+                self.joystick_spins[channel][sub_key] = spin
+            group.setLayout(grid)
+            layout.addWidget(group)
+
+        btn_layout: QHBoxLayout = QHBoxLayout()
+        send_btn: QPushButton = QPushButton("Send to Remote")
+        send_btn.setStyleSheet(
+            "background-color: #2196F3; color: white; font-weight: bold;"
+        )
+        send_btn.clicked.connect(self.send_remote_config)
+        btn_layout.addWidget(send_btn)
+
+        save_btn: QPushButton = QPushButton("Save to Flash")
+        save_btn.setStyleSheet(
+            "background-color: #FF9800; color: white; font-weight: bold;"
+        )
+        save_btn.clicked.connect(self.save_remote_config)
+        btn_layout.addWidget(save_btn)
+        layout.addLayout(btn_layout)
+
+        layout.addStretch()
+        return widget
+
     def create_console_tab(self) -> QWidget:
         """Create console log tab"""
         widget: QWidget = QWidget()
@@ -460,7 +607,7 @@ class PIDTunerGUI(QMainWindow):
 
         try:
             payload: bytes = struct.pack(PID_CONFIG_FORMAT, kp, ki, kd, axis, mode)
-            packet: bytes = uart_comm.encode(payload)
+            packet: bytes = uart_comm.encode_config_packet(PID_CONFIG, payload)
 
             self.serial_port.write(packet)
             self.serial_port.flush()
@@ -508,6 +655,132 @@ class PIDTunerGUI(QMainWindow):
                 self, "Save Error", "Failed to write pid_defaults.h - see console."
             )
             self.log_message(f"Failed to save {axis_name} {title} defaults")
+
+    def send_drone_config(self) -> None:
+        """Apply the drone config tab's values live (RAM only, not yet saved)."""
+        if not self.serial_port or not self.serial_port.is_open:
+            QMessageBox.warning(
+                self, "Not Connected", "Please connect to serial port first."
+            )
+            return
+
+        try:
+            spins = self.drone_config_spins
+            payload: bytes = struct.pack(
+                DRONE_CONFIG_FORMAT,
+                spins["max_rate"].value(),
+                spins["max_angle"].value(),
+                spins["fail_angle"].value(),
+                spins["min_throttle"].value(),
+                spins["max_throttle"].value(),
+                int(spins["coms_timeout_s"].value() * 1e6),
+                int(spins["low_voltage"].value()),
+                int(spins["critical_voltage"].value()),
+            )
+            packet: bytes = uart_comm.encode_config_packet(DRONE_CONFIG, payload)
+
+            self.serial_port.write(packet)
+            self.serial_port.flush()
+            self.log_message("→ Sent drone config update (live, not yet saved)")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Send Error", f"Failed to send: {e}")
+            self.log_message(f"Send failed: {e}")
+
+    def save_drone_config(self) -> None:
+        """Tell the drone to persist its currently-live config (gains included) to flash."""
+        if not self.serial_port or not self.serial_port.is_open:
+            QMessageBox.warning(
+                self, "Not Connected", "Please connect to serial port first."
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Save to Flash",
+            "Persist the drone's currently-live config (including PID gains) to flash?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            packet: bytes = uart_comm.encode_config_packet(CONFIG_SAVE)
+            self.serial_port.write(packet)
+            self.serial_port.flush()
+            self.log_message("→ Sent CONFIG_SAVE (persist to flash)")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Send Error", f"Failed to send: {e}")
+            self.log_message(f"Send failed: {e}")
+
+    def send_remote_config(self) -> None:
+        """Apply the remote config tab's values live (RAM only, not yet saved)."""
+        if not self.serial_port or not self.serial_port.is_open:
+            QMessageBox.warning(
+                self, "Not Connected", "Please connect to serial port first."
+            )
+            return
+
+        try:
+            v = self.remote_voltage_spins
+            j = self.joystick_spins
+            payload: bytes = struct.pack(
+                REMOTE_CONFIG_FORMAT,
+                v["voltage_cal_multiplier"].value(),
+                int(v["low_voltage"].value()),
+                int(v["critical_voltage"].value()),
+                int(j["throttle"]["min"].value()),
+                int(j["throttle"]["centre"].value()),
+                int(j["throttle"]["max"].value()),
+                int(j["pitch"]["min"].value()),
+                int(j["pitch"]["centre"].value()),
+                int(j["pitch"]["max"].value()),
+                int(j["roll"]["min"].value()),
+                int(j["roll"]["centre"].value()),
+                int(j["roll"]["max"].value()),
+                int(j["yaw"]["min"].value()),
+                int(j["yaw"]["centre"].value()),
+                int(j["yaw"]["max"].value()),
+            )
+            packet: bytes = uart_comm.encode_config_packet(REMOTE_CONFIG, payload)
+
+            self.serial_port.write(packet)
+            self.serial_port.flush()
+            self.log_message("→ Sent remote config update (live, not yet saved)")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Send Error", f"Failed to send: {e}")
+            self.log_message(f"Send failed: {e}")
+
+    def save_remote_config(self) -> None:
+        """Tell the remote to persist its currently-live config to flash."""
+        if not self.serial_port or not self.serial_port.is_open:
+            QMessageBox.warning(
+                self, "Not Connected", "Please connect to serial port first."
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Save to Flash",
+            "Persist the remote's currently-live config to flash?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            packet: bytes = uart_comm.encode_config_packet(REMOTE_CONFIG_SAVE)
+            self.serial_port.write(packet)
+            self.serial_port.flush()
+            self.log_message("→ Sent REMOTE_CONFIG_SAVE (persist to flash)")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Send Error", f"Failed to send: {e}")
+            self.log_message(f"Send failed: {e}")
 
     def handle_telemetry(self, data: Dict[str, Any]) -> None:
         """Handle received telemetry data"""

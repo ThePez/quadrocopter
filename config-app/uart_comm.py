@@ -1,11 +1,19 @@
 """
-Framing for the bridge <-> GUI UART link: [0xAA 0x55][payload][crc16].
-Mirrors uart_comm_write_frame()/uart_comm_read_frame() in bridge/main/bridge.c -
-keep both in sync if this changes.
+Framing for the bridge <-> GUI UART link.
+
+Two directions, two different frame shapes:
+- Bridge -> GUI (telemetry): [0xAA 0x55][sensor_telemetry_t][crc16], written by
+  uart_comm_write_frame() in bridge/main/bridge.c. Decoded here by FrameDecoder.
+- GUI -> bridge (config updates): [0xAA 0x55][struct wifi_packet_t], read by
+  uart_comm_read_frame() in bridge/main/bridge.c. wifi_packet_t already carries
+  its own crc16 and packet_id fields, so there's no separate trailing crc for
+  this direction - see encode_config_packet().
 """
 
 import struct
 from typing import List
+
+from constants import WIFI_PACKET_SIZE, WIFI_PACKET_UNION_SIZE
 
 MAGIC = bytes([0xAA, 0x55])
 CRC_SIZE = 2
@@ -30,9 +38,27 @@ def frame_size(payload_size: int) -> int:
     return len(MAGIC) + payload_size + CRC_SIZE
 
 
-def encode(payload: bytes) -> bytes:
-    """Wrap a payload for sending: [magic][payload][crc16]"""
-    return MAGIC + payload + struct.pack("<H", crc16(payload))
+def encode_config_packet(packet_id: int, payload: bytes = b"") -> bytes:
+    """Builds the wire bytes for a GUI -> bridge config-update packet.
+
+    Mirrors struct wifi_packet_t's layout: `payload` occupies the leading
+    bytes of the data union (zero-padded out to WIFI_PACKET_UNION_SIZE),
+    followed by a crc16 computed the same way esp_now_send_packet() does
+    (over just the union bytes) and the packet_id. Wrapped with the magic
+    sync bytes uart_comm_read_frame() expects.
+
+    CONFIG_SAVE/REMOTE_CONFIG_SAVE have no payload - packet_id alone is the
+    whole message, so the default empty payload is zero-padded as-is.
+    """
+    if len(payload) > WIFI_PACKET_UNION_SIZE:
+        raise ValueError(
+            f"payload of {len(payload)} bytes exceeds union size {WIFI_PACKET_UNION_SIZE}"
+        )
+
+    data = payload.ljust(WIFI_PACKET_UNION_SIZE, b"\x00")
+    crc = crc16(data)
+    packet = data + struct.pack("<H", crc) + bytes([packet_id])
+    return MAGIC + packet.ljust(WIFI_PACKET_SIZE, b"\x00")
 
 
 class FrameDecoder:
