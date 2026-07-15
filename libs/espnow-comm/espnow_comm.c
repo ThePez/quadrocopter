@@ -22,11 +22,11 @@
 #define TAG "ESPNOW"
 
 // DRONE's MAC ADDRESS
-uint8_t drone_mac[6] = {0xD8, 0x13, 0x2A, 0x2C, 0x4D, 0x74};
+const uint8_t drone_mac[6] = {0xD8, 0x13, 0x2A, 0x2C, 0x4D, 0x74};
 // REMOTE's MAC ADDRESS
-uint8_t remote_mac[6] = {0x10, 0x06, 0x1C, 0xF2, 0x42, 0xA4};
+const uint8_t remote_mac[6] = {0x10, 0x06, 0x1C, 0xF2, 0x42, 0xA4};
 // Bridge MAC ADDRESS
-uint8_t bridge_mac[6] = {0x58, 0x8C, 0x81, 0xCA, 0x5F, 0x80};
+const uint8_t bridge_mac[6] = {0x58, 0x8C, 0x81, 0xCA, 0x5F, 0x80};
 
 // Encryption keys
 // PMK (Primary Master Key) - must be same on both devices
@@ -40,8 +40,7 @@ const uint8_t lmk_key[16] = {0x4A, 0x7E, 0x1D, 0x9C, 0x0F, 0x6B,
 QueueHandle_t wifiQueue = NULL;
 SemaphoreHandle_t wifiSendSemaphore = NULL;
 
-// ESP-NOW send-complete callback: releases wifiSendSemaphore so the next
-// send can proceed, and warns if delivery failed.
+// ESP-NOW send-complete callback.
 static void espnow_send_cb(const uint8_t* mac_addr, esp_now_send_status_t status) {
     ARG_UNUSED(mac_addr);
     xSemaphoreGive(wifiSendSemaphore);
@@ -50,8 +49,7 @@ static void espnow_send_cb(const uint8_t* mac_addr, esp_now_send_status_t status
     }
 }
 
-// ESP-NOW receive callback: validates the packet's CRC16 and, if valid,
-// posts it to wifiQueue for processing.
+// ESP-NOW receive callback.
 static void espnow_recv_cb(const esp_now_recv_info_t* recv_info, const uint8_t* data, int len) {
 
     ARG_UNUSED(recv_info);
@@ -72,8 +70,7 @@ static void espnow_recv_cb(const esp_now_recv_info_t* recv_info, const uint8_t* 
     }
 }
 
-// Brings up WiFi in station mode on a fixed channel with power-save
-// disabled, as required for reliable ESP-NOW.
+// Brings up WiFi in station mode on a fixed channel with power-save disabled.
 static esp_err_t wifi_init(void) {
     CHECK_ERR(esp_netif_init(), "netif init failed");
     CHECK_ERR(esp_event_loop_create_default(), "event loop failed");
@@ -96,8 +93,7 @@ static esp_err_t wifi_init(void) {
     return ESP_OK;
 }
 
-// Initializes the ESP-NOW driver, sets the PMK, registers the send/receive
-// callbacks, and adds each given MAC as an encrypted peer.
+// Initializes the ESP-NOW driver.
 static esp_err_t espnow_init(uint8_t* peer_addr[], uint8_t num_peers) {
     // Initialize ESP-NOW
     CHECK_ERR(esp_now_init(), "init failed");
@@ -135,16 +131,23 @@ esp_err_t esp_now_module_init(uint8_t* peer_addr[], uint8_t num_peers) {
     // Ensure NVS is initialised
     CHECK_ERR_NO_LOG(nvs_init());
 
-    // Initialise WiFi and ESP-NOW
-    wifi_init();
-    espnow_init(peer_addr, num_peers);
+    // Initialise WiFi
+    CHECK_ERR_NO_LOG(wifi_init());
+
+    // Initialise ESP-NOW
+    CHECK_ERR_NO_LOG(espnow_init(peer_addr, num_peers));
 
     // Now initialise the messaging primatives
-    while (!wifiQueue) {
+    do {
+        // Try until it works...
         wifiQueue = xQueueCreate(10, sizeof(struct wifi_packet_t));
-    }
+    } while (wifiQueue == NULL);
 
-    wifiSendSemaphore = xSemaphoreCreateBinary();
+    do {
+        // Try until it works...
+        wifiSendSemaphore = xSemaphoreCreateBinary();
+    } while (wifiSendSemaphore == NULL);
+
     xSemaphoreGive(wifiSendSemaphore);
 
     return ESP_OK;

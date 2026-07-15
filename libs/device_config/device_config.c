@@ -15,10 +15,11 @@
 #include <string.h>
 
 #define TAG "CONFIG"
-static const char* const key = "cfg"; // device config key
 
+// device config key
+static const char* const key = "cfg"; 
 static bool initialised = false;
-static bool configLoaded = false;
+static bool cfgLoaded = false;
 
 SemaphoreHandle_t cfgMutex = NULL;
 
@@ -94,14 +95,13 @@ esp_err_t device_config_load(const char* namespace, void* cfg, size_t len, uint1
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (configLoaded) {
+    if (cfgLoaded) {
         return ESP_OK;
     }
 
-    configLoaded = true;
-
+    // Here only on first call (ie during boot process).
+    cfgLoaded = true;
     cfgMutex = xSemaphoreCreateMutex();
-
     esp_err_t err = blob_read(namespace, key, cfg, len);
 
     // Config data was either found but stale or no data was found -> Store defaults
@@ -111,20 +111,14 @@ esp_err_t device_config_load(const char* namespace, void* cfg, size_t len, uint1
         return ESP_ERR_NVS_TYPE_MISMATCH;
     }
 
-    // Valid config data found
+    // Valid config data found and loaded.
     return ESP_OK;
 }
 
-esp_err_t device_config_save(const char* namespace, void* cfg, const void* new_data, size_t len) {
-    if (cfgMutex == NULL) {
+esp_err_t device_config_save(const char* namespace, const void* new_data, size_t len) {
+    if (!cfgMutex || !cfgLoaded) {
         return ESP_ERR_NVS_NOT_INITIALIZED;
     }
 
-    xSemaphoreTake(cfgMutex, portMAX_DELAY);
-    // Copy new into cfg for the RAM
-    memcpy(cfg, new_data, len);
-    xSemaphoreGive(cfgMutex);
-
-    // Now complete the flash write outside of mutex as it's slower
     return blob_write(namespace, key, new_data, len);
 }

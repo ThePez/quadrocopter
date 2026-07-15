@@ -25,6 +25,9 @@
  * from compiled defaults instead of reading a stale struct.
  */
 
+#define NVS_DRONE_CFG_VERSION 1
+#define NVS_REMOTE_CFG_VERSION 1
+
 // One PID controller's gains (one axis/mode pair).
 struct __packed nvs_pid_cfg_t {
     double kp, ki, kd;
@@ -36,6 +39,7 @@ struct __packed nvs_joystick_cal_t {
     uint16_t min, centre, max;
 };
 
+// Configuation data for the drone
 struct __packed nvs_drone_cfg_t {
     uint16_t version;
     struct nvs_pid_cfg_t rate_pitch_roll, rate_yaw, angle_pitch_roll;
@@ -45,6 +49,7 @@ struct __packed nvs_drone_cfg_t {
     uint16_t low_voltage, critical_voltage;
 };
 
+// Configuration data for the remote
 struct __packed nvs_remote_cfg_t {
     uint16_t version;
     double voltage_cal_multiplier;
@@ -52,10 +57,7 @@ struct __packed nvs_remote_cfg_t {
     struct nvs_joystick_cal_t throttle, pitch, roll, yaw;
 };
 
-#define NVS_DRONE_CFG_VERSION 1
-#define NVS_REMOTE_CFG_VERSION 1
-
-// Protects whichever config blob device_config_load() loaded.
+// Protects the config data during operations
 extern SemaphoreHandle_t cfgMutex;
 
 /**
@@ -92,20 +94,10 @@ esp_err_t device_config_load(const char* namespace, void* cfg, size_t len, uint1
                              const void* defaults);
 
 /**
- * @brief Updates the live config blob in place, then persists it to NVS.
- *
- * Takes cfgMutex only for the RAM copy into `cfg`, so a concurrent reader
- * (taking the same mutex) never sees a torn mix of old and new field
- * values. The flash write happens afterwards, outside the mutex, since
- * it's much slower than a RAM copy and would otherwise block a fast reader
- * (eg. the 400Hz PID loop) for the duration of the write. This means `cfg`
- * updates in RAM immediately regardless of whether the flash write - which
- * happens second - succeeds.
+ * @brief Updates the given config blob into NVS
  *
  * @param namespace NVS namespace to write to - the same one passed to
  *                  device_config_load() for this blob.
- * @param cfg       Live config buffer to update in place; must be the same
- *                  buffer previously passed to device_config_load().
  * @param new_data  Complete replacement blob, `len` bytes.
  * @param len       Size of the config blob in bytes.
  *
@@ -113,6 +105,6 @@ esp_err_t device_config_load(const char* namespace, void* cfg, size_t len, uint1
  *         device_config_load() hasn't been called yet, or an error code
  *         from the flash write.
  */
-esp_err_t device_config_save(const char* namespace, void* cfg, const void* new_data, size_t len);
+esp_err_t device_config_save(const char* namespace, const void* new_data, size_t len);
 
 #endif

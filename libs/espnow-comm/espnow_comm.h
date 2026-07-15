@@ -14,48 +14,53 @@
 #include <stdint.h>
 
 struct sensor_telemetry_t {
-    float pitch_angle;
-    float roll_angle;
-    float yaw_angle;
-    float pitch_rate;
-    float roll_rate;
-    float yaw_rate;
+    float pitch_angle, roll_angle, yaw_angle;
+    float pitch_rate, roll_rate, yaw_rate;
     float mode;
-    float pid_pitch;
-    float pid_roll;
-    float pid_yaw;
-    uint16_t motor_a;
-    uint16_t motor_b;
-    uint16_t motor_c;
-    uint16_t motor_d;
+    float pid_pitch, pid_roll, pid_yaw;
+    uint16_t motor_a, motor_b, motor_c, motor_d;
     uint16_t battery;
 };
 
 struct remote_telemetry_t {
-    uint16_t throttle;
-    uint16_t pitch;
-    uint16_t roll;
-    uint16_t yaw;
+    uint16_t throttle, pitch, roll, yaw;
     uint16_t flight_mode;
 };
 
 struct pid_config_telemetry_t {
-    float kp;
-    float ki;
-    float kd;
+    float kp, ki, kd;
     uint16_t axis; // 0 = Pitch & Roll, 1 = Yaw
     uint16_t mode; // 0 = Rate, 1 = Angle
 };
 
-struct power_data_t {
+struct power_data_telemetry_t {
     uint16_t battery;
+};
+
+struct drone_config_telemetry_t {
+    float max_rate, max_angle, fail_angle;
+    float min_throttle, max_throttle;
+    uint32_t coms_timeout_us;
+    uint16_t low_voltage, critical_voltage;
+};
+
+struct joystick_cal_telemetry_t {
+    uint16_t min, centre, max;
+};
+
+struct remote_config_telemetry_t {
+    float voltage_cal_multiplier;
+    uint16_t low_voltage, critical_voltage;
+    struct joystick_cal_telemetry_t throttle, pitch, roll, yaw;
 };
 
 union packet_data {
     struct sensor_telemetry_t sensor;
     struct remote_telemetry_t remote;
     struct pid_config_telemetry_t pid_config;
-    struct power_data_t power;
+    struct power_data_telemetry_t power;
+    struct drone_config_telemetry_t drone_config;
+    struct remote_config_telemetry_t remote_config;
 };
 
 struct wifi_packet_t {
@@ -64,7 +69,16 @@ struct wifi_packet_t {
     uint8_t packet_id;
 };
 
-enum wifi_packet_id { SENSOR, REMOTE, PID_CONFIG, POWER };
+enum wifi_packet_id {
+    SENSOR,
+    REMOTE,
+    PID_CONFIG,
+    POWER,
+    DRONE_CFG,
+    DRONE_CFG_STORE,
+    REMOTE_CFG,
+    REMOTE_CFG_STORE
+};
 
 /**
  * @brief Initializes NVS, WiFi, and ESP-NOW, and registers the given peers.
@@ -106,15 +120,11 @@ esp_err_t esp_now_module_init(uint8_t* peer_addr[], uint8_t num_peers);
 esp_err_t esp_now_send_packet(const uint8_t* addr, struct wifi_packet_t* packet);
 
 // DRONE's MAC ADDRESS
-extern uint8_t drone_mac[6];
+extern const uint8_t drone_mac[6];
 // REMOTE's MAC ADDRESS
-extern uint8_t remote_mac[6];
+extern const uint8_t remote_mac[6];
 // BRIDGE's MAC ADDRESS
-extern uint8_t bridge_mac[6];
-
-// Encription keys
-extern const uint8_t pmk_key[16];
-extern const uint8_t lmk_key[16];
+extern const uint8_t bridge_mac[6];
 
 // ESPNOW queue
 extern QueueHandle_t wifiQueue;
