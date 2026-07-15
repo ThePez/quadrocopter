@@ -102,7 +102,7 @@ enum wifi_packet_id {
  *
  * @return ESP_OK on success, or error code on failure
  */
-esp_err_t esp_now_module_init(uint8_t* peer_addr[], uint8_t num_peers);
+esp_err_t esp_now_module_init(const uint8_t* peer_addr[], uint8_t num_peers);
 
 /**
  * @brief Computes and stores the packet's CRC16, then sends it via ESP-NOW.

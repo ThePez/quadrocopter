@@ -263,7 +263,7 @@ esp_err_t init_drone(void) {
     vTaskDelay(pdMS_TO_TICKS(50));
 
     // Setup ESP-NOW (pair the bridge and remote)
-    uint8_t* macs[] = {remote_mac, bridge_mac};
+    const uint8_t* macs[] = {remote_mac, bridge_mac};
     CHECK_ERR_NO_LOG(esp_now_module_init(macs, 2));
 
     esp_err_t err = device_config_load("droneCfg", &droneCfg, sizeof(struct nvs_drone_cfg_t),
@@ -365,7 +365,7 @@ esp_err_t init_esc_programming(void) {
     CHECK_ERR_NO_LOG(esc_pwm_init(MOTOR_SPEED_MAX));
 
     // Only the remote is needed for this
-    uint8_t* macs[] = {remote_mac};
+    const uint8_t* macs[] = {remote_mac};
     CHECK_ERR_NO_LOG(esp_now_module_init(macs, 1));
 
     while (!wifiQueue) {

@@ -94,7 +94,7 @@ static esp_err_t wifi_init(void) {
 }
 
 // Initializes the ESP-NOW driver.
-static esp_err_t espnow_init(uint8_t* peer_addr[], uint8_t num_peers) {
+static esp_err_t espnow_init(const uint8_t* peer_addr[], uint8_t num_peers) {
     // Initialize ESP-NOW
     CHECK_ERR(esp_now_init(), "init failed");
 
@@ -126,7 +126,7 @@ static esp_err_t espnow_init(uint8_t* peer_addr[], uint8_t num_peers) {
     return ESP_OK;
 }
 
-esp_err_t esp_now_module_init(uint8_t* peer_addr[], uint8_t num_peers) {
+esp_err_t esp_now_module_init(const uint8_t* peer_addr[], uint8_t num_peers) {
 
     // Ensure NVS is initialised
     CHECK_ERR_NO_LOG(nvs_init());

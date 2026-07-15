@@ -78,8 +78,7 @@ static struct nvs_remote_cfg_t remoteDefaults = {
 
 //////////////////////////////////////////////////////////////////////////////
 
-// Debounced GPIO ISR for a button pin: on a valid falling edge, notifies
-// remote_controller() via the button's notify bit.
+// ISR: Callback for button interrupts
 static void IRAM_ATTR intr_handler(void* args) {
 
     struct button_state_t* button = (struct button_state_t*) args;
@@ -99,6 +98,17 @@ static void IRAM_ATTR intr_handler(void* args) {
         button->prevRising = currentTick;
         button->pushAllowed = 1;
     }
+}
+
+// ISR: Callback for signalling remote task to compelete one loop
+void IRAM_ATTR remote_callback(void* args) {
+    ARG_UNUSED(args);
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    if (remoteTaskHandle) {
+        xTaskNotifyFromISR(remoteTaskHandle, TIMER_BIT, eSetBits, &xHigherPriorityTaskWoken);
+    }
+
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
 // Configures a button's GPIO as an interrupt input and installs the given ISR handler.
@@ -128,17 +138,8 @@ static esp_err_t interrupt_init(void* handler, struct button_state_t* button) {
     return ESP_OK;
 }
 
-void IRAM_ATTR remote_callback(void* args) {
-    ARG_UNUSED(args);
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    if (remoteTaskHandle) {
-        xTaskNotifyFromISR(remoteTaskHandle, TIMER_BIT, eSetBits, &xHigherPriorityTaskWoken);
-    }
-
-    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-}
-
-esp_err_t remote_timer_init(void) {
+// Initialises a timer callback for signaling a periodic task action.
+static esp_err_t remote_timer_init(void) {
     const esp_timer_create_args_t args = {.callback = remote_callback,
                                           .dispatch_method = ESP_TIMER_ISR};
     esp_timer_handle_t remote_timer = NULL;
@@ -146,61 +147,6 @@ esp_err_t remote_timer_init(void) {
     CHECK_ERR(esp_timer_start_periodic(remote_timer, 50000), "Timer start failed");
     ESP_LOGI(TAG, "Remote Timer Initialised");
     return ESP_OK;
-}
-
-// One-time hardware bring-up: ESP-NOW paired to the drone, button
-// interrupts, the SPI bus and MCP3208 ADC task, and the polling timer.
-static esp_err_t hardware_init(void) {
-    uint8_t* macs[] = {drone_mac};
-    CHECK_ERR_NO_LOG(esp_now_module_init(macs, 1));
-
-    esp_err_t err = device_config_load("remoteCfg", &remoteCfg, sizeof(struct nvs_remote_cfg_t),
-                                       NVS_REMOTE_CFG_VERSION, &remoteDefaults);
-    if (err == ESP_ERR_NVS_TYPE_MISMATCH) {
-        // Either first boot or struct update has occured
-        remoteCfg = remoteDefaults;
-    } else if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Unable to load remote config from flash");
-        return err;
-    }
-
-    CHECK_ERR_NO_LOG(interrupt_init(intr_handler, &mode_button));
-    CHECK_ERR_NO_LOG(interrupt_init(intr_handler, &emergency_button));
-    CHECK_ERR(spi_bus_setup(VSPI_HOST), "SPI bus failed init");
-    // Remote MCP3208 cs pin is 25
-    CHECK_ERR(mcpx_task_init(&spiVMutex, 0x1F, VSPI_HOST, MCPx_CS_PIN_REMOTE),
-              "MCPx Task creation failed");
-
-    CHECK_ERR_NO_LOG(remote_timer_init());
-
-    return ESP_OK;
-}
-
-// Toggles flight mode (and the status LED) on a mode-button press, if armed.
-static void handle_mode_button(struct remote_state_t* state) {
-    if (!state->armed) {
-        return;
-    }
-
-    state->flightMode = (state->flightMode != ACRO) ? ACRO : STABILISE;
-    gpio_set_level(STATUS_LED, (state->flightMode == STABILISE) ? 1 : 0);
-    ESP_LOGI(TAG, "Flight Mode %s", (state->flightMode == STABILISE) ? "Stabilise" : "Acro");
-
-    // Consume the set MODE bit
-    xTaskNotifyWait(MODE_BUTTON_BIT, 0, NULL, 0);
-}
-
-// Sets the emergency flag on an emergency-button press, if armed.
-static void handle_emergency_button(struct remote_state_t* state) {
-    if (!state->armed) {
-        return;
-    }
-
-    state->emergency = 1;
-    ESP_LOGE(TAG, "Emergancy");
-
-    // Consume the set MODE & EMERGENCY bits
-    xTaskNotifyWait(MODE_BUTTON_BIT | EMERGENCY_BUTTON_BIT, 0, NULL, 0);
 }
 
 // Remaps a raw ADC reading through its per-channel calibration back into the
@@ -272,16 +218,98 @@ static void handle_timer_tick(struct remote_state_t* state, uint32_t notifyValue
     }
 }
 
-// Main remote task: performs hardware init, then loops waiting on button and
-// timer notifications and dispatching them to their handlers.
-static void remote_controller(void* pvParams) {
-    (void) pvParams;
-    if (hardware_init()) {
-        // This is unrecoverable -> restart the device
-        esp_restart(); // This function doesn't return
+// Toggles flight mode (and the status LED) on a mode-button press, if armed.
+static void handle_mode_button(struct remote_state_t* state) {
+    if (!state->armed) {
+        return;
     }
 
+    state->flightMode = (state->flightMode != ACRO) ? ACRO : STABILISE;
+    gpio_set_level(STATUS_LED, (state->flightMode == STABILISE) ? 1 : 0);
+    ESP_LOGI(TAG, "Flight Mode %s", (state->flightMode == STABILISE) ? "Stabilise" : "Acro");
+
+    // Consume the set MODE bit
+    xTaskNotifyWait(MODE_BUTTON_BIT, 0, NULL, 0);
+}
+
+// Sets the emergency flag on an emergency-button press, if armed.
+static void handle_emergency_button(struct remote_state_t* state) {
+    if (!state->armed) {
+        return;
+    }
+
+    state->emergency = 1;
+    ESP_LOGE(TAG, "Emergancy");
+
+    // Consume the set MODE & EMERGENCY bits
+    xTaskNotifyWait(MODE_BUTTON_BIT | EMERGENCY_BUTTON_BIT, 0, NULL, 0);
+}
+
+// Converts a wire-format joystick calibration into the NVS-stored shape (same
+// fields, different struct type).
+static struct nvs_joystick_cal_t to_nvs_cal(struct joystick_cal_telemetry_t cal) {
+    return (struct nvs_joystick_cal_t){.min = cal.min, .centre = cal.centre, .max = cal.max};
+}
+
+// Applies a REMOTE_CONFIG update (joystick calibration/battery constants)
+// live. Writes straight into remoteCfg under cfgMutex; doesn't touch flash -
+// a later REMOTE_CONFIG_SAVE is what persists the change.
+static esp_err_t remote_config_handle_update(struct remote_config_telemetry_t* packet) {
+    xSemaphoreTake(cfgMutex, portMAX_DELAY);
+    remoteCfg.voltage_cal_multiplier = packet->voltage_cal_multiplier;
+    remoteCfg.low_voltage = packet->low_voltage;
+    remoteCfg.critical_voltage = packet->critical_voltage;
+    remoteCfg.throttle = to_nvs_cal(packet->throttle);
+    remoteCfg.pitch = to_nvs_cal(packet->pitch);
+    remoteCfg.roll = to_nvs_cal(packet->roll);
+    remoteCfg.yaw = to_nvs_cal(packet->yaw);
+    xSemaphoreGive(cfgMutex);
+
+    ESP_LOGI(TAG, "Remote config updated live (not yet saved to flash)");
+    return ESP_OK;
+}
+
+// Persists the currently-live remoteCfg to flash. Snapshots remoteCfg under
+// cfgMutex, then hands that snapshot to device_config_save() as the new
+// flash contents.
+static esp_err_t remote_config_handle_save(void) {
+    xSemaphoreTake(cfgMutex, portMAX_DELAY);
+    struct nvs_remote_cfg_t snapshot = remoteCfg;
+    xSemaphoreGive(cfgMutex);
+
+    CHECK_ERR(device_config_save("remoteCfg", &snapshot, sizeof(struct nvs_remote_cfg_t)),
+              "Failed to save remote config to flash");
+    return ESP_OK;
+}
+
+// Consumes incoming ESP-NOW config packets
+static void cfg_task(void* pvParameters) {
+    ARG_UNUSED(pvParameters);
+    struct wifi_packet_t packet;
+
+    while (1) {
+        xQueueReceive(wifiQueue, &packet, portMAX_DELAY);
+        switch (packet.packet_id) {
+        case REMOTE_CFG:
+            remote_config_handle_update(&packet.data.remote_config);
+            break;
+
+        case REMOTE_CFG_STORE:
+            remote_config_handle_save();
+            break;
+
+        default:
+            ESP_LOGW(TAG, "Unexpected packet id %d", packet.packet_id);
+            break;
+        }
+    }
+}
+
+// Main remote task
+static void remote_controller(void* pvParams) {
+    (void) pvParams;
     struct wifi_packet_t packet = {.packet_id = REMOTE};
+
     // Idle until all queue's are created
     while (!mcpxQueue || !wifiQueue) {
         vTaskDelay(pdMS_TO_TICKS(20));
@@ -318,7 +346,36 @@ static void remote_controller(void* pvParams) {
 }
 
 esp_err_t init_remote(void) {
-    BaseType_t result = xTaskCreate(remote_controller, "REMOTE_TASK", REMOTE_STACK, NULL,
-                                    REMOTE_PRIO, &remoteTaskHandle);
-    return (result == pdPASS) ? ESP_OK : ESP_FAIL;
+    const uint8_t* macs[] = {drone_mac, bridge_mac};
+    CHECK_ERR_NO_LOG(esp_now_module_init(macs, 2));
+
+    esp_err_t err = device_config_load("remoteCfg", &remoteCfg, sizeof(struct nvs_remote_cfg_t),
+                                       NVS_REMOTE_CFG_VERSION, &remoteDefaults);
+    if (err == ESP_ERR_NVS_TYPE_MISMATCH) {
+        // Either first boot or struct update has occured
+        remoteCfg = remoteDefaults;
+    } else if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Unable to load remote config from flash");
+        return err;
+    }
+
+    CHECK_ERR_NO_LOG(interrupt_init(intr_handler, &mode_button));
+    CHECK_ERR_NO_LOG(interrupt_init(intr_handler, &emergency_button));
+    CHECK_ERR(spi_bus_setup(VSPI_HOST), "SPI bus failed init");
+    // Remote MCP3208 cs pin is 25
+    CHECK_ERR(mcpx_task_init(&spiVMutex, 0x1F, VSPI_HOST, MCPx_CS_PIN_REMOTE),
+              "MCPx Task creation failed");
+
+    CHECK_ERR_NO_LOG(remote_timer_init());
+
+    // Create the 2 remote tasks
+    CHECK_ERR(xTaskCreate(cfg_task, "CFG_TASK", REMOTE_STACK, NULL, REMOTE_PRIO, NULL) == pdPASS
+                  ? ESP_OK
+                  : ESP_FAIL,
+              "Failed to create the config task");
+    CHECK_ERR_NO_LOG(xTaskCreate(remote_controller, "REMOTE_TASK", REMOTE_STACK, NULL, REMOTE_PRIO,
+                                 &remoteTaskHandle) == pdPASS
+                         ? ESP_OK
+                         : ESP_FAIL);
+    return ESP_OK;
 }

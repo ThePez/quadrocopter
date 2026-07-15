@@ -19,14 +19,19 @@
 extern struct nvs_remote_cfg_t remoteCfg;
 
 /**
- * @brief Starts the task that runs the whole remote (buttons, joystick ADC, ESP-NOW link).
+ * @brief Performs hardware init and starts the tasks that run the remote.
  *
- * The spawned task performs hardware init (ESP-NOW paired to the drone,
- * mode/emergency button interrupts, the MCP3208 ADC task, and the polling
- * timer), then loops handling button presses and periodic joystick reads,
- * sending a REMOTE packet to the drone once armed.
+ * Synchronously initialises ESP-NOW (paired to the drone and bridge), loads
+ * remoteCfg from flash (falling back to defaults on first boot or a struct
+ * version mismatch), sets up the mode/emergency button interrupts, the SPI
+ * bus and MCP3208 ADC task, and the polling timer. It then spawns two tasks:
+ * cfg_task, which applies/persists REMOTE_CFG and REMOTE_CFG_STORE packets
+ * received over ESP-NOW, and remote_controller, which loops handling button
+ * presses and periodic joystick reads, sending a REMOTE packet to the drone
+ * once armed.
  *
- * @return ESP_OK if the task was created, ESP_FAIL otherwise.
+ * @return ESP_OK if hardware init succeeded and both tasks were created,
+ *         an esp_err_t error code otherwise.
  */
 esp_err_t init_remote(void);
 

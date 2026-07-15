@@ -23,7 +23,7 @@
 #define MAGIC_0_REC 0
 #define MAGIC_1_REC 1
 #define PAYLOAD_REC 2
-#define CRC_REC 3
+#define CRC_CHECK 3
 
 #define UART_MAGIC_0 0xAA
 #define UART_MAGIC_1 0x55
@@ -42,13 +42,11 @@ static void uart_comm_write_frame(uart_port_t port, struct sensor_telemetry_t* p
     uart_write_bytes(port, &packet, sizeof(struct uart_packet));
 }
 
-// Blocking state machine that reads a PID-config frame off UART: syncs to
-// the magic bytes, reads the payload, then validates its CRC16 before returning.
-static void uart_comm_read_frame(uart_port_t port, struct pid_config_telemetry_t* payload,
+// Blocking state machine that reads a config-update frame off UART
+static void uart_comm_read_frame(uart_port_t port, struct wifi_packet_t* packet,
                                  TickType_t byte_timeout) {
     uint8_t byte = 0;
     uint8_t state = 0;
-    uint16_t crc;
     int len = 0;
 
     // State machine for where the read is at
@@ -72,19 +70,18 @@ static void uart_comm_read_frame(uart_port_t port, struct pid_config_telemetry_t
             continue;
 
         case PAYLOAD_REC:
-            len = uart_read_bytes(port, (uint8_t*) payload, sizeof(struct pid_config_telemetry_t),
+            len = uart_read_bytes(port, (uint8_t*) packet, sizeof(struct wifi_packet_t),
                                   byte_timeout);
-            state = (len == sizeof(struct pid_config_telemetry_t)) ? CRC_REC : MAGIC_0_REC;
+            state = (len == sizeof(struct wifi_packet_t)) ? CRC_CHECK : MAGIC_0_REC;
             continue;
 
-        case CRC_REC:
-            len = uart_read_bytes(port, &crc, sizeof(uint16_t), byte_timeout);
-            if (len != sizeof(uint16_t) ||
-                crc != esp_rom_crc16_le(0, (uint8_t*) payload,
-                                        sizeof(struct pid_config_telemetry_t))) {
+        case CRC_CHECK:
+            if (packet->crc16 !=
+                esp_rom_crc16_le(0, (uint8_t*) &packet->data, sizeof(union packet_data))) {
                 state = MAGIC_0_REC;
                 continue;
             }
+            
             return;
         }
     }
@@ -106,23 +103,44 @@ static void telemetry_task(void* pvParameters) {
     }
 }
 
-// Reads PID-config frames from the laptop over UART and forwards each to the drone over ESP-NOW.
+// Maps a GUI-originated config packet_id to the ESP-NOW peer it targets.
+static const uint8_t* config_packet_target(uint8_t packet_id) {
+    switch (packet_id) {
+    case PID_CONFIG:
+    case DRONE_CFG:
+    case DRONE_CFG_STORE:
+        return drone_mac;
+
+    case REMOTE_CFG:
+    case REMOTE_CFG_STORE:
+        return remote_mac;
+
+    default:
+        return NULL;
+    }
+}
+
+// Reads config-update frames from the laptop over UART.
 static void uart_task(void* pvParameters) {
 
-    struct wifi_packet_t packet = {.packet_id = PID_CONFIG};
-    struct pid_config_telemetry_t* pid_config = &packet.data.pid_config;
+    struct wifi_packet_t packet;
 
     while (1) {
-        // Read from UART (laptop): kp, ki, kd (float) then axis, mode (uint16_t)
-        uart_comm_read_frame(UART_NUM, pid_config, pdMS_TO_TICKS(100));
+        uart_comm_read_frame(UART_NUM, &packet, pdMS_TO_TICKS(100));
 
-        ESP_LOGI(TAG, "PID Packet received");
+        const uint8_t* target = config_packet_target(packet.packet_id);
+        if (target == NULL) {
+            ESP_LOGW(TAG, "Unrecognised config packet id %d", packet.packet_id);
+            continue;
+        }
 
-        // Forward to drone
+        ESP_LOGI(TAG, "Config packet %d received", packet.packet_id);
+
+        // Forward to the appropriate device
         if (xSemaphoreTake(wifiSendSemaphore, pdMS_TO_TICKS(100)) == pdTRUE) {
-            esp_err_t result = esp_now_send_packet(drone_mac, &packet);
+            esp_err_t result = esp_now_send_packet(target, &packet);
             if (result != ESP_OK) {
-                ESP_LOGW(TAG, "PID update send failed");
+                ESP_LOGW(TAG, "Config update send failed");
                 xSemaphoreGive(wifiSendSemaphore);
             }
         }
@@ -144,9 +162,9 @@ static esp_err_t hardware_init(void) {
     CHECK_ERR(uart_driver_install(UART_NUM, BUF_SIZE * 2, 0, 0, NULL, 0),
               "Uart driver install failed");
 
-    uint8_t* macs[] = {drone_mac};
-    // Initialize ESP-NOW (connect to drone)
-    CHECK_ERR_NO_LOG(esp_now_module_init(macs, 1));
+    const uint8_t* macs[] = {drone_mac, remote_mac};
+    // Initialize ESP-NOW (connect to drone and remote)
+    CHECK_ERR_NO_LOG(esp_now_module_init(macs, 2));
     // Success
     return ESP_OK;
 }
