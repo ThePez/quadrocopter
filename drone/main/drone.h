@@ -11,6 +11,7 @@
 
 #include "common_functions.h"
 #include "device_config.h"
+#include "espnow_comm.h"
 
 #include <stdint.h>
 
@@ -62,6 +63,24 @@ extern struct nvs_drone_cfg_t droneCfg;
  * @return ESP_OK on success, or an error code from the first failing step.
  */
 esp_err_t init_drone(void);
+
+/**
+ * @brief Applies a DRONE_CONFIG update (failsafe/throttle/battery constants) live.
+ *
+ * Writes straight into droneCfg under cfgMutex; does not touch flash. A
+ * later drone_config_handle_save() is what persists the change.
+ *
+ * @param packet New values to apply.
+ */
+esp_err_t drone_config_handle_update(struct drone_config_telemetry_t* packet);
+
+/**
+ * @brief Persists the currently-live droneCfg (gains included) to flash.
+ *
+ * Snapshots droneCfg under cfgMutex, then hands that snapshot to
+ * device_config_save() as the new flash contents.
+ */
+esp_err_t drone_config_handle_save(void);
 
 /**
  * @brief Brings up ESC programming mode instead of normal flight.

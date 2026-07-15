@@ -3,8 +3,6 @@
  * File: drone.c
  * Author: Jack Cairns
  * Date: 27-06-2025
- * Brief:
- * REFERENCE: None
  *****************************************************************************
  */
 
@@ -72,8 +70,7 @@ static adc_cali_handle_t adcCaliHandle;
 
 /* Setup Functions */
 
-// Sets up ADC calibration for the battery channel, preferring curve fitting
-// and falling back to line fitting if the target doesn't support it.
+// Sets up ADC calibration for the battery channel.
 static esp_err_t adc_calibration_init(void) {
     adc_cali_handle_t handle = NULL;
     esp_err_t ret = ESP_FAIL;
@@ -162,8 +159,7 @@ static void timer_task_callback_init(int periodUS, void (*cb)(void*)) {
 
 /* Functions run in the ESP-TIMER-TASK */
 
-// Periodic timer callback: reads and stores the battery voltage, and warns
-// the remote over ESP-NOW if it drops below droneCfg.low_voltage.
+// TimerTask Callback: Periodically reads and stores the battery voltage
 static void battery_callback(void* args) {
     ARG_UNUSED(args);
 
@@ -214,8 +210,7 @@ static void battery_callback(void* args) {
     }
 }
 
-// Periodic timer callback: assembles the current attitude/PID/motor/battery
-// state into a SENSOR packet and sends it to the bridge over ESP-NOW.
+// TimerTask Callback: Periodically sends bridge a snapshot of the drone's state
 static void system_data_callback(void* args) {
     ARG_UNUSED(args);
 
@@ -254,6 +249,8 @@ static void system_data_callback(void* args) {
         ESP_LOGW(TAG, "wifi semaphore unavailable");
     }
 }
+
+/* Initialisation and public functions */
 
 esp_err_t init_drone(void) {
 
@@ -307,6 +304,31 @@ esp_err_t init_drone(void) {
     CHECK_ERR(input_task_init(), "Input task init failed");
     CHECK_ERR(pid_task_init(), "PID task init failed");
 
+    return ESP_OK;
+}
+
+esp_err_t drone_config_handle_update(struct drone_config_telemetry_t* packet) {
+    xSemaphoreTake(cfgMutex, portMAX_DELAY);
+    droneCfg.max_rate = packet->max_rate;
+    droneCfg.max_angle = packet->max_angle;
+    droneCfg.fail_angle = packet->fail_angle;
+    droneCfg.min_throttle = packet->min_throttle;
+    droneCfg.max_throttle = packet->max_throttle;
+    droneCfg.coms_timeout_us = packet->coms_timeout_us;
+    droneCfg.low_voltage = packet->low_voltage;
+    droneCfg.critical_voltage = packet->critical_voltage;
+    xSemaphoreGive(cfgMutex);
+
+    ESP_LOGI(TAG, "Drone config updated live (not yet saved to flash)");
+    return ESP_OK;
+}
+
+esp_err_t drone_config_handle_save(void) {
+    xSemaphoreTake(cfgMutex, portMAX_DELAY);
+    struct nvs_drone_cfg_t snapshot = droneCfg;
+    xSemaphoreGive(cfgMutex);
+    CHECK_ERR(device_config_save("droneCfg", &snapshot, sizeof(struct nvs_drone_cfg_t)),
+              "Failed to update cfg to NVS");
     return ESP_OK;
 }
 

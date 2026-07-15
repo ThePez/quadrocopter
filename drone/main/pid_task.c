@@ -204,13 +204,21 @@ void pid_handle_config_update(struct pid_config_telemetry_t* packet) {
     ESP_LOGI(TAG, "PID Update - %s %s: Kp=%.4f Ki=%.4f Kd=%.4f", axis_names[packet->axis],
              mode_names[packet->mode], packet->kp, packet->ki, packet->kd);
 
-    // Update the appropriate PID controller
+    // Update the appropriate PID controller, and mirror the same gains into
+    // droneCfg so a later CONFIG_SAVE persists whatever's currently live
+    xSemaphoreTake(cfgMutex, portMAX_DELAY);
     if (!packet->mode) {
         // Rate mode
         struct pid_parameters_t* pid = (packet->axis == 1) ? &rateZPid : &ratePid;
         pid->kp = packet->kp;
         pid->ki = packet->ki;
         pid->kd = packet->kd;
+
+        struct nvs_pid_cfg_t* cfg = (packet->axis == 1) ? &droneCfg.rate_yaw : &droneCfg.rate_pitch_roll;
+        cfg->kp = packet->kp;
+        cfg->ki = packet->ki;
+        cfg->kd = packet->kd;
+        xSemaphoreGive(cfgMutex);
 
         // Reset integrator when changing gains
         if (!packet->axis) {
@@ -226,6 +234,15 @@ void pid_handle_config_update(struct pid_config_telemetry_t* packet) {
             anglePid.kp = packet->kp;
             anglePid.ki = packet->ki;
             anglePid.kd = packet->kd;
+
+            droneCfg.angle_pitch_roll.kp = packet->kp;
+            droneCfg.angle_pitch_roll.ki = packet->ki;
+            droneCfg.angle_pitch_roll.kd = packet->kd;
+        }
+        
+        xSemaphoreGive(cfgMutex);
+
+        if (!packet->axis) {
             // Reset integrators
             pid_reset(&pidAngle.pitch);
             pid_reset(&pidAngle.roll);

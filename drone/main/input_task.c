@@ -29,8 +29,7 @@
 
 static TaskHandle_t inputTaskHandle = NULL;
 
-// Maps a raw REMOTE packet's ADC values into remoteIn setpoints (with
-// deadzones on the sticks), applies the flight mode, and marks the drone armed.
+// Handles a remote data update
 static void handle_remote_update(struct remote_telemetry_t* remote) {
     xSemaphoreTake(droneData.mutex, portMAX_DELAY);
     droneData.lastRemoteTime = esp_timer_get_time();
@@ -60,13 +59,10 @@ static void handle_remote_update(struct remote_telemetry_t* remote) {
     remoteIn.yaw = (fabs(reading) < 5) ? 0 : reading;
     // Flight mode
     set_flight_mode((remote->flight_mode == ACRO) ? ACRO : STABILISE);
-
-    // ESP_LOGI(TAG, "SETPOINTS: pitch %lf, roll %lf, yaw %lf, throttle %lf", remoteIn.pitch,
-    //          remoteIn.roll, remoteIn.yaw, remoteIn.throttle);
 }
 
-// Main input task loop: blocks on wifiQueue and dispatches REMOTE and
-// PID_CONFIG packets to their respective handlers.
+// Main input task loop: blocks on wifiQueue and dispatches REMOTE, PID_CONFIG,
+// DRONE_CONFIG, and CONFIG_SAVE packets to their respective handlers.
 static void input_control(void* pvParams) {
     ARG_UNUSED(pvParams);
 
@@ -92,6 +88,15 @@ static void input_control(void* pvParams) {
         case PID_CONFIG:
             ESP_LOGI(TAG, "PID Coefficient update");
             pid_handle_config_update(&packet.data.pid_config);
+            break;
+
+        case DRONE_CFG:
+            ESP_LOGI(TAG, "Drone config update");
+            drone_config_handle_update(&packet.data.drone_config);
+            break;
+
+        case DRONE_CFG_STORE:
+            drone_config_handle_save();
             break;
 
         default:
