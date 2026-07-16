@@ -10,6 +10,7 @@
 #define REMOTE_H
 
 #include "device_config.h"
+#include "espnow_comm.h"
 
 #include <esp_err.h>
 
@@ -17,6 +18,24 @@
 #define SHUTOFF_BUTTON_PIN 32
 
 extern struct nvs_remote_cfg_t remoteCfg;
+
+/**
+ * @brief Applies a REMOTE_CFG update (joystick calibration/battery constants) live.
+ *
+ * Writes straight into remoteCfg under cfgMutex; does not touch flash. A
+ * later remote_config_handle_save() is what persists the change.
+ *
+ * @param packet New values to apply.
+ */
+esp_err_t remote_config_handle_update(struct remote_config_telemetry_t* packet);
+
+/**
+ * @brief Persists the currently-live remoteCfg to flash.
+ *
+ * Snapshots remoteCfg under cfgMutex, then hands that snapshot to
+ * device_config_save() as the new flash contents.
+ */
+esp_err_t remote_config_handle_save(void);
 
 /**
  * @brief Performs hardware init and starts the tasks that run the remote.
