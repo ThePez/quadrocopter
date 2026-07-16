@@ -250,22 +250,38 @@ static void system_data_callback(void* args) {
     }
 }
 
+// Logs the currently loaded droneCfg.
+static void print_config(void) {
+    xSemaphoreTake(cfgMutex, portMAX_DELAY);
+    struct nvs_drone_cfg_t cfg = droneCfg;
+    xSemaphoreGive(cfgMutex);
+
+    ESP_LOGI(TAG, "==== Drone Config (v%u) ====", cfg.version);
+    ESP_LOGI(TAG, "== PID Gains ==");
+    ESP_LOGI(TAG, "Rate PID (pitch/roll):  kp=%.4f ki=%.4f kd=%.4f dtermAlpha=%.4f",
+             cfg.rate_pitch_roll.kp, cfg.rate_pitch_roll.ki, cfg.rate_pitch_roll.kd,
+             cfg.rate_pitch_roll.dtermAlpha);
+    ESP_LOGI(TAG, "Rate PID (yaw):         kp=%.4f ki=%.4f kd=%.4f dtermAlpha=%.4f",
+             cfg.rate_yaw.kp, cfg.rate_yaw.ki, cfg.rate_yaw.kd, cfg.rate_yaw.dtermAlpha);
+    ESP_LOGI(TAG, "Angle PID (pitch/roll): kp=%.4f ki=%.4f kd=%.4f dtermAlpha=%.4f",
+             cfg.angle_pitch_roll.kp, cfg.angle_pitch_roll.ki, cfg.angle_pitch_roll.kd,
+             cfg.angle_pitch_roll.dtermAlpha);
+    ESP_LOGI(TAG, "== Remote mappings ==");
+    ESP_LOGI(TAG, "Max rate: %.2f deg/s   Max angle: %.2f deg   Fail angle: %.2f deg", cfg.max_rate,
+             cfg.max_angle, cfg.fail_angle);
+    ESP_LOGI(TAG, "Throttle range: %.2f - %.2f", cfg.min_throttle, cfg.max_throttle);
+    ESP_LOGI(TAG, "== Saftey ==");
+    ESP_LOGI(TAG, "Coms timeout: %lld ms", cfg.coms_timeout_us / 1000);
+    ESP_LOGI(TAG, "Battery: low=%u mV critical=%u mV", cfg.low_voltage, cfg.critical_voltage);
+}
+
 /* Initialisation and public functions */
 
 esp_err_t init_drone(void) {
 
-    // ADC for measuring the battery voltage
-    CHECK_ERR_NO_LOG(adc_init());
+    CHECK_ERR(nvs_init(), "NVS init failed");
 
-    // Start the C++ imu task
-    CHECK_ERR(imu_init(), "IMU init failed");
-    // Wait for the IMU initialisation to finish
-    vTaskDelay(pdMS_TO_TICKS(50));
-
-    // Setup ESP-NOW (pair the bridge and remote)
-    const uint8_t* macs[] = {remote_mac, bridge_mac};
-    CHECK_ERR_NO_LOG(esp_now_module_init(macs, 2));
-
+    // Load configuration data from flash memory
     esp_err_t err = device_config_load("droneCfg", &droneCfg, sizeof(struct nvs_drone_cfg_t),
                                        NVS_DRONE_CFG_VERSION, &droneDefaults);
     if (err == ESP_ERR_NVS_TYPE_MISMATCH) {
@@ -276,13 +292,29 @@ esp_err_t init_drone(void) {
         esp_restart(); // This function doesn't return
     }
 
-    // Setup PWM - motors off until the flight loop takes over
-    CHECK_ERR_NO_LOG(esc_pwm_init(MOTOR_SPEED_MIN));
+    // Display loaded config
+    print_config();
+
+    // ADC for measuring the battery voltage
+    CHECK_ERR_NO_LOG(adc_init());
+
+    // Start the imu setup task
+    CHECK_ERR(imu_init(), "IMU init failed");
+
+    // Wait for the IMU initialisation to finish
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    // Setup ESP-NOW (pair the bridge and remote)
+    const uint8_t* macs[] = {remote_mac, bridge_mac};
+    CHECK_ERR_NO_LOG(esp_now_module_init(macs, 2));
 
     // Wait to ensure the wifiQueue is created before timer callback tasks are registered
     while (!wifiQueue) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
+
+    // Setup PWM - motors off until the flight loop takes over
+    CHECK_ERR_NO_LOG(esc_pwm_init(MOTOR_SPEED_MIN));
 
     // Mutex protecting droneData - must exist before task startup
     droneData.mutex = xSemaphoreCreateMutex();
