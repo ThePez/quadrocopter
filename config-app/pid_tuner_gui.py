@@ -31,11 +31,7 @@ from constants import (
     PID_CONFIG_FORMAT,
     DRONE_CONFIG_FORMAT,
     REMOTE_CONFIG_FORMAT,
-    PID_CONFIG,
-    DRONE_CONFIG,
-    CONFIG_SAVE,
-    REMOTE_CONFIG,
-    REMOTE_CONFIG_SAVE,
+    PACKET_ID,
 )
 from pid_defaults import PID_DEFAULTS, PID_DEFAULT_KEYS, save_pid_defaults
 from drone_config_defaults import DRONE_DEFAULTS, REMOTE_DEFAULTS
@@ -75,8 +71,7 @@ class PIDTunerGUI(QMainWindow):
         self.record_checkbox: Optional[QCheckBox] = None
         self.log_text: Optional[QTextEdit] = None
         self.main_tabs: Optional[QTabWidget] = None
-        self.pitch_roll_tab: Optional[QWidget] = None
-        self.yaw_tab: Optional[QWidget] = None
+        self.pid_tab: Optional[QWidget] = None
         self.angles_plot: Optional[PlotWidget] = None
         self.rates_plot: Optional[PlotWidget] = None
         self.pid_plot: Optional[PlotWidget] = None
@@ -112,12 +107,8 @@ class PIDTunerGUI(QMainWindow):
         # Creat Telemetry tab
         telemetry_tab: QWidget = self.create_telemetry_tab()
 
-        # Create PID tuning tabs
-        pid_tabs: QTabWidget = QTabWidget()
-        self.pitch_roll_tab = self.create_axis_tab(0)
-        self.yaw_tab = self.create_axis_tab(1)
-        pid_tabs.addTab(self.pitch_roll_tab, "Pitch + Roll")
-        pid_tabs.addTab(self.yaw_tab, "Yaw")
+        # Create PID tuning tab
+        self.pid_tab = self.create_pid_tab()
 
         # Create drone/remote config tabs
         drone_config_tab: QWidget = self.create_drone_config_tab()
@@ -126,7 +117,7 @@ class PIDTunerGUI(QMainWindow):
         # Now add the Tabs in the correct order
         self.main_tabs = QTabWidget()
         self.main_tabs.addTab(telemetry_tab, "Telemetry")
-        self.main_tabs.addTab(pid_tabs, "PID Tuning")
+        self.main_tabs.addTab(self.pid_tab, "PID Tuning")
         self.main_tabs.addTab(drone_config_tab, "Drone Config")
         self.main_tabs.addTab(remote_config_tab, "Remote Config")
         self.main_tabs.addTab(console_tab, "Console")
@@ -255,21 +246,25 @@ class PIDTunerGUI(QMainWindow):
         group.setLayout(layout)
         return group
 
-    def create_axis_tab(self, axis: int) -> QWidget:
-        """Create a tab for configuring an axis"""
+    def create_pid_tab(self) -> QWidget:
+        """Create the single PID tuning tab: a Rate row with Pitch/Roll and
+        Yaw side by side, then an Angle row with Pitch/Roll only, since the
+        yaw axis has no angle loop (see the axis == 1 guard in send_pid)."""
         widget: QWidget = QWidget()
         layout: QVBoxLayout = QVBoxLayout(widget)
 
-        rate_group: QGroupBox = self.create_pid_group(axis, 0, "Rate Mode PID")
-        layout.addWidget(rate_group)
+        rate_row: QHBoxLayout = QHBoxLayout()
+        rate_row.addWidget(self.create_pid_group(0, 0, "Rate Mode PID - Pitch/Roll"))
+        rate_row.addWidget(self.create_pid_group(1, 0, "Rate Mode PID - Yaw"))
+        layout.addLayout(rate_row)
 
-        if axis != 1:
-            angle_group: QGroupBox = self.create_pid_group(axis, 1, "Angle Mode PID")
-            layout.addWidget(angle_group)
-        else:
-            note_label: QLabel = QLabel("Note: Yaw only supports Rate mode")
-            note_label.setStyleSheet("color: #666; font-style: italic;")
-            layout.addWidget(note_label)
+        angle_row: QHBoxLayout = QHBoxLayout()
+        angle_row.addWidget(self.create_pid_group(0, 1, "Angle Mode PID - Pitch/Roll"))
+        layout.addLayout(angle_row)
+
+        note_label: QLabel = QLabel("Note: Yaw only supports Rate mode")
+        note_label.setStyleSheet("color: #666; font-style: italic;")
+        layout.addWidget(note_label)
 
         layout.addStretch()
         return widget
@@ -607,7 +602,7 @@ class PIDTunerGUI(QMainWindow):
 
         try:
             payload: bytes = struct.pack(PID_CONFIG_FORMAT, kp, ki, kd, axis, mode)
-            packet: bytes = uart_comm.encode_config_packet(PID_CONFIG, payload)
+            packet: bytes = uart_comm.encode_config_packet(PACKET_ID.PID_CONFIG, payload)
 
             self.serial_port.write(packet)
             self.serial_port.flush()
@@ -677,7 +672,7 @@ class PIDTunerGUI(QMainWindow):
                 int(spins["low_voltage"].value()),
                 int(spins["critical_voltage"].value()),
             )
-            packet: bytes = uart_comm.encode_config_packet(DRONE_CONFIG, payload)
+            packet: bytes = uart_comm.encode_config_packet(PACKET_ID.DRONE_CFG, payload)
 
             self.serial_port.write(packet)
             self.serial_port.flush()
@@ -706,10 +701,10 @@ class PIDTunerGUI(QMainWindow):
             return
 
         try:
-            packet: bytes = uart_comm.encode_config_packet(CONFIG_SAVE)
+            packet: bytes = uart_comm.encode_config_packet(PACKET_ID.DRONE_CFG_STORE)
             self.serial_port.write(packet)
             self.serial_port.flush()
-            self.log_message("→ Sent CONFIG_SAVE (persist to flash)")
+            self.log_message("→ Sent DRONE_CFG_STORE (persist to flash)")
 
         except Exception as e:
             QMessageBox.critical(self, "Send Error", f"Failed to send: {e}")
@@ -744,7 +739,7 @@ class PIDTunerGUI(QMainWindow):
                 int(j["yaw"]["centre"].value()),
                 int(j["yaw"]["max"].value()),
             )
-            packet: bytes = uart_comm.encode_config_packet(REMOTE_CONFIG, payload)
+            packet: bytes = uart_comm.encode_config_packet(PACKET_ID.REMOTE_CFG, payload)
 
             self.serial_port.write(packet)
             self.serial_port.flush()
@@ -773,10 +768,10 @@ class PIDTunerGUI(QMainWindow):
             return
 
         try:
-            packet: bytes = uart_comm.encode_config_packet(REMOTE_CONFIG_SAVE)
+            packet: bytes = uart_comm.encode_config_packet(PACKET_ID.REMOTE_CFG_STORE)
             self.serial_port.write(packet)
             self.serial_port.flush()
-            self.log_message("→ Sent REMOTE_CONFIG_SAVE (persist to flash)")
+            self.log_message("→ Sent REMOTE_CFG_STORE (persist to flash)")
 
         except Exception as e:
             QMessageBox.critical(self, "Send Error", f"Failed to send: {e}")
