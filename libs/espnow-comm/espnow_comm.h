@@ -64,12 +64,12 @@ union packet_data {
 };
 
 struct wifi_packet_t {
-    union packet_data data;
-    uint16_t crc16;
     uint8_t packet_id;
+    uint16_t crc16;
+    union packet_data data;
 };
 
-enum wifi_packet_id {
+enum esp_now_packet_id {
     SENSOR,
     REMOTE,
     PID_CONFIG,
@@ -77,7 +77,7 @@ enum wifi_packet_id {
     DRONE_CFG,
     DRONE_CFG_STORE,
     REMOTE_CFG,
-    REMOTE_CFG_STORE
+    REMOTE_CFG_STORE,
 };
 
 /**
