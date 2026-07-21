@@ -1,62 +1,59 @@
 """
 Wire-format constants shared across the GUI's modules.
-Each one mirrors a struct in libs/espnow-comm/espnow_comm.h - keep both in
-sync if the firmware side changes.
+Formats/sizes are generated from libs/espnow-comm/espnow_comm.h via
+parser.py/layout.py, so they can't drift out of sync with the firmware side.
 """
 
-import struct
+from pathlib import Path
+from types import SimpleNamespace
 
-# Mirrors struct sensor_telemetry_t in libs/espnow-comm/espnow_comm.h:
-# 10 floats (angles/rates/mode/pid outputs) then 5 uint16_t (motor duty cycles, battery mV).
-# The struct isn't packed, so the compiler pads its sizeof() up to a multiple of 4.
-# The trailing '2x' skips those 2 pad bytes; bridge.c sends sizeof(struct
-# sensor_telemetry_t) bytes per packet, so this must track that exactly.
-SENSOR_TELEMETRY_FORMAT = "<10f5H2x"
-SENSOR_TELEMETRY_SIZE = struct.calcsize(SENSOR_TELEMETRY_FORMAT)
+from parser import parse_structs, parse_unions, parse_enum, parse_defines, read_file
+from layout import build_formats
 
-# Mirrors struct pid_config_telemetry_t in libs/espnow-comm/espnow_comm.h:
-# 3 floats (kp, ki, kd) then 2 uint16_t (axis, mode).
-PID_CONFIG_FORMAT = "<fffHH"
+_ESPNOW_HEADER = Path(__file__).resolve().parent.parent / "libs" / "espnow-comm" / "espnow_comm.h"
 
-# Mirrors enum wifi_packet_id in libs/espnow-comm/espnow_comm.h. CONFIG_SAVE
-# and REMOTE_CONFIG_SAVE carry no payload - the packet_id alone tells the
-# drone/remote to persist its currently-live config to flash.
-(
-    SENSOR,
-    REMOTE,
-    PID_CONFIG,
-    POWER,
-    DRONE_CONFIG,
-    CONFIG_SAVE,
-    REMOTE_CONFIG,
-    REMOTE_CONFIG_SAVE,
-) = range(8)
+_header_text = read_file(str(_ESPNOW_HEADER))
+_structs, _is_packed = parse_structs(str(_ESPNOW_HEADER))
+_unions = parse_unions(str(_ESPNOW_HEADER))
+_defines = parse_defines(_header_text)
 
-# Mirrors struct drone_config_telemetry_t: 5 floats (max_rate, max_angle,
-# fail_angle, min_throttle, max_throttle), 1 uint32_t (coms_timeout_us), then
-# 2 uint16_t (low_voltage, critical_voltage). Already 4-byte aligned - no pad.
-DRONE_CONFIG_FORMAT = "<5fI2H"
-DRONE_CONFIG_SIZE = struct.calcsize(DRONE_CONFIG_FORMAT)
+_struct_layouts, _union_layouts = build_formats(_structs, _is_packed, _unions, _defines)
 
-# Mirrors struct joystick_cal_telemetry_t: 3 uint16_t (min, centre, max).
-JOYSTICK_CAL_FORMAT = "<3H"
 
-# Mirrors struct remote_config_telemetry_t: 1 float (voltage_cal_multiplier),
-# 2 uint16_t (low_voltage, critical_voltage), then 4 joystick_cal_telemetry_t
-# (throttle, pitch, roll, yaw), each 3 uint16_t.
-REMOTE_CONFIG_FORMAT = "<f2H" + "3H" * 4
-REMOTE_CONFIG_SIZE = struct.calcsize(REMOTE_CONFIG_FORMAT)
+def _format(struct_name: str) -> str:
+    return "<" + _struct_layouts[struct_name][0]
 
-# Mirrors sizeof(union packet_data) on the firmware side - driven by
-# sensor_telemetry_t, still the largest member (see SENSOR_TELEMETRY_SIZE
-# above). Every GUI -> bridge config packet's payload is placed at the start
-# of this many bytes (zero-padded) before the wire-level crc16/packet_id,
-# mirroring struct wifi_packet_t's layout exactly. Update this if a union
-# member ever grows past sensor_telemetry_t's size.
-WIFI_PACKET_UNION_SIZE = SENSOR_TELEMETRY_SIZE
 
-# Mirrors sizeof(struct wifi_packet_t): the union above, then a uint16_t
-# crc16, a uint8_t packet_id, rounded up to the struct's 4-byte alignment
-# (from the union's floats) - whatever trailing pad that rounding implies.
-_WIFI_PACKET_RAW_SIZE = WIFI_PACKET_UNION_SIZE + 2 + 1  # data + crc16 + packet_id
-WIFI_PACKET_SIZE = (_WIFI_PACKET_RAW_SIZE + 3) & ~3
+def _size(struct_name: str) -> int:
+    return _struct_layouts[struct_name][1]
+
+
+# Mirrors struct sensor_telemetry_t in libs/espnow-comm/espnow_comm.h.
+SENSOR_TELEMETRY_FORMAT = _format("sensor_telemetry_t")
+SENSOR_TELEMETRY_SIZE = _size("sensor_telemetry_t")
+
+# Mirrors struct pid_config_telemetry_t in libs/espnow-comm/espnow_comm.h.
+PID_CONFIG_FORMAT = _format("pid_config_telemetry_t")
+
+# Mirrors enum esp_now_packet_id in libs/espnow-comm/espnow_comm.h - values
+# are parsed from the header itself so the two files can't drift out of sync.
+# Access as e.g. PACKET_ID.DRONE_CFG.
+PACKET_ID = SimpleNamespace(**parse_enum(_header_text, "esp_now_packet_id"))
+
+# Mirrors struct drone_config_telemetry_t in libs/espnow-comm/espnow_comm.h.
+DRONE_CONFIG_FORMAT = _format("drone_config_telemetry_t")
+DRONE_CONFIG_SIZE = _size("drone_config_telemetry_t")
+
+# Mirrors struct joystick_cal_telemetry_t in libs/espnow-comm/espnow_comm.h.
+JOYSTICK_CAL_FORMAT = _format("joystick_cal_telemetry_t")
+
+# Mirrors struct remote_config_telemetry_t in libs/espnow-comm/espnow_comm.h.
+REMOTE_CONFIG_FORMAT = _format("remote_config_telemetry_t")
+REMOTE_CONFIG_SIZE = _size("remote_config_telemetry_t")
+
+# Mirrors sizeof(union packet_data) on the firmware side.
+WIFI_PACKET_UNION_SIZE, _ = _union_layouts["packet_data"]
+
+# Mirrors sizeof(struct wifi_packet_t): packet_id, crc16, then the union
+# above, padded out to the struct's own alignment.
+WIFI_PACKET_SIZE = _size("wifi_packet_t")
