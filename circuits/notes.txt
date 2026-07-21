@@ -1,0 +1,23 @@
+Hall Effect TMR Joysticks
+=================================================================
+
+Orientation: facing the blue KS shielding, pins pointing down.
+
+Axis Pins (3-pin)
+------------------
+  Left   : GND
+  Mid    : OUT
+  Right  : VCC
+
+Button Pins (standard 4-pin tactile switch)
+---------------------------------------------
+  1 -------- 2
+  |          |
+  3 -------- 4
+
+  Pins 1-2 (top)   : always connected to each other
+  Pins 3-4 (bottom): always connected to each other
+  Pressing the button: bridges 1-3 and 2-4
+
+  Physically: pins 1-3 and 2-4 are the close-together pairs (legs on
+  each side of the switch); the bigger gap is between those two groups.
