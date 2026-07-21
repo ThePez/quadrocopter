@@ -9,7 +9,7 @@ Custom quadrocopter firmware written in C using the ESP-IDF framework. The syste
 ```
 ┌──────────────┐       ESP-NOW        ┌──────────────┐       ESP-NOW     ┌──────────────┐        UART       ┌──────────────┐
 │   Remote     │ ──────────────────►  │    Drone     │ ────────────────► │    Bridge    │ ────────────────► |      PC      |
-│   (ESP32)    │                      │   (ESP32)    │ ◄──────────────── │  (ESP32-S3)  │ ◄──────────────── | (PID-GUI.py) |
+│   (ESP32)    │                      │   (ESP32)    │ ◄──────────────── │  (ESP32-S3)  │ ◄──────────────── | (config-app) |
 └──────────────┘                      └──────────────┘                   └──────────────┘                   └──────────────┘
 ```
 
@@ -101,7 +101,7 @@ MAC addresses are configured in `libs/espnow-comm/espnow_comm.c`.
 
 ## Bridge ↔ PC Link (UART)
 
-The bridge and desktop app talk over a framed, CRC-checked link at 115200 baud: `[0xAA 0x55][payload][crc16]`. Framing (`uart_comm_write_frame()` / `uart_comm_read_frame()`) lives in `bridge/main/bridge.c`; the Python mirror is `bridge/uart_comm.py` — keep both in sync if the format changes. On a CRC failure the decoder discards just the 2 magic bytes and resyncs, rather than dropping a whole frame.
+The bridge and desktop app talk over a framed, CRC-checked link at 115200 baud: `[0xAA 0x55][payload][crc16]`. Framing (`uart_comm_write_frame()` / `uart_comm_read_frame()`) lives in `bridge/main/bridge.c`; the Python mirror is `config-app/uart_comm.py` — keep both in sync if the format changes. On a CRC failure the decoder discards just the 2 magic bytes and resyncs, rather than dropping a whole frame.
 
 - **Bridge → PC**: `sensor_telemetry_t` packets forwarded from the drone's ESP-NOW telemetry
 - **PC → Bridge → Drone**: `pid_config_telemetry_t` packets carrying live PID gain updates
@@ -116,15 +116,21 @@ quadrocopter/
 │   └── main/            # drone.c, pid_task.c, input_task.c
 ├── remote/             # Remote control firmware (ESP32)
 │   └── main/remote.c
-├── bridge/             # Bridge firmware (ESP32-S3) + desktop app
-│   ├── main/bridge.c
-│   ├── PID-GUI.py      # Desktop telemetry & tuning app
-│   └── uart_comm.py    # UART framing/CRC, mirrors bridge/main/bridge.c
+├── bridge/             # Bridge firmware (ESP32-S3)
+│   └── main/bridge.c
+├── config-app/          # Desktop telemetry & PID tuning app (PyQt5)
+│   ├── main.py             # Entry point
+│   ├── pid_tuner_gui.py    # Main window - telemetry, PID/drone/remote config tabs
+│   ├── uart_comm.py        # UART framing/CRC, mirrors bridge/main/bridge.c
+│   ├── parser.py           # Parses structs/unions/enums out of a C header
+│   ├── layout.py           # Simulates C struct layout to build struct-module formats
+│   └── constants.py        # Wire-format constants, generated from libs/espnow-comm/espnow_comm.h
 ├── libs/                # ESP-IDF components shared across targets
 │   ├── pid/              # PID controller
 │   ├── motors/           # MCPWM ESC driver
 │   ├── kalman/           # Single-axis Kalman filter for attitude (currently disabled)
 │   ├── espnow-comm/      # ESP-NOW peer management, queues & wire structs
+│   ├── device_config/     # NVS-persisted drone/remote config load & save
 │   └── common_functions/ # mapf(), constrainf(), SPI/I2C bus init
 ├── components/          # Sensor driver components
 │   ├── imu/               # BNO085 driver (quaternion → Euler)
@@ -175,9 +181,9 @@ just monitor-esc-program [port]
 
 ---
 
-## Desktop App (PID-GUI.py)
+## Desktop App (config-app)
 
-A PyQt5 application for real-time monitoring and PID tuning.
+A PyQt5 application for real-time monitoring, PID tuning, and drone/remote configuration.
 
 **Dependencies:**
 ```bash
@@ -186,14 +192,16 @@ pip install PyQt5 pyqtgraph PyOpenGL pyserial numpy
 
 **Run:**
 ```bash
-cd bridge && python3 PID-GUI.py
+cd config-app && python3 main.py
 ```
 
 **Features:**
 - Live plots of angles, rates, PID outputs, and motor speeds (500-point rolling window)
 - 3D attitude view — a rotating rigid-body model (front arms in red, rear in grey) driven live by pitch/roll/yaw telemetry, with a numeric angle readout
 - Battery voltage display
-- Live Kp/Ki/Kd adjustment for rate and angle loops on each axis — changes are sent to the drone immediately over the bridge
+- A single PID Tuning tab: Rate mode gains for Pitch/Roll and Yaw side by side, Angle mode gains for Pitch/Roll only (yaw has no angle loop) — changes are sent to the drone immediately over the bridge
+- Drone Config and Remote Config tabs for live failsafe/throttle/battery/joystick-calibration updates, with buttons to persist them to flash
+- Wire-format struct/union layouts (`constants.py`) are parsed straight out of `libs/espnow-comm/espnow_comm.h` (`parser.py`/`layout.py` simulate the C compiler's struct-packing rules) rather than hand-maintained, so they can't drift out of sync with the firmware
 
 ---
 
@@ -210,7 +218,7 @@ Press **both** the mode button and emergency button simultaneously on the remote
 
 ### PID Tuning
 1. Connect the bridge to your PC via USB
-2. Run `python3 PID-GUI.py` and select the correct serial port
+2. Run `python3 main.py` (from `config-app/`) and select the correct serial port
 3. Adjust gains while the drone is flying; changes take effect within one telemetry cycle
 
 ---

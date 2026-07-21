@@ -11,3 +11,4 @@ compile_commands.json
 gen_compile_commands.py
 **/__pycache__
 **/build-esc-program
+config-app/regex-help-file.txt
