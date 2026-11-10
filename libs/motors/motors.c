@@ -17,13 +17,14 @@
 
 static mcpwm_cmpr_handle_t esc_pwm_comparators[4] = {NULL, NULL, NULL, NULL};
 
-esp_err_t esc_pwm_init(uint16_t initial_duty_cycle) {
+esp_err_t esc_pwm_init(uint16_t initial_duty_cycle)
+{
     // Create and configure the timers
     mcpwm_timer_handle_t pwm_timers[2] = {NULL};
     for (uint8_t i = 0; i < 2; i++) {
         mcpwm_timer_config_t pwm_timer_config = {
             .resolution_hz = 1000000,                // 1MHz
-            .period_ticks = 20000,                   // 20ms
+            .period_ticks = ESC_PWM_PERIOD_US,       // 4000 us motors.h
             .group_id = i,                           // Group 0/1
             .count_mode = MCPWM_TIMER_COUNT_MODE_UP, // Count up from 0 then reset to 0
             .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT   // Default clock source
@@ -44,7 +45,8 @@ esp_err_t esc_pwm_init(uint16_t initial_duty_cycle) {
     }
 
     // Create and configure the Comparators and Generators
-    mcpwm_comparator_config_t cmpr_config = {0};
+    // Latch new compare values at the start of a period.
+    mcpwm_comparator_config_t cmpr_config = {.flags.update_cmp_on_tez = true};
     mcpwm_gen_handle_t generators[4] = {};
     mcpwm_generator_config_t generator_configs[4] = {};
     generator_configs[0].gen_gpio_num = MOTOR_A_CW;
@@ -94,7 +96,8 @@ esp_err_t esc_pwm_init(uint16_t initial_duty_cycle) {
     return ESP_OK;
 }
 
-esp_err_t esc_pwm_set_duty_cycle(MotorIndex motor, uint16_t duty_cycle) {
+esp_err_t esc_pwm_set_duty_cycle(MotorIndex motor, uint16_t duty_cycle)
+{
 
     // Ensure that the motor index given is valid
     if (motor >= NUMBER_OF_MOTORS) {
@@ -103,7 +106,7 @@ esp_err_t esc_pwm_set_duty_cycle(MotorIndex motor, uint16_t duty_cycle) {
     }
 
     // Limit the requested motor speed between the min/max
-    duty_cycle = (uint16_t) constrainf(duty_cycle, MOTOR_SPEED_MIN, MOTOR_SPEED_MAX);
+    duty_cycle = (uint16_t)constrainf(duty_cycle, MOTOR_SPEED_MIN, MOTOR_SPEED_MAX);
 
     // Update the comparator used by the specified motor
     CHECK_ERR(mcpwm_comparator_set_compare_value(esc_pwm_comparators[motor], duty_cycle),

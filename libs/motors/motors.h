@@ -16,24 +16,34 @@
 #include <esp_err.h>
 
 // Motor/ESC's GPIO Pins
-#define MOTOR_A_CW 17  // Front left
+#define MOTOR_A_CW  17 // Front left
 #define MOTOR_B_CCW 16 // Rear left
-#define MOTOR_C_CW 27  // Rear right
+#define MOTOR_C_CW  27 // Rear right
 #define MOTOR_D_CCW 26 // Front right
 
 // Throttle speeds / Duty cycle's in us
-#define MOTOR_SPEED_MIN 1000
-#define MOTOR_SPEED_MAX 2000
-#define MAX_MOTOR_ADJUSTMENT 150
-#define NUMBER_OF_MOTORS 4
+#define MOTOR_SPEED_MIN   1000
+#define MOTOR_SPEED_MAX   2000
+// ESC update period in us: 4000 = 250 Hz. Must stay above MOTOR_SPEED_MAX with
+// some low time left over. Use 20000 (50 Hz) for ESCs that reject faster PWM.
+#define ESC_PWM_PERIOD_US 4000
 
-typedef enum { MOTOR_A, MOTOR_B, MOTOR_C, MOTOR_D } MotorIndex;
+// Most any one axis (pitch/roll/yaw) may add to or take from a motor, in us
+#define MAX_MOTOR_ADJUSTMENT 150.0f
+#define NUMBER_OF_MOTORS     4
+
+typedef enum {
+    MOTOR_A,
+    MOTOR_B,
+    MOTOR_C,
+    MOTOR_D
+} MotorIndex;
 
 /**
  * @brief Initializes the MCPWM hardware to drive four ESCs with PWM signals.
  *
  * This function configures:
- * - Two MCPWM timers (one per operator group), each running at 50 Hz (20 ms period).
+ * - Two MCPWM timers (one per operator group), each with a period of ESC_PWM_PERIOD_US.
  * - Four MCPWM operators (two per group), each attached to a timer.
  * - Four comparators (one per ESC) to control when the PWM signal goes LOW.
  * - Four generators mapped to GPIOs to output the PWM waveform to each ESC.

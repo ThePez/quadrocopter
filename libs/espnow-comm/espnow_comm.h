@@ -20,6 +20,7 @@ struct sensor_telemetry_t {
     float pid_pitch, pid_roll, pid_yaw;
     uint16_t motor_a, motor_b, motor_c, motor_d;
     uint16_t battery;
+    uint16_t loop_dt_max_us;
 };
 
 struct remote_telemetry_t {
@@ -29,6 +30,7 @@ struct remote_telemetry_t {
 
 struct pid_config_telemetry_t {
     float kp, ki, kd;
+    float d_alpha; // D-term low-pass coefficient, 0-1 (1 = unfiltered)
     uint16_t axis; // 0 = Pitch & Roll, 1 = Yaw
     uint16_t mode; // 0 = Rate, 1 = Angle
 };
