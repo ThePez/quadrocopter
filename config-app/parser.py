@@ -3,32 +3,26 @@ from pathlib import Path
 
 
 def read_file(path: str) -> str:
-    """Reads a C header and strips // and /* ... */ comments from it.
+    """
+    Reads a C header and strips // and /* ... */ comments from it.
 
     Comments are stripped up front so none of the regexes below (here or
     in layout.py) need to worry about a struct/union/enum body containing
     something that only looks like C syntax inside a comment.
     """
-    path = Path(path).resolve()
-    text = path.read_text()
-    text = re.sub(r"//.*", "", text)  # remove // style C comments
-    text = re.sub(
-        r"/\*.*?\*/", "", text, flags=re.DOTALL
-    )  # remove /* ... */ style C comments
+    path: Path = Path(path).resolve()
+    text: str = path.read_text()
+    # remove // ...
+    text = re.sub(r"//.*", "", text)
+    # remove /* ... */
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
     return text
 
 
 def _parse_body(body: str, list_: list) -> None:
-    """Parses a flattened struct/union body into (type, var) pairs, appended
+    """
+    Parses a flattened struct/union body into (type, var) pairs, appended
     in declaration order to `list_`.
-
-    `body` must already be whitespace-collapsed to one line per statement
-    with statements still separated by ";" (see parse_structs/parse_unions).
-    Each statement's leading type token(s) are split off, then its
-    comma-separated variable names are each paired with that same type -
-    so `int a, b, c;` becomes three separate ("int", "a") / ("int", "b") /
-    ("int", "c") entries. `var` may still carry a trailing "[N]" array
-    suffix; that's resolved later by layout.py, not here.
     """
     for line in body.split(";"):
         line = line.strip()
@@ -46,9 +40,10 @@ def _parse_body(body: str, list_: list) -> None:
 
 
 def parse_unions(file_path: str) -> dict:
-    """Finds every `union <name> { ... };` block in a C header and parses
+    """
+    Finds every `union <name> { ... };` block in a C header and parses
     each one's body into a {union_name: [(type, var), ...]} dict, in
-    declaration order - mirroring parse_structs() but for unions.
+    declaration order.
     """
     unions = {}
     text = read_file(file_path)
@@ -74,8 +69,7 @@ def parse_unions(file_path: str) -> dict:
 def parse_structs(file_path: str) -> tuple[dict, dict]:
     """Finds every `struct <name> { ... };` block in a C header (optionally
     `struct __packed <name> { ... };`) and parses each one's body into a
-    {struct_name: [(type, var), ...]} dict, in declaration order - the
-    order layout.py relies on to resolve nested struct/union fields.
+    {struct_name: [(type, var), ...]} dict, in declaration order.
 
     Returns (structs, is_packed), where is_packed maps struct_name -> bool
     for whether it was declared with the __packed attribute (no
@@ -107,23 +101,42 @@ def parse_structs(file_path: str) -> tuple[dict, dict]:
     return structs, is_packed
 
 
-def parse_defines(header_text: str) -> dict[str, int]:
-    """Pulls simple integer #define constants out of a C header, e.g.
-    `#define OTA_DATA_CHUNK 128` -> {"OTA_DATA_CHUNK": 128}.
-
-    A macro whose value is just another already-defined macro's name is
-    resolved to that macro's value, e.g. `#define Y 4` then `#define X Y`
-    -> {"Y": 4, "X": 4}. This only works forwards through the file, same as
-    the C preprocessor - referencing a macro defined later, or an
-    expression (`#define X (Y + 1)`), is not evaluated.
+def parse_defines(header_text: str) -> dict[str, int | float]:
+    """
+    Pulls #define NAME VALUE constants out of a C header, typing each
+    value as int or float based on how it's written. A macro whose value
+    is just another already-defined macro's name is resolved to that
+    macro's value (including a leading `-`).
     """
     out: dict = {}
-    for m in re.finditer(r"#define\s+(\w+)\s+(\w+|0[xX][0-9a-fA-F]+|\d+|0[0-9]+)", header_text):
-        name, value = m.group(1), m.group(2)
-        if value in out:
-            out[name] = out[value]
+    pattern = re.compile(
+        r"#define\s+(?P<name>\w+)\s+"  # name
+        r"(?:"  # group of groups
+        r"(?P<hex>-?0[xX][0-9a-fA-F]+)|"  # hex
+        r"(?P<octal>-?0[0-7]+)|"  # octal
+        r"(?P<float>-?\d*\.\d+)|"  # float
+        r"(?P<int>-?\d+)|"  # int
+        r"(?:(?P<neg>-?)(?P<ref>\w+))"  # references
+        r")"  # end of groups
+    )
+
+    for m in re.finditer(pattern, header_text):
+        name = m.group("name")
+        if m.group("hex"):
+            value = int(m.group("hex"), 16)
+        elif m.group("octal"):
+            value = int(m.group("octal"), 8)
+        elif m.group("float"):
+            value = float(m.group("float"))
+        elif m.group("int"):
+            value = int(m.group("int"))
+        elif out.get(m.group("ref"), None):
+            value = out[m.group("ref")]
+            value = -value if m.group("neg") else value
         else:
-            out[name] = int(value, 0)
+            continue
+
+        out[name] = value
 
     return out
 
@@ -146,10 +159,13 @@ def parse_enum(header_text: str, enum_name: str) -> dict[str, int]:
         entry = entry.strip()
         if not entry:
             continue
+
         name, _, raw_value = entry.partition("=")
         name = name.strip()
         if raw_value.strip():
             next_value = int(raw_value.strip(), 0)
+
         values[name] = next_value
         next_value += 1
+
     return values

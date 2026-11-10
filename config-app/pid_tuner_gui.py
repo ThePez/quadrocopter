@@ -1,5 +1,8 @@
-"""Main window: serial connection, PID tuning tabs, and telemetry display."""
+"""
+Main window: serial connection, PID tuning tabs, and telemetry display.
+"""
 
+import math
 import struct
 import serial
 import serial.tools.list_ports
@@ -21,6 +24,7 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QMessageBox,
     QCheckBox,
+    QFileDialog,
 )
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont, QCloseEvent
@@ -34,9 +38,33 @@ from constants import (
     PACKET_ID,
 )
 from pid_defaults import PID_DEFAULTS, PID_DEFAULT_KEYS, save_pid_defaults
-from drone_config_defaults import DRONE_DEFAULTS, REMOTE_DEFAULTS
+from drone_config_defaults import (
+    DRONE_DEFAULTS,
+    REMOTE_DEFAULTS,
+    save_drone_defaults,
+    save_remote_defaults,
+)
 from plot_widget import PlotWidget
 from attitude_widget import Attitude3DWidget
+from session_recorder import SESSIONS_DIR, SessionRecorder
+from session_viewer import SessionViewer
+
+# Control loop rate the D-filter cutoff hint is worked out for (Hz)
+LOOP_RATE_HZ = 400.0
+
+
+def d_alpha_to_hz(alpha: float) -> Optional[float]:
+    """Cutoff frequency of the drone's first-order D-term filter for a given
+    coefficient, or None when the filter is off (alpha = 1)."""
+    if alpha >= 1.0:
+        return None
+    return alpha / (1.0 - alpha) * LOOP_RATE_HZ / (2.0 * math.pi)
+
+
+def d_filter_text(alpha: float) -> str:
+    cutoff = d_alpha_to_hz(alpha)
+    return "unfiltered" if cutoff is None else f"≈ {cutoff:.0f} Hz cutoff"
+
 
 
 class PIDTunerGUI(QMainWindow):
@@ -52,11 +80,20 @@ class PIDTunerGUI(QMainWindow):
             1: {0: None, 1: None},
         }
 
+        # Snapshots of the values last sent live to the drone/remote
+        self.drone_config_sent: Optional[Dict[str, float]] = None
+        self.remote_config_sent: Optional[Dict[str, float]] = None
+
         self.axis_names: list[str] = ["Pitch / Roll", "Yaw"]
         self.mode_names: list[str] = ["Rate", "Angle"]
 
         # Telemetry storage
         self.telemetry_enabled: bool = True
+
+        # Session recording to disk, and any open session viewer windows
+        self.recorder: SessionRecorder = SessionRecorder()
+        self.session_viewers: List[SessionViewer] = []
+        self.session_btn: Optional[QPushButton] = None
 
         # Telemetry timeout tracking
         self.last_telemetry_time: Optional[datetime] | None = None
@@ -146,8 +183,18 @@ class PIDTunerGUI(QMainWindow):
 
         status_layout.addStretch()
 
-        # Recording control
-        self.record_checkbox = QCheckBox("Record Data")
+        # Session recording (saves every packet to a file for later review)
+        self.session_btn = QPushButton("Start Recording")
+        self.session_btn.setCheckable(True)
+        self.session_btn.clicked.connect(self.toggle_session_recording)
+        status_layout.addWidget(self.session_btn)
+
+        open_session_btn: QPushButton = QPushButton("Open Session...")
+        open_session_btn.clicked.connect(self.open_session)
+        status_layout.addWidget(open_session_btn)
+
+        # Live plot control (does not affect session recording)
+        self.record_checkbox = QCheckBox("Live Plots")
         self.record_checkbox.setChecked(True)
         status_layout.addWidget(self.record_checkbox)
 
@@ -192,6 +239,7 @@ class PIDTunerGUI(QMainWindow):
             ("Roll Rate:", "roll_rate", "°/s"),
             ("Yaw Rate:", "yaw_rate", "°/s"),
             ("Battery:", "battery", "V"),
+            ("Loop dt max:", "loop_dt_max_us", " µs"),
         ]
 
         for i, (label_text, key, unit) in enumerate(legend):
@@ -278,6 +326,7 @@ class PIDTunerGUI(QMainWindow):
         default_kp = PID_DEFAULTS.get(f"{prefix}_KP", 0.0) if prefix else 0.0
         default_ki = PID_DEFAULTS.get(f"{prefix}_KI", 0.0) if prefix else 0.0
         default_kd = PID_DEFAULTS.get(f"{prefix}_KD", 0.0) if prefix else 0.0
+        default_alpha = PID_DEFAULTS.get(f"{prefix}_KD_ALPHA", 1.0) if prefix else 1.0
 
         current_label: QLabel = QLabel("Current:")
         layout.addWidget(current_label, 0, 0)
@@ -311,24 +360,54 @@ class PIDTunerGUI(QMainWindow):
         kd_spin.setValue(default_kd)
         layout.addWidget(kd_spin, 2, 1)
 
+        layout.addWidget(QLabel("D filter α:"), 3, 0)
+        alpha_spin: QDoubleSpinBox = QDoubleSpinBox()
+        alpha_spin.setRange(0.01, 1.0)
+        alpha_spin.setDecimals(2)
+        alpha_spin.setSingleStep(0.05)
+        alpha_spin.setValue(default_alpha)
+        alpha_spin.setToolTip(
+            "Low-pass filter on the D term. 1 = unfiltered; lower values smooth\n"
+            "more (less noise) but add delay."
+        )
+        layout.addWidget(alpha_spin, 3, 1)
+
+        alpha_hint: QLabel = QLabel(d_filter_text(default_alpha))
+        alpha_hint.setStyleSheet("color: #666; font-style: italic;")
+        alpha_spin.valueChanged.connect(
+            lambda value: alpha_hint.setText(d_filter_text(value))
+        )
+        layout.addWidget(alpha_hint, 4, 0, 1, 2)
+
         send_btn: QPushButton = QPushButton(f"Send to Drone")
         send_btn.setStyleSheet(
             "background-color: #2196F3; color: white; font-weight: bold;"
         )
         send_btn.clicked.connect(
             lambda: self.send_pid(
-                axis, mode, kp_spin.value(), ki_spin.value(), kd_spin.value()
+                axis,
+                mode,
+                kp_spin.value(),
+                ki_spin.value(),
+                kd_spin.value(),
+                alpha_spin.value(),
             )
         )
         layout.addWidget(send_btn, 2, 2, 1, 2)
 
-        save_btn: QPushButton = QPushButton("Save as Default")
+        save_btn: QPushButton = QPushButton("Save to Flash && Default")
         save_btn.setStyleSheet(
             "background-color: #FF9800; color: white; font-weight: bold;"
         )
         save_btn.clicked.connect(
             lambda: self.save_pid_as_default(
-                axis, mode, title, kp_spin.value(), ki_spin.value(), kd_spin.value()
+                axis,
+                mode,
+                title,
+                kp_spin.value(),
+                ki_spin.value(),
+                kd_spin.value(),
+                alpha_spin.value(),
             )
         )
         layout.addWidget(save_btn, 3, 2, 1, 2)
@@ -336,6 +415,7 @@ class PIDTunerGUI(QMainWindow):
         setattr(self, f"kp_spin_{axis}_{mode}", kp_spin)
         setattr(self, f"ki_spin_{axis}_{mode}", ki_spin)
         setattr(self, f"kd_spin_{axis}_{mode}", kd_spin)
+        setattr(self, f"alpha_spin_{axis}_{mode}", alpha_spin)
 
         group.setLayout(layout)
         return group
@@ -382,7 +462,7 @@ class PIDTunerGUI(QMainWindow):
         send_btn.clicked.connect(self.send_drone_config)
         layout.addWidget(send_btn, len(fields), 0)
 
-        save_btn: QPushButton = QPushButton("Save to Flash")
+        save_btn: QPushButton = QPushButton("Save to Flash && Default")
         save_btn.setStyleSheet(
             "background-color: #FF9800; color: white; font-weight: bold;"
         )
@@ -422,16 +502,27 @@ class PIDTunerGUI(QMainWindow):
             spin.setValue(default_value)
             battery_layout.addWidget(spin, i, 1)
             self.remote_voltage_spins[key] = spin
+
         battery_group.setLayout(battery_layout)
         layout.addWidget(battery_group)
 
-        channel_defaults: tuple[float, float, float] = (
+        # Per-channel calibration falls back to the shared JOYSTICK_CAL_*
+        # default from remote_defaults.h until Save to Flash has saved a
+        # per-channel override for that specific channel.
+        shared_cal_defaults: tuple[float, float, float] = (
             defaults.get("JOYSTICK_CAL_MIN", 0.0),
             defaults.get("JOYSTICK_CAL_CENTRE", 2048.0),
             defaults.get("JOYSTICK_CAL_MAX", 4095.0),
         )
         self.joystick_spins: Dict[str, Dict[str, QDoubleSpinBox]] = {}
         for channel in ["throttle", "pitch", "roll", "yaw"]:
+            channel_defaults: tuple[float, float, float] = (
+                defaults.get(f"JOYSTICK_{channel.upper()}_MIN", shared_cal_defaults[0]),
+                defaults.get(
+                    f"JOYSTICK_{channel.upper()}_CENTRE", shared_cal_defaults[1]
+                ),
+                defaults.get(f"JOYSTICK_{channel.upper()}_MAX", shared_cal_defaults[2]),
+            )
             group: QGroupBox = QGroupBox(f"{channel.capitalize()} Calibration")
             grid: QGridLayout = QGridLayout()
             self.joystick_spins[channel] = {}
@@ -460,12 +551,13 @@ class PIDTunerGUI(QMainWindow):
         send_btn.clicked.connect(self.send_remote_config)
         btn_layout.addWidget(send_btn)
 
-        save_btn: QPushButton = QPushButton("Save to Flash")
+        save_btn: QPushButton = QPushButton("Save to Flash && Default")
         save_btn.setStyleSheet(
             "background-color: #FF9800; color: white; font-weight: bold;"
         )
         save_btn.clicked.connect(self.save_remote_config)
         btn_layout.addWidget(save_btn)
+
         layout.addLayout(btn_layout)
 
         layout.addStretch()
@@ -549,8 +641,60 @@ class PIDTunerGUI(QMainWindow):
             QMessageBox.critical(self, "Connection Error", f"Failed to connect: {e}")
             self.log_message(f"Connection failed: {e}")
 
+    def toggle_session_recording(self) -> None:
+        """Start or stop saving telemetry to a session file"""
+        if self.recorder.recording:
+            self.stop_session_recording()
+            return
+
+        try:
+            path: str = self.recorder.start()
+        except OSError as e:
+            self.session_btn.setChecked(False)
+            QMessageBox.critical(self, "Recording Error", f"Could not start: {e}")
+            return
+
+        self.session_btn.setChecked(True)
+        self.session_btn.setText("Stop Recording")
+        self.session_btn.setStyleSheet(
+            "background-color: #f44336; color: white; font-weight: bold;"
+        )
+        self.log_message(f"Recording session to {path}")
+
+    def stop_session_recording(self) -> None:
+        """Close the current session file, if one is being recorded"""
+        rows: int = self.recorder.rows
+        path: Optional[str] = self.recorder.stop()
+
+        self.session_btn.setChecked(False)
+        self.session_btn.setText("Start Recording")
+        self.session_btn.setStyleSheet("")
+
+        if path:
+            self.log_message(f"Session saved ({rows} samples): {path}")
+
+    def open_session(self) -> None:
+        """Pick a recorded session file and show it in its own window"""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open Session", SESSIONS_DIR, "Session files (*.csv)"
+        )
+        if not path:
+            return
+
+        try:
+            viewer: SessionViewer = SessionViewer(path, self)
+        except (OSError, ValueError) as e:
+            QMessageBox.critical(self, "Open Session", f"Could not open: {e}")
+            return
+
+        # Keep a reference so the window isn't garbage collected
+        self.session_viewers.append(viewer)
+        viewer.show()
+
     def disconnect(self) -> None:
         """Disconnect from serial port"""
+        self.stop_session_recording()
+
         if self.telemetry_thread:
             self.telemetry_thread.stop()
             self.telemetry_thread.wait()
@@ -588,102 +732,77 @@ class PIDTunerGUI(QMainWindow):
             self.telemetry_status.setText("Telemetry timeout")
             self.telemetry_status.setStyleSheet("font-weight: bold; color: #f44336;")
 
-    def send_pid(self, axis: int, mode: int, kp: float, ki: float, kd: float) -> None:
-        """Send PID configuration to drone"""
+    def send_pid(
+        self, axis: int, mode: int, kp: float, ki: float, kd: float, d_alpha: float
+    ) -> bool:
+        """Send PID configuration to drone. Returns whether the send succeeded."""
         if not self.serial_port or not self.serial_port.is_open:
             QMessageBox.warning(
                 self, "Not Connected", "Please connect to serial port first."
             )
-            return
+            return False
 
         if axis == 1 and mode != 0:
             QMessageBox.warning(self, "Invalid Mode", "Yaw only supports Rate mode.")
-            return
+            return False
 
         try:
-            payload: bytes = struct.pack(PID_CONFIG_FORMAT, kp, ki, kd, axis, mode)
-            packet: bytes = uart_comm.encode_config_packet(PACKET_ID.PID_CONFIG, payload)
+            payload: bytes = struct.pack(
+                PID_CONFIG_FORMAT, kp, ki, kd, d_alpha, axis, mode
+            )
+            packet: bytes = uart_comm.encode_config_packet(
+                PACKET_ID.PID_CONFIG, payload
+            )
 
             self.serial_port.write(packet)
             self.serial_port.flush()
 
-            self.pid_config[axis][mode] = {"kp": kp, "ki": ki, "kd": kd}
+            self.pid_config[axis][mode] = {
+                "kp": kp,
+                "ki": ki,
+                "kd": kd,
+                "d_alpha": d_alpha,
+            }
 
             current_label: QLabel = getattr(self, f"current_label_{axis}_{mode}")
-            current_label.setText(f"Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}")
+            current_label.setText(
+                f"Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}, α={d_alpha:.2f}"
+            )
             current_label.setStyleSheet("color: #2196F3; font-weight: bold;")
 
             axis_name: str = self.axis_names[axis]
             mode_name: str = self.mode_names[mode]
             self.log_message(
-                f"→ Sent {axis_name} {mode_name}: Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}"
+                f"→ Sent {axis_name} {mode_name}: Kp={kp:.4f}, Ki={ki:.4f}, "
+                f"Kd={kd:.4f}, D filter α={d_alpha:.2f} ({d_filter_text(d_alpha)})"
             )
+            self.recorder.add_event(
+                f"{axis_name} {mode_name}: Kp={kp:.4f} Ki={ki:.4f} Kd={kd:.4f} "
+                f"a={d_alpha:.2f}"
+            )
+            return True
 
         except Exception as e:
             QMessageBox.critical(self, "Send Error", f"Failed to send: {e}")
             self.log_message(f"Send failed: {e}")
+            return False
 
     def save_pid_as_default(
-        self, axis: int, mode: int, title: str, kp: float, ki: float, kd: float
+        self,
+        axis: int,
+        mode: int,
+        title: str,
+        kp: float,
+        ki: float,
+        kd: float,
+        d_alpha: float,
     ) -> None:
-        """Write the current spin-box values into pid_defaults.h as the new
-        boot-time defaults for this loop."""
+        """
+        Tell the drone to persist its currently-live config to flash -
+        PID gains live inside the drone's own config.
+        """
         axis_name: str = self.axis_names[axis]
 
-        reply = QMessageBox.question(
-            self,
-            "Save as Default",
-            f"Overwrite the {axis_name} {title} defaults in pid_defaults.h with\n"
-            f"Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if reply != QMessageBox.Yes:
-            return
-
-        if save_pid_defaults(axis, mode, kp, ki, kd):
-            self.log_message(
-                f"Saved {axis_name} {title} as default: Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}"
-            )
-        else:
-            QMessageBox.critical(
-                self, "Save Error", "Failed to write pid_defaults.h - see console."
-            )
-            self.log_message(f"Failed to save {axis_name} {title} defaults")
-
-    def send_drone_config(self) -> None:
-        """Apply the drone config tab's values live (RAM only, not yet saved)."""
-        if not self.serial_port or not self.serial_port.is_open:
-            QMessageBox.warning(
-                self, "Not Connected", "Please connect to serial port first."
-            )
-            return
-
-        try:
-            spins = self.drone_config_spins
-            payload: bytes = struct.pack(
-                DRONE_CONFIG_FORMAT,
-                spins["max_rate"].value(),
-                spins["max_angle"].value(),
-                spins["fail_angle"].value(),
-                spins["min_throttle"].value(),
-                spins["max_throttle"].value(),
-                int(spins["coms_timeout_s"].value() * 1e6),
-                int(spins["low_voltage"].value()),
-                int(spins["critical_voltage"].value()),
-            )
-            packet: bytes = uart_comm.encode_config_packet(PACKET_ID.DRONE_CFG, payload)
-
-            self.serial_port.write(packet)
-            self.serial_port.flush()
-            self.log_message("→ Sent drone config update (live, not yet saved)")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Send Error", f"Failed to send: {e}")
-            self.log_message(f"Send failed: {e}")
-
-    def save_drone_config(self) -> None:
-        """Tell the drone to persist its currently-live config (gains included) to flash."""
         if not self.serial_port or not self.serial_port.is_open:
             QMessageBox.warning(
                 self, "Not Connected", "Please connect to serial port first."
@@ -692,13 +811,20 @@ class PIDTunerGUI(QMainWindow):
 
         reply = QMessageBox.question(
             self,
-            "Save to Flash",
-            "Persist the drone's currently-live config (including PID gains) to flash?",
+            "Save to Flash & Default",
+            f"Persist the drone's currently-live config to flash, and save the\n"
+            f"{axis_name} {title} gains as your local working default:\n"
+            f"Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}, D filter α={d_alpha:.2f}?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
         if reply != QMessageBox.Yes:
             return
+
+        live = {"kp": kp, "ki": ki, "kd": kd, "d_alpha": d_alpha}
+        if self.pid_config[axis][mode] != live:
+            if not self.send_pid(axis, mode, kp, ki, kd, d_alpha):
+                return
 
         try:
             packet: bytes = uart_comm.encode_config_packet(PACKET_ID.DRONE_CFG_STORE)
@@ -709,48 +835,61 @@ class PIDTunerGUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Send Error", f"Failed to send: {e}")
             self.log_message(f"Send failed: {e}")
+            return
 
-    def send_remote_config(self) -> None:
-        """Apply the remote config tab's values live (RAM only, not yet saved)."""
+        if save_pid_defaults(axis, mode, kp, ki, kd, d_alpha):
+            self.log_message(
+                f"Saved {axis_name} {title} as default: Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}"
+            )
+        else:
+            self.log_message(f"Failed to save {axis_name} {title} defaults")
+
+    def _drone_config_values(self) -> Dict[str, float]:
+        """Current drone config tab spin-box values, keyed the same way as
+        self.drone_config_spins."""
+        return {key: spin.value() for key, spin in self.drone_config_spins.items()}
+
+    def send_drone_config(self) -> bool:
+        """Apply the drone config tab's values live (RAM only, not yet
+        saved). Returns whether the send succeeded."""
         if not self.serial_port or not self.serial_port.is_open:
             QMessageBox.warning(
                 self, "Not Connected", "Please connect to serial port first."
             )
-            return
+            return False
 
+        values = self._drone_config_values()
         try:
-            v = self.remote_voltage_spins
-            j = self.joystick_spins
             payload: bytes = struct.pack(
-                REMOTE_CONFIG_FORMAT,
-                v["voltage_cal_multiplier"].value(),
-                int(v["low_voltage"].value()),
-                int(v["critical_voltage"].value()),
-                int(j["throttle"]["min"].value()),
-                int(j["throttle"]["centre"].value()),
-                int(j["throttle"]["max"].value()),
-                int(j["pitch"]["min"].value()),
-                int(j["pitch"]["centre"].value()),
-                int(j["pitch"]["max"].value()),
-                int(j["roll"]["min"].value()),
-                int(j["roll"]["centre"].value()),
-                int(j["roll"]["max"].value()),
-                int(j["yaw"]["min"].value()),
-                int(j["yaw"]["centre"].value()),
-                int(j["yaw"]["max"].value()),
+                DRONE_CONFIG_FORMAT,
+                values["max_rate"],
+                values["max_angle"],
+                values["fail_angle"],
+                values["min_throttle"],
+                values["max_throttle"],
+                int(values["coms_timeout_s"] * 1e6),
+                int(values["low_voltage"]),
+                int(values["critical_voltage"]),
             )
-            packet: bytes = uart_comm.encode_config_packet(PACKET_ID.REMOTE_CFG, payload)
+            packet: bytes = uart_comm.encode_config_packet(PACKET_ID.DRONE_CFG, payload)
 
             self.serial_port.write(packet)
             self.serial_port.flush()
-            self.log_message("→ Sent remote config update (live, not yet saved)")
+            self.log_message("→ Sent drone config update (live, not yet saved)")
+            self.drone_config_sent = values
+            return True
 
         except Exception as e:
             QMessageBox.critical(self, "Send Error", f"Failed to send: {e}")
             self.log_message(f"Send failed: {e}")
+            return False
 
-    def save_remote_config(self) -> None:
-        """Tell the remote to persist its currently-live config to flash."""
+    def save_drone_config(self) -> None:
+        """
+        Tell the drone to persist its currently-live config to flash, and 
+        save the drone config tab's values as the GUI's own working defaults 
+        (user_defaults.json).
+        """
         if not self.serial_port or not self.serial_port.is_open:
             QMessageBox.warning(
                 self, "Not Connected", "Please connect to serial port first."
@@ -759,13 +898,131 @@ class PIDTunerGUI(QMainWindow):
 
         reply = QMessageBox.question(
             self,
-            "Save to Flash",
-            "Persist the remote's currently-live config to flash?",
+            "Save to Flash & Default",
+            "Persist the drone's currently-live config (including PID gains) to flash,\n"
+            "and save these values as your local working defaults?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
         if reply != QMessageBox.Yes:
             return
+
+        values = self._drone_config_values()
+        if self.drone_config_sent != values:
+            if not self.send_drone_config():
+                return
+
+        try:
+            packet: bytes = uart_comm.encode_config_packet(PACKET_ID.DRONE_CFG_STORE)
+            self.serial_port.write(packet)
+            self.serial_port.flush()
+            self.log_message("→ Sent DRONE_CFG_STORE (persist to flash)")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Send Error", f"Failed to send: {e}")
+            self.log_message(f"Send failed: {e}")
+            return
+
+        updates = {
+            "MAX_RATE": values["max_rate"],
+            "MAX_ANGLE": values["max_angle"],
+            "FAIL_ANGLE": values["fail_angle"],
+            "MIN_THROTTLE": values["min_throttle"],
+            "MAX_THROTTLE": values["max_throttle"],
+            "FAILSAFE_TIMEOUT_US": values["coms_timeout_s"] * 1e6,
+            "LOW_VOLTAGE": values["low_voltage"],
+            "CRITICAL_VOLTAGE": values["critical_voltage"],
+        }
+
+        if save_drone_defaults(updates):
+            self.log_message("Saved drone config tab as default")
+        else:
+            self.log_message("Failed to save drone config defaults")
+
+    def _remote_config_values(self) -> Dict[str, float]:
+        """Current remote config tab spin-box values (battery/voltage and
+        per-channel joystick calibration), flattened into one dict."""
+        v = self.remote_voltage_spins
+        j = self.joystick_spins
+        values: Dict[str, float] = {
+            "voltage_cal_multiplier": v["voltage_cal_multiplier"].value(),
+            "low_voltage": v["low_voltage"].value(),
+            "critical_voltage": v["critical_voltage"].value(),
+        }
+        for channel in ["throttle", "pitch", "roll", "yaw"]:
+            values[f"{channel}_min"] = j[channel]["min"].value()
+            values[f"{channel}_centre"] = j[channel]["centre"].value()
+            values[f"{channel}_max"] = j[channel]["max"].value()
+        return values
+
+    def send_remote_config(self) -> bool:
+        """Apply the remote config tab's values live (RAM only, not yet
+        saved). Returns whether the send succeeded."""
+        if not self.serial_port or not self.serial_port.is_open:
+            QMessageBox.warning(
+                self, "Not Connected", "Please connect to serial port first."
+            )
+            return False
+
+        values = self._remote_config_values()
+        try:
+            payload: bytes = struct.pack(
+                REMOTE_CONFIG_FORMAT,
+                values["voltage_cal_multiplier"],
+                int(values["low_voltage"]),
+                int(values["critical_voltage"]),
+                int(values["throttle_min"]),
+                int(values["throttle_centre"]),
+                int(values["throttle_max"]),
+                int(values["pitch_min"]),
+                int(values["pitch_centre"]),
+                int(values["pitch_max"]),
+                int(values["roll_min"]),
+                int(values["roll_centre"]),
+                int(values["roll_max"]),
+                int(values["yaw_min"]),
+                int(values["yaw_centre"]),
+                int(values["yaw_max"]),
+            )
+            packet: bytes = uart_comm.encode_config_packet(
+                PACKET_ID.REMOTE_CFG, payload
+            )
+
+            self.serial_port.write(packet)
+            self.serial_port.flush()
+            self.log_message("→ Sent remote config update (live, not yet saved)")
+            self.remote_config_sent = values
+            return True
+
+        except Exception as e:
+            QMessageBox.critical(self, "Send Error", f"Failed to send: {e}")
+            self.log_message(f"Send failed: {e}")
+            return False
+
+    def save_remote_config(self) -> None:
+        """Tell the remote to persist its currently-live config to flash, and
+        save the remote tab's values as the GUI's own working defaults."""
+        if not self.serial_port or not self.serial_port.is_open:
+            QMessageBox.warning(
+                self, "Not Connected", "Please connect to serial port first."
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Save to Flash & Default",
+            "Persist the remote's currently-live config to flash,\n"
+            "and save these values as your local working defaults?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        values = self._remote_config_values()
+        if self.remote_config_sent != values:
+            if not self.send_remote_config():
+                return
 
         try:
             packet: bytes = uart_comm.encode_config_packet(PACKET_ID.REMOTE_CFG_STORE)
@@ -776,9 +1033,28 @@ class PIDTunerGUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Send Error", f"Failed to send: {e}")
             self.log_message(f"Send failed: {e}")
+            return
+
+        updates: Dict[str, float] = {
+            "VOLTAGE_CAL_MULTIPLIER": values["voltage_cal_multiplier"],
+            "LOW_VOLTAGE": values["low_voltage"],
+            "CRITICAL_VOLTAGE": values["critical_voltage"],
+        }
+        for channel in ["throttle", "pitch", "roll", "yaw"]:
+            updates[f"JOYSTICK_{channel.upper()}_MIN"] = values[f"{channel}_min"]
+            updates[f"JOYSTICK_{channel.upper()}_CENTRE"] = values[f"{channel}_centre"]
+            updates[f"JOYSTICK_{channel.upper()}_MAX"] = values[f"{channel}_max"]
+
+        if save_remote_defaults(updates):
+            self.log_message("Saved remote config tab as default")
+        else:
+            self.log_message("Failed to save remote config defaults")
 
     def handle_telemetry(self, data: Dict[str, Any]) -> None:
         """Handle received telemetry data"""
+        # Session recording takes every packet, whatever the plots are doing
+        self.recorder.add(data)
+
         if not self.record_checkbox.isChecked():
             return
 
@@ -795,6 +1071,8 @@ class PIDTunerGUI(QMainWindow):
                 text: str
                 if key == "mode":
                     text = "STABILISE" if data[key] else "ACRO"
+                elif key == "loop_dt_max_us":
+                    text = f"{data[key]:.0f}{unit}"
                 elif key == "battery":
                     # voltage sent as mV
                     voltage: float = data[key] / 1000
