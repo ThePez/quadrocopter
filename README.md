@@ -26,7 +26,7 @@ Custom quadrocopter firmware written in C using the ESP-IDF framework. The syste
 ### Drone (ESP32)
 | Component         | Interface | Pins / Notes                           |
 |-------------------|-----------|----------------------------------------|
-| 4× ESC            | MCPWM     | GPIOs 17, 16, 27, 26 — 50 Hz RC PWM   |
+| 4× ESC            | MCPWM     | GPIOs 17, 16, 27, 26 — 250 Hz RC PWM  |
 | BNO085 IMU        | I2C       | 9-DOF attitude sensor                  |
 | MCP3208 ADC       | SPI       | 8-ch 12-bit ADC for battery monitoring |
 | Battery monitor   | GPIO 34   | Voltage divider (46.4 kΩ + 9.84 kΩ)   |
@@ -92,7 +92,7 @@ Each motor output is clamped to [1050, 2000] µs.
 - **Channel**: 9, long-range mode enabled
 - **Encryption**: PMK + LMK configured per peer
 - **Remote → Drone**: 20 Hz control packets (throttle, pitch, roll, yaw, flight mode)
-- **Drone → Bridge**: 10 Hz telemetry packets (angles, rates, PID outputs, motor PWM, battery mV)
+- **Drone → Bridge**: 50 Hz telemetry packets (angles, rates, PID outputs, motor PWM, battery mV)
 - **Bridge → Drone**: PID tuning packets forwarded from PC
 
 MAC addresses are configured in `libs/espnow-comm/espnow_comm.c`.
@@ -122,13 +122,14 @@ quadrocopter/
 │   ├── main.py             # Entry point
 │   ├── pid_tuner_gui.py    # Main window - telemetry, PID/drone/remote config tabs
 │   ├── uart_comm.py        # UART framing/CRC, mirrors bridge/main/bridge.c
+│   ├── session_recorder.py # Writes/reads telemetry session CSV files
+│   ├── session_viewer.py   # Window for reviewing a recorded session
 │   ├── parser.py           # Parses structs/unions/enums out of a C header
 │   ├── layout.py           # Simulates C struct layout to build struct-module formats
 │   └── constants.py        # Wire-format constants, generated from libs/espnow-comm/espnow_comm.h
 ├── libs/                # ESP-IDF components shared across targets
 │   ├── pid/              # PID controller
 │   ├── motors/           # MCPWM ESC driver
-│   ├── kalman/           # Single-axis Kalman filter for attitude (currently disabled)
 │   ├── espnow-comm/      # ESP-NOW peer management, queues & wire structs
 │   ├── device_config/     # NVS-persisted drone/remote config load & save
 │   └── common_functions/ # mapf(), constrainf(), SPI/I2C bus init
@@ -199,7 +200,9 @@ cd config-app && python3 main.py
 - Live plots of angles, rates, PID outputs, and motor speeds (500-point rolling window)
 - 3D attitude view — a rotating rigid-body model (front arms in red, rear in grey) driven live by pitch/roll/yaw telemetry, with a numeric angle readout
 - Battery voltage display
+- Session recording — **Start Recording** on the Telemetry tab saves every packet to `config-app/sessions/session_<date>_<time>.csv`; **Open Session...** reopens one as zoomable plots, with each PID gain change marked on the time axis
 - A single PID Tuning tab: Rate mode gains for Pitch/Roll and Yaw side by side, Angle mode gains for Pitch/Roll only (yaw has no angle loop) — changes are sent to the drone immediately over the bridge
+- Each PID group also sets its D-term low-pass coefficient (shown with the equivalent cutoff in Hz), and telemetry includes the worst gap between control cycles so loop timing can be checked
 - Drone Config and Remote Config tabs for live failsafe/throttle/battery/joystick-calibration updates, with buttons to persist them to flash
 - Wire-format struct/union layouts (`constants.py`) are parsed straight out of `libs/espnow-comm/espnow_comm.h` (`parser.py`/`layout.py` simulate the C compiler's struct-packing rules) rather than hand-maintained, so they can't drift out of sync with the firmware
 
@@ -225,9 +228,9 @@ Press **both** the mode button and emergency button simultaneously on the remote
 
 ## Implementation Notes
 
-- **Dual-core**: Core 0 handles incoming remote packets; Core 1 runs the 400 Hz PID loop at elevated FreeRTOS priority
+- **Dual-core**: Core 0 handles incoming remote packets; Core 1 runs the PID loop at elevated FreeRTOS priority, one cycle per IMU sample (400 Hz)
 - **Thread safety**: Shared drone state (`droneData`) is guarded by a mutex, since `pid_task` and `input_task` write to it from separate cores
-- **IMU filtering**: A single-axis Kalman filter (`libs/kalman`) exists to fuse gyro rate with the BNO085's fused angle, but is currently disabled (`#ifdef ENABLE`) — attitude passes through the sensor's fused rotation vector unfiltered
+- **IMU filtering**: Angles are the BNO085's fused rotation vector, used as-is; gyro rates get a first-order low-pass (`GYRO_LPF_ALPHA` in `pid_task.c`). `imuQueue` is a one-deep mailbox, so the loop always flies on the newest sample
 - **ADC calibration**: Battery voltage uses ESP-IDF ADC calibration for mV-level accuracy
 - **Memory**: All dynamic allocations checked at startup; device restarts on malloc failure
 

@@ -17,13 +17,14 @@
 #define TAG "CONFIG"
 
 // device config key
-static const char* const key = "cfg"; 
+static const char *const key = "cfg";
 static bool initialised = false;
 static bool cfgLoaded = false;
 
 SemaphoreHandle_t cfgMutex = NULL;
 
-esp_err_t nvs_init(void) {
+esp_err_t nvs_init(void)
+{
 
     if (initialised) {
         return ESP_OK;
@@ -44,7 +45,8 @@ esp_err_t nvs_init(void) {
 }
 
 // Reads a blob value from NVS, failing if the stored size doesn't match len.
-static esp_err_t blob_read(const char* namespace, const char* key, void* data, size_t len) {
+static esp_err_t blob_read(const char *namespace, const char *key, void *data, size_t len)
+{
     if (!initialised) {
         return ESP_ERR_NVS_NOT_INITIALIZED;
     }
@@ -56,7 +58,7 @@ static esp_err_t blob_read(const char* namespace, const char* key, void* data, s
 
     // Ensure length is expected
     if (actual != len) {
-        ESP_LOGW(TAG, "Size mismatch: expected %d, got %d", (int) len, (int) actual);
+        ESP_LOGW(TAG, "Size mismatch: expected %d, got %d", (int)len, (int)actual);
         return ESP_ERR_NVS_INVALID_LENGTH;
     }
 
@@ -64,7 +66,8 @@ static esp_err_t blob_read(const char* namespace, const char* key, void* data, s
 }
 
 // Writes and commits a blob value to NVS.
-static esp_err_t blob_write(const char* namespace, const char* key, const void* data, size_t len) {
+static esp_err_t blob_write(const char *namespace, const char *key, const void *data, size_t len)
+{
     if (!initialised) {
         return ESP_ERR_NVS_NOT_INITIALIZED;
     }
@@ -88,8 +91,9 @@ static esp_err_t blob_write(const char* namespace, const char* key, const void* 
     return err;
 }
 
-esp_err_t device_config_load(const char* namespace, void* cfg, size_t len, uint16_t version,
-                             const void* defaults) {
+esp_err_t device_config_load(const char *namespace, void *cfg, size_t len, uint16_t version,
+                             const void *defaults)
+{
 
     if (len < sizeof(uint16_t)) {
         return ESP_ERR_INVALID_ARG;
@@ -105,7 +109,7 @@ esp_err_t device_config_load(const char* namespace, void* cfg, size_t len, uint1
     esp_err_t err = blob_read(namespace, key, cfg, len);
 
     // Config data was either found but stale or no data was found -> Store defaults
-    if ((err == ESP_OK && *(uint16_t*) cfg != version) || err != ESP_OK) {
+    if ((err == ESP_OK && *(uint16_t *)cfg != version) || err != ESP_OK) {
         // Write in the defaults loaded from compile-time
         CHECK_ERR(blob_write(namespace, key, defaults, len), "flash config update failed");
         return ESP_ERR_NVS_TYPE_MISMATCH;
@@ -115,7 +119,8 @@ esp_err_t device_config_load(const char* namespace, void* cfg, size_t len, uint1
     return ESP_OK;
 }
 
-esp_err_t device_config_save(const char* namespace, const void* new_data, size_t len) {
+esp_err_t device_config_save(const char *namespace, const void *new_data, size_t len)
+{
     if (!cfgMutex || !cfgLoaded) {
         return ESP_ERR_NVS_NOT_INITIALIZED;
     }

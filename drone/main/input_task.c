@@ -25,12 +25,13 @@
 #define TAG "INPUT_TASK"
 
 #define INPUT_TASK_STACK (configMINIMAL_STACK_SIZE * 2)
-#define INPUT_TASK_PRIO (tskIDLE_PRIORITY + 2)
+#define INPUT_TASK_PRIO  (tskIDLE_PRIORITY + 2)
 
 static TaskHandle_t inputTaskHandle = NULL;
 
 // Handles a remote data update
-static void handle_remote_update(struct remote_telemetry_t* remote) {
+static void handle_remote_update(struct remote_telemetry_t *remote)
+{
     xSemaphoreTake(droneData.mutex, portMAX_DELAY);
     droneData.lastRemoteTime = esp_timer_get_time();
 
@@ -41,29 +42,30 @@ static void handle_remote_update(struct remote_telemetry_t* remote) {
     xSemaphoreGive(droneData.mutex);
 
     xSemaphoreTake(cfgMutex, portMAX_DELAY);
-    double minThrottle = droneCfg.min_throttle;
-    double maxThrottle = droneCfg.max_throttle;
-    double maxRate = droneCfg.max_rate;
+    float minThrottle = (float)droneCfg.min_throttle;
+    float maxThrottle = (float)droneCfg.max_throttle;
+    float maxRate = (float)droneCfg.max_rate;
     xSemaphoreGive(cfgMutex);
 
-    double reading = mapf(remote->throttle, ADC_MIN, ADC_MAX, minThrottle, maxThrottle);
+    float reading = mapf(remote->throttle, ADC_MIN, ADC_MAX, minThrottle, maxThrottle);
     remoteIn.throttle = (reading < minThrottle + 20) ? minThrottle : reading;
     // Pitch Input
     reading = mapf(remote->pitch, ADC_MIN, ADC_MAX, -maxRate, maxRate);
-    remoteIn.pitch = (fabs(reading) < 5) ? 0 : reading;
+    remoteIn.pitch = (fabsf(reading) < 5) ? 0 : reading;
     // Roll Input
     reading = mapf(remote->roll, ADC_MIN, ADC_MAX, -maxRate, maxRate);
-    remoteIn.roll = (fabs(reading) < 5) ? 0 : reading;
+    remoteIn.roll = (fabsf(reading) < 5) ? 0 : reading;
     // Yaw Input (inverted due to physical position of joystick on remote)
     reading = -mapf(remote->yaw, ADC_MIN, ADC_MAX, -maxRate, maxRate);
-    remoteIn.yaw = (fabs(reading) < 5) ? 0 : reading;
+    remoteIn.yaw = (fabsf(reading) < 5) ? 0 : reading;
     // Flight mode
     set_flight_mode((remote->flight_mode == ACRO) ? ACRO : STABILISE);
 }
 
 // Main input task loop: blocks on wifiQueue and dispatches REMOTE, PID_CONFIG,
 // DRONE_CONFIG, and CONFIG_SAVE packets to their respective handlers.
-static void input_control(void* pvParams) {
+static void input_control(void *pvParams)
+{
     ARG_UNUSED(pvParams);
 
     struct wifi_packet_t packet;
@@ -106,8 +108,9 @@ static void input_control(void* pvParams) {
     }
 }
 
-esp_err_t input_task_init(void) {
+esp_err_t input_task_init(void)
+{
     BaseType_t result = xTaskCreatePinnedToCore(input_control, "INPUT_TASK", INPUT_TASK_STACK, NULL,
-                                                INPUT_TASK_PRIO, &inputTaskHandle, (BaseType_t) 0);
+                                                INPUT_TASK_PRIO, &inputTaskHandle, (BaseType_t)0);
     return (result == pdPASS) ? ESP_OK : ESP_FAIL;
 }

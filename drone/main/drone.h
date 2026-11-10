@@ -23,19 +23,19 @@
 #define ADC_MAX 4095
 
 #define ANGLE_FAIL (1 << 0)
-#define COMS_FAIL (1 << 1)
+#define COMS_FAIL  (1 << 1)
 
 // Voltage divider constants
-#define R1 46400.0f                            // 46.4k ohms
-#define R2 9840.0f                             // 9.84k ohms
-#define VOLTAGE_MULTIPLIER ((R1 + R2) / R2)    // ~5.715
-#define NON_CALIBRATED_MULTIPLIER 0.000805861f // 3.3 / 4095
+#define R1                        46400.0f         // 46.4k ohms
+#define R2                        9840.0f          // 9.84k ohms
+#define VOLTAGE_MULTIPLIER        ((R1 + R2) / R2) // ~5.715
+#define NON_CALIBRATED_MULTIPLIER 0.000805861f     // 3.3 / 4095
 
 struct target_parameters_t {
-    double pitch;
-    double roll;
-    double yaw;
-    double throttle;
+    float pitch;
+    float roll;
+    float yaw;
+    float throttle;
 };
 
 struct drone_config_t {
@@ -56,7 +56,7 @@ extern struct nvs_drone_cfg_t droneCfg;
  * @brief Brings up the full drone flight system.
  *
  * Initializes ESC PWM output, the battery-voltage ADC, the IMU task, ESP-NOW
- * (paired with the remote and bridge), the droneData/kalman mutexes, the
+ * (paired with the remote and bridge), the droneData mutex, the
  * periodic telemetry and battery-check timer callbacks, and finally starts
  * the input and PID control tasks.
  *
@@ -72,7 +72,7 @@ esp_err_t init_drone(void);
  *
  * @param packet New values to apply.
  */
-esp_err_t drone_config_handle_update(struct drone_config_telemetry_t* packet);
+esp_err_t drone_config_handle_update(struct drone_config_telemetry_t *packet);
 
 /**
  * @brief Persists the currently-live droneCfg (gains included) to flash.

@@ -13,7 +13,6 @@
 #include "espnow_comm.h"
 #include "imu.h"
 #include "input_task.h"
-#include "kalman.h"
 #include "motors.h"
 #include "pid_defaults.h"
 #include "pid_task.h"
@@ -31,6 +30,9 @@
 #define TAG "DRONE"
 
 #define BATTERY_ADC_CHANNEL ADC_CHANNEL_7
+
+// 50 Hz - fast enough to see oscillations on the config-app plots
+#define TELEMETRY_PERIOD_US 20000
 
 ////////////////////////////// Global Variables //////////////////////////////
 
@@ -71,7 +73,8 @@ static adc_cali_handle_t adcCaliHandle;
 /* Setup Functions */
 
 // Sets up ADC calibration for the battery channel.
-static esp_err_t adc_calibration_init(void) {
+static esp_err_t adc_calibration_init(void)
+{
     adc_cali_handle_t handle = NULL;
     esp_err_t ret = ESP_FAIL;
     uint8_t calibrated = 0;
@@ -122,7 +125,8 @@ static esp_err_t adc_calibration_init(void) {
 }
 
 // Configures the oneshot ADC unit/channel used for battery voltage sensing.
-static esp_err_t adc_init(void) {
+static esp_err_t adc_init(void)
+{
 
     adc_oneshot_unit_init_cfg_t unitConfig = {.unit_id = ADC_UNIT_1};
     CHECK_ERR(adc_oneshot_new_unit(&unitConfig, &adcHandle), "ADC new unit failed");
@@ -144,10 +148,11 @@ static esp_err_t adc_init(void) {
 }
 
 // Creates and starts a periodic esp_timer that invokes cb every periodUS microseconds.
-static void timer_task_callback_init(int periodUS, void (*cb)(void*)) {
+static void timer_task_callback_init(int periodUS, void (*callback)(void *))
+{
 
     esp_timer_create_args_t config = {
-        .callback = cb,                    // Function to execute
+        .callback = callback,              // Function to execute
         .dispatch_method = ESP_TIMER_TASK, // Where the function is called from
         .arg = NULL                        // Input argument
     };
@@ -160,7 +165,8 @@ static void timer_task_callback_init(int periodUS, void (*cb)(void*)) {
 /* Functions run in the ESP-TIMER-TASK */
 
 // TimerTask Callback: Periodically reads and stores the battery voltage
-static void battery_callback(void* args) {
+static void battery_callback(void *args)
+{
     ARG_UNUSED(args);
 
     int raw_value;
@@ -177,15 +183,15 @@ static void battery_callback(void* args) {
         // Use calibrated reading
         int calibrated_voltage;
         adc_cali_raw_to_voltage(adcCaliHandle, raw_value, &calibrated_voltage);
-        battery_voltage = (float) calibrated_voltage * VOLTAGE_MULTIPLIER;
+        battery_voltage = (float)calibrated_voltage * VOLTAGE_MULTIPLIER;
     } else {
         // Fallback to uncalibrated (0-3.3V range for 12dB attenuation)
-        battery_voltage = (float) raw_value * NON_CALIBRATED_MULTIPLIER * VOLTAGE_MULTIPLIER;
+        battery_voltage = (float)raw_value * NON_CALIBRATED_MULTIPLIER * VOLTAGE_MULTIPLIER;
     }
 
     // Store as millivolts
     xSemaphoreTake(droneData.mutex, portMAX_DELAY);
-    droneData.battery = (uint16_t) battery_voltage; // mV
+    droneData.battery = (uint16_t)battery_voltage; // mV
     xSemaphoreGive(droneData.mutex);
 
     // If battery volatage is too low -> send a signal to the remote
@@ -211,14 +217,12 @@ static void battery_callback(void* args) {
 }
 
 // TimerTask Callback: Periodically sends bridge a snapshot of the drone's state
-static void system_data_callback(void* args) {
+static void system_data_callback(void *args)
+{
     ARG_UNUSED(args);
 
-    struct imu_packet_t attitude;
-    kalman_get(&attitude);
-
     struct wifi_packet_t packet = {.packet_id = SENSOR};
-    struct sensor_telemetry_t* telemetry = &packet.data.sensor;
+    struct sensor_telemetry_t *telemetry = &packet.data.sensor;
 
     telemetry->pitch_angle = attitude.pitchAngle;
     telemetry->roll_angle = attitude.rollAngle;
@@ -237,21 +241,39 @@ static void system_data_callback(void* args) {
     telemetry->motor_b = motors.motorB;
     telemetry->motor_c = motors.motorC;
     telemetry->motor_d = motors.motorD;
+    telemetry->loop_dt_max_us = pid_task_take_loop_dt_max_us();
 
-    // Only allow sending after the previous message was sent
+    // Only allow sending after the previous message was sent.
+    static uint32_t attempts = 0;
+    static uint32_t skipped = 0;
+    static int64_t lastReportUs = 0;
+
+    attempts++;
     if (xSemaphoreTake(wifiSendSemaphore, 0) == pdTRUE) {
         esp_err_t result = esp_now_send_packet(bridge_mac, &packet);
         if (result != ESP_OK) {
-            ESP_LOGW(TAG, "data callback send failed");
+            ESP_LOGW(TAG, "data callback send failed: %s", esp_err_to_name(result));
             xSemaphoreGive(wifiSendSemaphore);
         }
     } else {
-        ESP_LOGW(TAG, "wifi semaphore unavailable");
+        skipped++;
+    }
+
+    int64_t now = esp_timer_get_time();
+    if (now - lastReportUs >= 5000000) {
+        if (skipped > 0) {
+            ESP_LOGW(TAG, "Telemetry: skipped %lu of %lu packets (previous send not finished)",
+                     (unsigned long)skipped, (unsigned long)attempts);
+        }
+        attempts = 0;
+        skipped = 0;
+        lastReportUs = now;
     }
 }
 
 // Logs the currently loaded droneCfg.
-static void print_config(void) {
+static void print_config(void)
+{
     xSemaphoreTake(cfgMutex, portMAX_DELAY);
     struct nvs_drone_cfg_t cfg = droneCfg;
     xSemaphoreGive(cfgMutex);
@@ -277,7 +299,8 @@ static void print_config(void) {
 
 /* Initialisation and public functions */
 
-esp_err_t init_drone(void) {
+esp_err_t init_drone(void)
+{
 
     CHECK_ERR(nvs_init(), "NVS init failed");
 
@@ -305,7 +328,7 @@ esp_err_t init_drone(void) {
     vTaskDelay(pdMS_TO_TICKS(50));
 
     // Setup ESP-NOW (pair the bridge and remote)
-    const uint8_t* macs[] = {remote_mac, bridge_mac};
+    const uint8_t *macs[] = {remote_mac, bridge_mac};
     CHECK_ERR_NO_LOG(esp_now_module_init(macs, 2));
 
     // Wait to ensure the wifiQueue is created before timer callback tasks are registered
@@ -323,11 +346,8 @@ esp_err_t init_drone(void) {
         return ESP_FAIL;
     }
 
-    // Mutex protecting kalman's shared state - must be called before task startup
-    CHECK_ERR(kalman_init(), "Failed to create kalman mutex");
-
     // Initialise a callback for returning info back to the PC app
-    timer_task_callback_init(100000, system_data_callback); // Interval of 50ms
+    timer_task_callback_init(TELEMETRY_PERIOD_US, system_data_callback);
 
     // Initialise a callback for checking battery voltage
     timer_task_callback_init(1000000, battery_callback); // Interval of 1 second
@@ -339,7 +359,8 @@ esp_err_t init_drone(void) {
     return ESP_OK;
 }
 
-esp_err_t drone_config_handle_update(struct drone_config_telemetry_t* packet) {
+esp_err_t drone_config_handle_update(struct drone_config_telemetry_t *packet)
+{
     xSemaphoreTake(cfgMutex, portMAX_DELAY);
     droneCfg.max_rate = packet->max_rate;
     droneCfg.max_angle = packet->max_angle;
@@ -351,11 +372,15 @@ esp_err_t drone_config_handle_update(struct drone_config_telemetry_t* packet) {
     droneCfg.critical_voltage = packet->critical_voltage;
     xSemaphoreGive(cfgMutex);
 
+    // The PID task flies from its own copy of the config
+    pid_task_config_changed();
+
     ESP_LOGI(TAG, "Drone config updated live (not yet saved to flash)");
     return ESP_OK;
 }
 
-esp_err_t drone_config_handle_save(void) {
+esp_err_t drone_config_handle_save(void)
+{
     xSemaphoreTake(cfgMutex, portMAX_DELAY);
     struct nvs_drone_cfg_t snapshot = droneCfg;
     xSemaphoreGive(cfgMutex);
@@ -368,7 +393,8 @@ esp_err_t drone_config_handle_save(void) {
  * channel drives all 4 ESCs directly, allowing entry to the ESC's own
  * programming menu (which requires seeing max throttle on power-up). */
 
-static void esc_program_task(void* pvParams) {
+static void esc_program_task(void *pvParams)
+{
     ARG_UNUSED(pvParams);
 
     while (1) {
@@ -380,9 +406,9 @@ static void esc_program_task(void* pvParams) {
         // connects - otherwise remoteIn.throttle's zeroed default would
         // immediately stomp the max-throttle signal the ESCs need to see.
         if (lastRemoteTime != 0) {
-            uint16_t duty = (uint16_t) remoteIn.throttle;
+            uint16_t duty = (uint16_t)remoteIn.throttle;
             for (uint8_t i = 0; i < NUMBER_OF_MOTORS; i++) {
-                esc_pwm_set_duty_cycle((MotorIndex) i, duty);
+                esc_pwm_set_duty_cycle((MotorIndex)i, duty);
             }
         }
 
@@ -390,14 +416,15 @@ static void esc_program_task(void* pvParams) {
     }
 }
 
-esp_err_t init_esc_programming(void) {
+esp_err_t init_esc_programming(void)
+{
 
     // Motors up at max throttle immediately - most ESCs enter their
     // programming menu by seeing max throttle as the first signal on power-up
     CHECK_ERR_NO_LOG(esc_pwm_init(MOTOR_SPEED_MAX));
 
     // Only the remote is needed for this
-    const uint8_t* macs[] = {remote_mac};
+    const uint8_t *macs[] = {remote_mac};
     CHECK_ERR_NO_LOG(esp_now_module_init(macs, 1));
 
     while (!wifiQueue) {

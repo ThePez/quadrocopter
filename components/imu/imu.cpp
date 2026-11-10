@@ -17,11 +17,13 @@
 
 #define REPORT_FREQUENCY 2500UL // 2.5ms between readings
 
-#define IMU_QUEUE_LEN 10
+// Length 1: imuQueue is a "latest sample" mailbox (see xQueueOverwrite below),
+// so the control loop can never read stale attitude data.
+#define IMU_QUEUE_LEN  1
 #define IMU_STACK_SIZE (configMINIMAL_STACK_SIZE * 2)
-#define IMU_PRIORITY (tskIDLE_PRIORITY + 4)
+#define IMU_PRIORITY   (tskIDLE_PRIORITY + 4)
 
-#define RAD_2_DEG(x) ((180.0 / M_PI) * x)
+#define RAD_2_DEG(x) ((float)(180.0f / M_PI) * (x))
 
 #define TAG "IMU"
 
@@ -30,28 +32,30 @@ QueueHandle_t imuQueue = NULL;
 // Create IMU object with default wiring scheme
 static BNO08x imu;
 
-// Reads the latest rotation-vector report from the BNO08x and posts it to imuQueue.
-static void imu_data_callback(void) {
-
+// Reads the latest rotation-vector report from the BNO08x and publishes it as
+// the newest sample in imuQueue.
+static void imu_data_callback(void)
+{
     struct imu_packet_t packet;
 
-    // X-axis -> Roll
-    // Y-axis -> Pitch
+    // With the sensor as mounted
+    // X-axis -> Pitch (angle and rate)
+    // Y-axis -> Roll  (angle and rate)
     // Z-axis -> Yaw
 #ifdef ENABLE_SH2_HAL
     bno08x_ang_vel_t velocity = imu.rpt.rv_gyro_integrated.get_vel();
-    packet.rollRate = RAD_2_DEG(velocity.x);
-    packet.pitchRate = RAD_2_DEG(velocity.y);
+    packet.pitchRate = RAD_2_DEG(velocity.x);
+    packet.rollRate = RAD_2_DEG(velocity.y);
     packet.yawRate = RAD_2_DEG(velocity.z);
 
     bno08x_euler_angle_t euler = imu.rpt.rv_gyro_integrated.get_euler(true);
-    packet.pitchAngle = euler.x; // X-axis -> Pitch
-    packet.rollAngle = euler.y;  // Y-axis -> Roll
-    packet.yawAngle = euler.z;   // Z-axis -> Yaw
+    packet.pitchAngle = euler.x;
+    packet.rollAngle = euler.y;
+    packet.yawAngle = euler.z;
 
 #else
-    packet.rollRate = imu.get_calibrated_gyro_velocity_X();
-    packet.pitchRate = imu.get_calibrated_gyro_velocity_Y();
+    packet.rollRate = imu.get_calibrated_gyro_velocity_Y();
+    packet.pitchRate = imu.get_calibrated_gyro_velocity_X();
     packet.yawRate = imu.get_calibrated_gyro_velocity_Z();
 
     packet.rollAngle = imu.get_roll_deg();
@@ -59,13 +63,14 @@ static void imu_data_callback(void) {
     packet.yawAngle = imu.get_yaw_deg();
 #endif
 
-    // Post to queue
-    xQueueSendToBack(imuQueue, &packet, 0);
+    // Replace whatever sample is waiting - only the newest one is useful
+    xQueueOverwrite(imuQueue, &packet);
 }
 
 // One-shot setup task: creates imuQueue, initializes the BNO08x, enables its
 // gyro-integrated rotation vector report, and registers the data callback.
-static void bno08x_task(void* pvParameters) {
+static void bno08x_task(void *pvParameters)
+{
 
     imuQueue = xQueueCreate(IMU_QUEUE_LEN, sizeof(struct imu_packet_t));
     if (!imuQueue) {
@@ -96,7 +101,8 @@ static void bno08x_task(void* pvParameters) {
     vTaskDelete(NULL);
 }
 
-esp_err_t imu_init(void) {
+esp_err_t imu_init(void)
+{
     BaseType_t err = xTaskCreate(bno08x_task, "IMU Task", IMU_STACK_SIZE, NULL, IMU_PRIORITY, NULL);
     return (err == pdPASS) ? ESP_OK : ESP_FAIL;
 }

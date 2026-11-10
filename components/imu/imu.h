@@ -17,12 +17,12 @@ extern "C" {
 #include <freertos/FreeRTOS.h>
 
 struct imu_packet_t {
-    double pitchAngle;
-    double pitchRate;
-    double rollAngle;
-    double rollRate;
-    double yawAngle;
-    double yawRate;
+    float pitchAngle; // deg
+    float pitchRate;  // deg/s
+    float rollAngle;  // deg
+    float rollRate;   // deg/s
+    float yawAngle;   // deg
+    float yawRate;    // deg/s
 };
 
 /**
@@ -30,7 +30,8 @@ struct imu_packet_t {
  *
  * Spawns a task which creates imuQueue, performs the IMU hardware init,
  * enables the gyro-integrated rotation vector report, and registers a
- * callback that posts an imu_packet_t to imuQueue on every report.
+ * callback that publishes an imu_packet_t to imuQueue on every report.
+ * imuQueue only ever holds the newest sample (older ones are overwritten).
  *
  * @note imuQueue is not valid until the spawned task has run - callers
  *       should wait briefly before using it.

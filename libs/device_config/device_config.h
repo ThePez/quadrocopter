@@ -25,13 +25,15 @@
  * from compiled defaults instead of reading a stale struct.
  */
 
-#define NVS_DRONE_CFG_VERSION 1
+// v2: gains and limits changed from double to float
+#define NVS_DRONE_CFG_VERSION 2
+
 #define NVS_REMOTE_CFG_VERSION 1
 
 // One PID controller's gains (one axis/mode pair).
 struct __packed nvs_pid_cfg_t {
-    double kp, ki, kd;
-    double dtermAlpha;
+    float kp, ki, kd;
+    float dtermAlpha;
 };
 
 // Calibrated raw ADC range for one joystick channel.
@@ -43,8 +45,8 @@ struct __packed nvs_joystick_cal_t {
 struct __packed nvs_drone_cfg_t {
     uint16_t version;
     struct nvs_pid_cfg_t rate_pitch_roll, rate_yaw, angle_pitch_roll;
-    double max_rate, max_angle, fail_angle;
-    double min_throttle, max_throttle;
+    float max_rate, max_angle, fail_angle;
+    float min_throttle, max_throttle;
     int64_t coms_timeout_us;
     uint16_t low_voltage, critical_voltage;
 };
@@ -90,8 +92,8 @@ esp_err_t nvs_init(void);
  *
  * @return ESP_OK once `cfg` holds a valid config, either way.
  */
-esp_err_t device_config_load(const char* namespace, void* cfg, size_t len, uint16_t version,
-                             const void* defaults);
+esp_err_t device_config_load(const char *namespace, void *cfg, size_t len, uint16_t version,
+                             const void *defaults);
 
 /**
  * @brief Updates the given config blob into NVS
@@ -105,6 +107,6 @@ esp_err_t device_config_load(const char* namespace, void* cfg, size_t len, uint1
  *         device_config_load() hasn't been called yet, or an error code
  *         from the flash write.
  */
-esp_err_t device_config_save(const char* namespace, const void* new_data, size_t len);
+esp_err_t device_config_save(const char *namespace, const void *new_data, size_t len);
 
 #endif
