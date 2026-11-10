@@ -205,17 +205,37 @@ static void battery_callback(void *args)
 
         static uint32_t attempts = 0;
         static uint32_t skipped = 0;
+        static uint32_t missedInARow = 0;
         const uint32_t REPORT_EVERY = 30;
+        const uint32_t FORCE_AFTER = 30;
 
         attempts++;
-        if (xSemaphoreTake(wifiSendSemaphore, 0) == pdTRUE) {
+
+        // Normally only send if the previous message has finished. If every
+        // attempt for FORCE_AFTER seconds was skipped, the alert must get
+        // through: wait briefly for the slot, then send regardless.
+        uint8_t force = (missedInARow >= FORCE_AFTER);
+        uint8_t haveSlot =
+            (xSemaphoreTake(wifiSendSemaphore, force ? pdMS_TO_TICKS(100) : 0) == pdTRUE);
+
+        if (haveSlot || force) {
+            if (force) {
+                ESP_LOGW(TAG, "Low battery alert: forcing send after %lu skipped attempts",
+                         (unsigned long)missedInARow);
+            }
+
             esp_err_t result = esp_now_send_packet(remote_mac, &packet);
             if (result != ESP_OK) {
                 ESP_LOGW(TAG, "Power callback send failed: %s", esp_err_to_name(result));
-                xSemaphoreGive(wifiSendSemaphore);
+                if (haveSlot) {
+                    xSemaphoreGive(wifiSendSemaphore);
+                }
             }
+
+            missedInARow = 0;
         } else {
             skipped++;
+            missedInARow++;
         }
 
         if (attempts >= REPORT_EVERY) {

@@ -11,15 +11,14 @@
 #include "common_functions.h"
 
 #include <nvs_flash.h>
-#include <stdbool.h>
 #include <string.h>
 
 #define TAG "CONFIG"
 
 // device config key
 static const char *const key = "cfg";
-static bool initialised = false;
-static bool cfgLoaded = false;
+static uint8_t initialised = 0;
+static uint8_t cfgLoaded = 0;
 
 SemaphoreHandle_t cfgMutex = NULL;
 
