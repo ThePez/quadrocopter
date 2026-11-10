@@ -203,15 +203,29 @@ static void battery_callback(void *args)
         struct wifi_packet_t packet = {.packet_id = POWER};
         packet.data.power.battery = battery_voltage;
 
-        // Only allow sending after the previous message was sent
+        static uint32_t attempts = 0;
+        static uint32_t skipped = 0;
+        const uint32_t REPORT_EVERY = 30;
+
+        attempts++;
         if (xSemaphoreTake(wifiSendSemaphore, 0) == pdTRUE) {
             esp_err_t result = esp_now_send_packet(remote_mac, &packet);
             if (result != ESP_OK) {
-                ESP_LOGW(TAG, "Power callback send failed");
+                ESP_LOGW(TAG, "Power callback send failed: %s", esp_err_to_name(result));
                 xSemaphoreGive(wifiSendSemaphore);
             }
         } else {
-            ESP_LOGW(TAG, "wifi semaphore unavailable");
+            skipped++;
+        }
+
+        if (attempts >= REPORT_EVERY) {
+            if (skipped > 0) {
+                ESP_LOGW(TAG,
+                         "Low battery alert: skipped %lu of %lu sends (previous send not finished)",
+                         (unsigned long)skipped, (unsigned long)attempts);
+            }
+            attempts = 0;
+            skipped = 0;
         }
     }
 }
