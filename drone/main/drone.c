@@ -34,6 +34,12 @@
 // 50 Hz - fast enough to see oscillations on the config-app plots
 #define TELEMETRY_PERIOD_US 20000
 
+// Low-battery alerts to the remote are blocked if it hasn't been heard from for this long
+#define REMOTE_ALERT_TIMEOUT_US 10000000 // 10 seconds
+
+// Not a multiple of TELEMETRY_PERIOD_US
+#define BATTERY_PERIOD_US 1010000
+
 ////////////////////////////// Global Variables //////////////////////////////
 
 struct drone_config_t droneData = {.mode = ACRO};
@@ -192,6 +198,7 @@ static void battery_callback(void *args)
     // Store as millivolts
     xSemaphoreTake(droneData.mutex, portMAX_DELAY);
     droneData.battery = (uint16_t)battery_voltage; // mV
+    int64_t lastRemoteTime = droneData.lastRemoteTime;
     xSemaphoreGive(droneData.mutex);
 
     // If battery volatage is too low -> send a signal to the remote
@@ -199,7 +206,13 @@ static void battery_callback(void *args)
     uint16_t lowVoltage = droneCfg.low_voltage;
     xSemaphoreGive(cfgMutex);
 
-    if (battery_voltage < lowVoltage) {
+    // Only worth alerting if the remote is there to hear it. A send to a remote that
+    // is off is never acknowledged, and the radio retries it for ~50 ms, holding
+    // the send slot that telemetry needs. (lastRemoteTime is 0 until first contact.)
+    uint8_t remoteHeard = (lastRemoteTime != 0) &&
+                          (esp_timer_get_time() - lastRemoteTime < REMOTE_ALERT_TIMEOUT_US);
+
+    if (battery_voltage < lowVoltage && remoteHeard) {
         struct wifi_packet_t packet = {.packet_id = POWER};
         packet.data.power.battery = battery_voltage;
 
@@ -384,7 +397,10 @@ esp_err_t init_drone(void)
     timer_task_callback_init(TELEMETRY_PERIOD_US, system_data_callback);
 
     // Initialise a callback for checking battery voltage
-    timer_task_callback_init(1000000, battery_callback); // Interval of 1 second
+    // Roughly once a second. Deliberately NOT exactly 1 s: that is a whole number of
+    // telemetry periods, so both callbacks would fire together every time and the
+    // telemetry send (which runs first) would always hold the send slot.
+    timer_task_callback_init(BATTERY_PERIOD_US, battery_callback);
 
     // Create the 2 control Tasks
     CHECK_ERR(input_task_init(), "Input task init failed");

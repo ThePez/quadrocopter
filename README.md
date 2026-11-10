@@ -83,7 +83,8 @@ Each motor output is clamped to [1050, 2000] µs.
 |-----------------------------------|---------------------------------------------------------|
 | Pitch or roll > ±30°              | Motors killed; must throttle down and level to re-arm  |
 | No remote signal for > 2 s        | Motors killed immediately                               |
-| Battery ≤ 14 V (warn) / 13.6 V   | Warning / critical alert via telemetry                 |
+| Battery ≤ 14 V (warn)             | Low-battery alert sent to the remote (if it is connected) |
+| Battery ≤ 13.6 V (critical)       | No take-off. In flight, throttle is limited to 50% of its range so the drone descends instead of cutting out |
 
 ---
 

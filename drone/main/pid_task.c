@@ -49,8 +49,6 @@
 // Throttle this far above min_throttle is treated as "stick down"
 #define IDLE_OFFSET 50.0f
 
-// With a critical battery, in-flight throttle is capped to this fraction of
-// the throttle range. Set it just under your hover throttle so the drone sinks.
 #define CRITICAL_THROTTLE_FRACTION 0.5f
 
 struct pid_feedback_t {
@@ -230,13 +228,16 @@ static void comms_failsafe(const struct flight_cfg_t *cfg)
 // Decides how much throttle the pilot is allowed, given the battery voltage.
 // The returned value replaces the stick throttle for this control cycle;
 // anything below (minThrottle + IDLE_OFFSET) stops the motors.
+//
+// With a critical battery:
+//  - on the ground: take-off is refused
+//  - in the air: the motors are never cut; throttle is limited to 50% of the
+//    throttle range (CRITICAL_THROTTLE_FRACTION)
 static float battery_throttle_limit(float throttle, uint16_t batteryMv,
                                     const struct flight_cfg_t *cfg)
 {
     // Whether the motors were being driven on the previous cycle (PID task only)
     static uint8_t flying = 0;
-
-    float idle = cfg->minThrottle + IDLE_OFFSET;
 
     if (batteryMv < cfg->criticalVoltage) {
         if (!flying) {
@@ -245,14 +246,13 @@ static float battery_throttle_limit(float throttle, uint16_t batteryMv,
             return cfg->minThrottle;
         }
 
-        // In the air: never cut out. Cap the throttle so the drone can only
-        // descend or hold, which also reduces the sag that may have caused this.
+        // In the air: never cut out. Limit the throttle to 50% of the range
         float cap =
             cfg->minThrottle + CRITICAL_THROTTLE_FRACTION * (cfg->maxThrottle - cfg->minThrottle);
         throttle = (throttle > cap) ? cap : throttle;
     }
 
-    flying = throttle >= idle;
+    flying = throttle >= (cfg->minThrottle + IDLE_OFFSET);
     return throttle;
 }
 

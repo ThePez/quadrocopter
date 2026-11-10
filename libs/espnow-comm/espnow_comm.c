@@ -40,12 +40,32 @@ const uint8_t lmk_key[16] = {0x4A, 0x7E, 0x1D, 0x9C, 0x0F, 0x6B,
 QueueHandle_t wifiQueue = NULL;
 SemaphoreHandle_t wifiSendSemaphore = NULL;
 
+// Returns a readable name for a peer's MAC address, for log messages.
+static const char* peer_name(const uint8_t* mac) {
+    if (mac == NULL) {
+        return "unknown";
+    }
+
+    if (memcmp(mac, drone_mac, ESP_NOW_ETH_ALEN) == 0) {
+        return "drone";
+    }
+
+    if (memcmp(mac, remote_mac, ESP_NOW_ETH_ALEN) == 0) {
+        return "remote";
+    }
+
+    if (memcmp(mac, bridge_mac, ESP_NOW_ETH_ALEN) == 0) {
+        return "bridge";
+    }
+
+    return "unknown";
+}
+
 // ESP-NOW send-complete callback.
 static void espnow_send_cb(const uint8_t* mac_addr, esp_now_send_status_t status) {
-    ARG_UNUSED(mac_addr);
     xSemaphoreGive(wifiSendSemaphore);
     if (status != ESP_NOW_SEND_SUCCESS) {
-        ESP_LOGW(TAG, "MESSAGE NOT DELIVERED");
+        ESP_LOGW(TAG, "MESSAGE NOT DELIVERED to %s", peer_name(mac_addr));
     }
 }
 
