@@ -23,7 +23,8 @@ SemaphoreHandle_t spiHMutex = NULL;
 SemaphoreHandle_t spiVMutex = NULL;
 SemaphoreHandle_t i2cMutex = NULL;
 
-esp_err_t spi_bus_setup(spi_host_device_t host) {
+esp_err_t spi_bus_setup(spi_host_device_t host)
+{
     if ((host == VSPI_HOST_COMPAT && spiVBusInitialised) ||
         (host == HSPI_HOST_COMPAT && spiHBusInitialised)) {
         return ESP_ERR_INVALID_ARG;
@@ -57,7 +58,8 @@ esp_err_t spi_bus_setup(spi_host_device_t host) {
     return err;
 }
 
-i2c_master_bus_handle_t* i2c_bus_setup(void) {
+i2c_master_bus_handle_t *i2c_bus_setup(void)
+{
     i2c_master_bus_config_t i2cMasterConfig = {
         .clk_source = I2C_CLK_SRC_DEFAULT,    // Default
         .i2c_port = -1,                       // Auto select
@@ -69,16 +71,17 @@ i2c_master_bus_handle_t* i2c_bus_setup(void) {
 
     i2c_master_bus_handle_t busHandle;
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2cMasterConfig, &busHandle));
-    i2c_master_bus_handle_t* handle = pvPortMalloc(sizeof(i2c_master_bus_handle_t));
+    i2c_master_bus_handle_t *handle = pvPortMalloc(sizeof(i2c_master_bus_handle_t));
     *handle = busHandle;
     i2cMutex = xSemaphoreCreateMutex();
     return handle;
 }
 
-esp_err_t print_task_stats(void) {
+esp_err_t print_task_stats(void)
+{
     uint16_t numTasks = uxTaskGetNumberOfTasks();
     uint16_t bufferLength = numTasks * 50;
-    char* taskListBuffer = pvPortMalloc(bufferLength * sizeof(char));
+    char *taskListBuffer = pvPortMalloc(bufferLength * sizeof(char));
     if (taskListBuffer == NULL) {
         return ESP_FAIL; // Malloc Failed
     }
@@ -92,10 +95,12 @@ esp_err_t print_task_stats(void) {
     return ESP_OK;
 }
 
-inline float mapf(float x, float in_min, float in_max, float out_min, float out_max) {
+inline float mapf(float x, float in_min, float in_max, float out_min, float out_max)
+{
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
-inline float constrainf(float value, float min, float max) {
+inline float constrainf(float value, float min, float max)
+{
     return (value > max) ? max : (value < min) ? min : value;
 }

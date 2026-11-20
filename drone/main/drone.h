@@ -25,6 +25,10 @@
 #define ANGLE_FAIL (1 << 0)
 #define COMS_FAIL  (1 << 1)
 
+// Throttle this far above min_throttle (us) counts as "stick up": below it the
+// motors are stopped, and the drone will only arm with the stick below it
+#define IDLE_OFFSET 50.0f
+
 // Voltage divider constants
 #define R1                        46400.0f         // 46.4k ohms
 #define R2                        9840.0f          // 9.84k ohms

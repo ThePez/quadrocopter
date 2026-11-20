@@ -13,7 +13,8 @@
 
 #define TAG "MAIN"
 
-void app_main(void) {
+void app_main(void)
+{
 #ifdef ESC_PROGRAMMING_MODE
     if (init_esc_programming() != ESP_OK) {
         ESP_LOGE(TAG, "ESC programming init failed");

@@ -1,0 +1,32 @@
+# Settings applied whenever drone/sdkconfig is (re)generated, which happens after
+# `idf.py set-target` (the Justfile runs it for any target with no build folder, e.g.
+# after `just clean drone`). A reset wipes sdkconfig back to IDF defaults, so anything
+# the firmware depends on must be listed here as well.
+
+# Optimise for speed: the 400 Hz control loop is float-heavy
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# Flash chip size
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# esp_timer callbacks dispatched from the ISR (ESP_TIMER_ISR)
+CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD=y
+
+# vTaskList() in print_task_stats() (common_functions.c)
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y
+
+# IMU wiring and driver task settings (esp32_BNO08x)
+CONFIG_ESP32_BNO08X_GPIO_HINT=21
+CONFIG_ESP32_BNO08X_GPIO_RST=33
+CONFIG_ESP32_BNO08X_GPIO_CS=22
+CONFIG_ESP32_BNO08X_SPI_QUEUE_SZ=10
+CONFIG_ESP32_BNO08X_DATA_PROC_TASK_SZ=4096
+# CONFIG_ESP32_BNO08x_LOG_STATEMENTS is not set
+
+# Wi-Fi buffers for ESP-NOW
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=15
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=64
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER=y
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=32
+# CONFIG_ESP_WIFI_STA_DISCONNECTED_PM_ENABLE is not set

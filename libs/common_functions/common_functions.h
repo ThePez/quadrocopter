@@ -14,7 +14,7 @@
 #include <esp_err.h>
 #include <esp_log.h>
 
-#define ARG_UNUSED(arg) ((void) arg)
+#define ARG_UNUSED(arg) ((void)arg)
 
 // Handle differences between ESP32 and ESP32-S3
 #ifdef CONFIG_IDF_TARGET_ESP32
@@ -25,10 +25,10 @@
 // SPI pins
 #define HSPI_MISO 12
 #define HSPI_MOSI 13
-#define HSPI_CLK 14
+#define HSPI_CLK  14
 #define VSPI_MISO 19
 #define VSPI_MOSI 23
-#define VSPI_CLK 18
+#define VSPI_CLK  18
 
 // I2C Pins
 #define I2C_SCL 22
@@ -40,16 +40,16 @@
 #define VSPI_HOST_COMPAT SPI3_HOST
 
 // ESP32-S3 SPI pins (commonly used)
-#define HSPI_MISO 13
-#define HSPI_MOSI 11
-#define HSPI_CLK 12
-#define VSPI_MISO 37
-#define VSPI_MOSI 35
-#define VSPI_CLK 36
+#define HSPI_MISO        13
+#define HSPI_MOSI        11
+#define HSPI_CLK         12
+#define VSPI_MISO        37
+#define VSPI_MOSI        35
+#define VSPI_CLK         36
 
 // ESP32-S3 I2C pins (commonly used)
-#define I2C_SCL 9
-#define I2C_SDA 8
+#define I2C_SCL          9
+#define I2C_SDA          8
 
 #endif
 
@@ -58,7 +58,7 @@
         esp_err_t _err = (code);                                                                   \
         if (_err != ESP_OK) {                                                                      \
             ESP_LOGE(TAG, msg, ##__VA_ARGS__);                                                     \
-            return _err;                                                                            \
+            return _err;                                                                           \
         }                                                                                          \
     } while (0)
 
@@ -66,7 +66,7 @@
     do {                                                                                           \
         esp_err_t _err = (code);                                                                   \
         if (_err != ESP_OK) {                                                                      \
-            return _err;                                                                            \
+            return _err;                                                                           \
         }                                                                                          \
     } while (0)
 
@@ -95,7 +95,7 @@ esp_err_t spi_bus_setup(spi_host_device_t host);
  *
  * @return Pointer to a newly allocated I2C master bus handle.
  */
-i2c_master_bus_handle_t* i2c_bus_setup(void);
+i2c_master_bus_handle_t *i2c_bus_setup(void);
 
 /**
  * @brief Logs a snapshot of all FreeRTOS tasks (name, state, priority, stack, ID) via printf.

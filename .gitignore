@@ -14,3 +14,5 @@ gen_compile_commands.py
 config-app/regex-help-file.txt
 config-app/user_defaults.json
 config-app/sessions/
+
+config-app-c/sessions/

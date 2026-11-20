@@ -30,18 +30,17 @@ const uint8_t bridge_mac[6] = {0x58, 0x8C, 0x81, 0xCA, 0x5F, 0x80};
 
 // Encryption keys
 // PMK (Primary Master Key) - must be same on both devices
-const uint8_t pmk_key[16] = {0x9F, 0x3C, 0x8A, 0x2D, 0x7B, 0x14,
-                             0xE6, 0xF0, 0xA5, 0xC9, 0xD2, 0xB1};
+const uint8_t pmk_key[16] = {0x9F, 0x3C, 0x8A, 0x2D, 0x7B, 0x14, 0xE6, 0xF0, 0xA5, 0xC9, 0xD2, 0xB1, 0x20, 0x29, 0xFF, 0x67};
 // LMK (Local Master Key) - must be same for this peer relationship
-const uint8_t lmk_key[16] = {0x4A, 0x7E, 0x1D, 0x9C, 0x0F, 0x6B,
-                             0x2A, 0x8E, 0x5D, 0x3C, 0x91, 0xB4};
+const uint8_t lmk_key[16] = {0x4A, 0x7E, 0x1D, 0x9C, 0x0F, 0x6B, 0x2A, 0x8E, 0x5D, 0x3C, 0x91, 0xB4, 0xFB, 0xDF, 0x19, 0x88};
 
 // Queue for recieving packets
 QueueHandle_t wifiQueue = NULL;
 SemaphoreHandle_t wifiSendSemaphore = NULL;
 
 // Returns a readable name for a peer's MAC address, for log messages.
-static const char* peer_name(const uint8_t* mac) {
+static const char *peer_name(const uint8_t *mac)
+{
     if (mac == NULL) {
         return "unknown";
     }
@@ -62,7 +61,8 @@ static const char* peer_name(const uint8_t* mac) {
 }
 
 // ESP-NOW send-complete callback.
-static void espnow_send_cb(const uint8_t* mac_addr, esp_now_send_status_t status) {
+static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status)
+{
     xSemaphoreGive(wifiSendSemaphore);
     if (status != ESP_NOW_SEND_SUCCESS) {
         ESP_LOGW(TAG, "MESSAGE NOT DELIVERED to %s", peer_name(mac_addr));
@@ -70,15 +70,21 @@ static void espnow_send_cb(const uint8_t* mac_addr, esp_now_send_status_t status
 }
 
 // ESP-NOW receive callback.
-static void espnow_recv_cb(const esp_now_recv_info_t* recv_info, const uint8_t* data, int len) {
+static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len)
+{
 
     ARG_UNUSED(recv_info);
-    ARG_UNUSED(len);
 
-    struct wifi_packet_t* packet = (struct wifi_packet_t*) data;
+    // Reject anything that isn't exactly one packet, before reading any of it
+    if (len != (int)sizeof(struct wifi_packet_t)) {
+        ESP_LOGW(TAG, "Wrong size wifi packet recieved (%d bytes)", len);
+        return;
+    }
+
+    struct wifi_packet_t *packet = (struct wifi_packet_t *)data;
 
     // Check CRC16 value
-    if (packet->crc16 != esp_rom_crc16_le(0, (uint8_t*) &packet->data, sizeof(union packet_data))) {
+    if (packet->crc16 != esp_rom_crc16_le(0, (uint8_t *)&packet->data, sizeof(union packet_data))) {
         // Invalid Packet
         ESP_LOGW(TAG, "Invalid wifi packet recieved");
         return;
@@ -91,7 +97,8 @@ static void espnow_recv_cb(const esp_now_recv_info_t* recv_info, const uint8_t* 
 }
 
 // Brings up WiFi in station mode on a fixed channel with power-save disabled.
-static esp_err_t wifi_init(void) {
+static esp_err_t wifi_init(void)
+{
     CHECK_ERR(esp_netif_init(), "netif init failed");
     CHECK_ERR(esp_event_loop_create_default(), "event loop failed");
 
@@ -114,7 +121,8 @@ static esp_err_t wifi_init(void) {
 }
 
 // Initializes the ESP-NOW driver.
-static esp_err_t espnow_init(const uint8_t* peer_addr[], uint8_t num_peers) {
+static esp_err_t espnow_init(const uint8_t *peer_addr[], uint8_t num_peers)
+{
     // Initialize ESP-NOW
     CHECK_ERR(esp_now_init(), "init failed");
 
@@ -146,7 +154,8 @@ static esp_err_t espnow_init(const uint8_t* peer_addr[], uint8_t num_peers) {
     return ESP_OK;
 }
 
-esp_err_t esp_now_module_init(const uint8_t* peer_addr[], uint8_t num_peers) {
+esp_err_t esp_now_module_init(const uint8_t *peer_addr[], uint8_t num_peers)
+{
 
     // Ensure NVS is initialised
     CHECK_ERR_NO_LOG(nvs_init());
@@ -154,10 +163,8 @@ esp_err_t esp_now_module_init(const uint8_t* peer_addr[], uint8_t num_peers) {
     // Initialise WiFi
     CHECK_ERR_NO_LOG(wifi_init());
 
-    // Initialise ESP-NOW
-    CHECK_ERR_NO_LOG(espnow_init(peer_addr, num_peers));
-
-    // Now initialise the messaging primatives
+    // Create the messaging primatives first: the ESP-NOW callbacks use them and can
+    // fire as soon as they are registered inside espnow_init()
     do {
         // Try until it works...
         wifiQueue = xQueueCreate(10, sizeof(struct wifi_packet_t));
@@ -170,11 +177,15 @@ esp_err_t esp_now_module_init(const uint8_t* peer_addr[], uint8_t num_peers) {
 
     xSemaphoreGive(wifiSendSemaphore);
 
+    // Initialise ESP-NOW
+    CHECK_ERR_NO_LOG(espnow_init(peer_addr, num_peers));
+
     return ESP_OK;
 }
 
-esp_err_t esp_now_send_packet(const uint8_t* addr, struct wifi_packet_t* packet) {
+esp_err_t esp_now_send_packet(const uint8_t *addr, struct wifi_packet_t *packet)
+{
     // Add the CRC before sending
-    packet->crc16 = esp_rom_crc16_le(0, (uint8_t*) &packet->data, sizeof(union packet_data));
-    return esp_now_send(addr, (uint8_t*) packet, sizeof(struct wifi_packet_t));
+    packet->crc16 = esp_rom_crc16_le(0, (uint8_t *)&packet->data, sizeof(union packet_data));
+    return esp_now_send(addr, (uint8_t *)packet, sizeof(struct wifi_packet_t));
 }

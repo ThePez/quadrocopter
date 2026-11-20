@@ -46,9 +46,6 @@
 // (alpha = dt / (dt + 1 / (2 * pi * fc))). 1 = unfiltered.
 #define GYRO_LPF_ALPHA 0.6f
 
-// Throttle this far above min_throttle is treated as "stick down"
-#define IDLE_OFFSET 50.0f
-
 #define CRITICAL_THROTTLE_FRACTION 0.5f
 
 struct pid_feedback_t {
