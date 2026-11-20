@@ -15,25 +15,25 @@
 #include <esp_err.h>
 #include <freertos/FreeRTOS.h>
 
-#define MCPx_CS_PIN_DRONE 33  // Drone
+#define MCPx_CS_PIN_DRONE  33 // Drone
 #define MCPx_CS_PIN_REMOTE 22 // Remote
 
 #define MCP3208_SPI_START (1 << 10)
-#define MCP3208_SINGLE 1
-#define MCP3208_DIFF 0
+#define MCP3208_SINGLE    1
+#define MCP3208_DIFF      0
 
 // Channel control bits
-#define MCP3208_CHANNEL_0 0x0
-#define MCP3208_CHANNEL_1 0x1
-#define MCP3208_CHANNEL_2 0x2
-#define MCP3208_CHANNEL_3 0x3
-#define MCP3208_CHANNEL_4 0x4
-#define MCP3208_CHANNEL_5 0x5
-#define MCP3208_CHANNEL_6 0x6
-#define MCP3208_CHANNEL_7 0x7
+#define MCP3208_CHANNEL_0    0x0
+#define MCP3208_CHANNEL_1    0x1
+#define MCP3208_CHANNEL_2    0x2
+#define MCP3208_CHANNEL_3    0x3
+#define MCP3208_CHANNEL_4    0x4
+#define MCP3208_CHANNEL_5    0x5
+#define MCP3208_CHANNEL_6    0x6
+#define MCP3208_CHANNEL_7    0x7
 #define MCP3208_MAX_CHANNELS 8
 
-#define MCP3208_SINGLE_CHANNEL_MASK(channel) (0x0600 | ((channel & 0x0007) << 6))
+#define MCP3208_SINGLE_CHANNEL_MASK(channel)       (0x0600 | ((channel & 0x0007) << 6))
 #define MCP3208_DIFFERENTIAL_CHANNEL_MASK(channel) (0x0400 | ((channel & 0x0007) << 6))
 
 /**
@@ -46,7 +46,7 @@
  * @param channels Bitmask defining which channels should be sampled.
  * @param spiHost SPI host ID where the MCP3208 is connected.
  */
-esp_err_t mcpx_task_init(SemaphoreHandle_t* spiMutex, uint8_t channels, spi_host_device_t spiHost,
+esp_err_t mcpx_task_init(SemaphoreHandle_t *spiMutex, uint8_t channels, spi_host_device_t spiHost,
                          uint8_t cs);
 
 extern TaskHandle_t mcpxTaskHandle;

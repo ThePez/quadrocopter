@@ -18,14 +18,14 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 
-#define MCPx_STACK (configMINIMAL_STACK_SIZE * 2)
-#define MCPx_PRIORITY (tskIDLE_PRIORITY + 4)
+#define MCPx_STACK        (configMINIMAL_STACK_SIZE * 2)
+#define MCPx_PRIORITY     (tskIDLE_PRIORITY + 4)
 #define MCPx_QUEUE_LENGTH 5
-#define MCPx_DELAY (pdMS_TO_TICKS(10))
-#define TAG "MCPxTask"
+#define MCPx_DELAY        (pdMS_TO_TICKS(10))
+#define TAG               "MCPxTask"
 
 struct params_t {
-    SemaphoreHandle_t* spiMutex;
+    SemaphoreHandle_t *spiMutex;
     uint8_t channels;
     spi_host_device_t host;
 };
@@ -46,7 +46,8 @@ static spi_device_handle_t mcpxSpiHandle = NULL;
  * @param spiBus The SPI host device (e.g., HSPI_HOST or VSPI_HOST).
  * @return ESP_OK on success, or an ESP_FAIL reason on error.
  */
-static esp_err_t mcp3208_spi_init(spi_host_device_t spiBus) {
+static esp_err_t mcp3208_spi_init(spi_host_device_t spiBus)
+{
     // Setup the SPI for the radio module
     spi_device_interface_config_t deviceConfig = {
         .clock_speed_hz = 1000000,      // 1 MHz Clock speed
@@ -68,7 +69,8 @@ static esp_err_t mcp3208_spi_init(spi_host_device_t spiBus) {
  * @param spiBus SPI host to initialize the MCP3208 on.
  * @return ESP_OK if initialization succeeds, otherwise an error code.
  */
-static esp_err_t mcp3208_init(spi_host_device_t spiBus) {
+static esp_err_t mcp3208_init(spi_host_device_t spiBus)
+{
     CHECK_ERR(gpio_set_direction(MCP3208_CS_PIN, GPIO_MODE_OUTPUT), "SPI Pin CE failed");
     // Cycle the CS pin upon startup, for ~50us
     gpio_set_level(MCP3208_CS_PIN, 0);
@@ -91,13 +93,14 @@ static esp_err_t mcp3208_init(spi_host_device_t spiBus) {
  * @param type Conversion mode: MCP3208_SINGLE (1) or MCP3208_DIFF (0).
  * @return The 12-bit raw ADC result.
  */
-static uint16_t mcp3208_read_adc_channel(uint8_t channel, uint8_t type) {
+static uint16_t mcp3208_read_adc_channel(uint8_t channel, uint8_t type)
+{
 
     uint16_t channelMask =
         (type) ? MCP3208_SINGLE_CHANNEL_MASK(channel) : MCP3208_DIFFERENTIAL_CHANNEL_MASK(channel);
 
     // Store the request as 2 bytes
-    uint8_t txBuffer[3] = {(uint8_t) (channelMask >> 8), (uint8_t) (channelMask & 0xFF), 0x00};
+    uint8_t txBuffer[3] = {(uint8_t)(channelMask >> 8), (uint8_t)(channelMask & 0xFF), 0x00};
     uint8_t rxBuffer[3];
 
     spi_transaction_t transaction = {
@@ -115,8 +118,9 @@ static uint16_t mcp3208_read_adc_channel(uint8_t channel, uint8_t type) {
 
 // Waits for a notification, samples all channels selected in the channel
 // mask over SPI, and posts the results to mcpxQueue.
-static void mcpx_task(void* pvParams) {
-    (void) pvParams;
+static void mcpx_task(void *pvParams)
+{
+    (void)pvParams;
     SemaphoreHandle_t spiMutex = *params.spiMutex;
     uint8_t channelMask = params.channels;
     spi_host_device_t host = params.host;
@@ -165,13 +169,14 @@ static void mcpx_task(void* pvParams) {
     }
 }
 
-esp_err_t mcpx_task_init(SemaphoreHandle_t* spiMutex, uint8_t channels, spi_host_device_t spiHost,
-                         uint8_t cs) {
+esp_err_t mcpx_task_init(SemaphoreHandle_t *spiMutex, uint8_t channels, spi_host_device_t spiHost,
+                         uint8_t cs)
+{
     params.spiMutex = spiMutex;
     params.channels = channels;
     params.host = spiHost;
     MCP3208_CS_PIN = cs;
-    BaseType_t result = xTaskCreate((void*) &mcpx_task, "MCPxTask", MCPx_STACK, NULL,
-                                    MCPx_PRIORITY, &mcpxTaskHandle);
+    BaseType_t result = xTaskCreate((void *)&mcpx_task, "MCPxTask", MCPx_STACK, NULL, MCPx_PRIORITY,
+                                    &mcpxTaskHandle);
     return (result == pdPASS) ? ESP_OK : ESP_FAIL;
 }

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from parser import parse_structs, parse_unions, parse_enum, parse_defines, read_file
 from layout import build_formats
 
-_ESPNOW_HEADER = Path(__file__).resolve().parent.parent / "libs" / "espnow-comm" / "espnow_comm.h"
+_ESPNOW_HEADER = Path(__file__).resolve().parent.parent / "libs" / "espnow-comm" / "protocol.h"
 
 _header_text = read_file(str(_ESPNOW_HEADER))
 _structs, _is_packed = parse_structs(str(_ESPNOW_HEADER))

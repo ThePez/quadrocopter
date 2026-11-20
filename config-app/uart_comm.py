@@ -41,11 +41,18 @@ def frame_size(payload_size: int) -> int:
 def encode_config_packet(packet_id: int, payload: bytes = b"") -> bytes:
     """Builds the wire bytes for a GUI -> bridge config-update packet.
 
-    Mirrors struct wifi_packet_t's layout: `payload` occupies the leading
-    bytes of the data union (zero-padded out to WIFI_PACKET_UNION_SIZE),
-    followed by a crc16 computed the same way esp_now_send_packet() does
-    (over just the union bytes) and the packet_id. Wrapped with the magic
-    sync bytes uart_comm_read_frame() expects.
+    Mirrors struct wifi_packet_t in libs/espnow-comm/protocol.h, whose fields
+    are declared in this order:
+
+        uint8_t  packet_id;   offset 0
+        (1 byte of compiler padding so crc16 is 2-byte aligned)
+        uint16_t crc16;       offset 2
+        union packet_data data;   offset 4 (the union is 4-byte aligned)
+
+    `payload` occupies the leading bytes of the data union (zero-padded out to
+    WIFI_PACKET_UNION_SIZE). crc16 is computed the same way
+    esp_now_send_packet() does (over just the union bytes). The whole thing is
+    wrapped with the magic sync bytes uart_comm_read_frame() expects.
 
     CONFIG_SAVE/REMOTE_CONFIG_SAVE have no payload - packet_id alone is the
     whole message, so the default empty payload is zero-padded as-is.
@@ -57,8 +64,14 @@ def encode_config_packet(packet_id: int, payload: bytes = b"") -> bytes:
 
     data = payload.ljust(WIFI_PACKET_UNION_SIZE, b"\x00")
     crc = crc16(data)
-    packet = data + struct.pack("<H", crc) + bytes([packet_id])
-    return MAGIC + packet.ljust(WIFI_PACKET_SIZE, b"\x00")
+    # "<BxH": packet_id, one pad byte, crc16 - then the union starts at offset 4.
+    packet = struct.pack("<BxH", packet_id, crc) + data
+    if len(packet) != WIFI_PACKET_SIZE:
+        raise RuntimeError(
+            f"wifi_packet_t layout changed: built {len(packet)} bytes but the header "
+            f"says {WIFI_PACKET_SIZE} - update encode_config_packet()"
+        )
+    return MAGIC + packet
 
 
 class FrameDecoder:
