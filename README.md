@@ -68,10 +68,10 @@ PID coefficients can be updated live from the desktop app without reflashing.
 ### Motor Mixing (X-Configuration)
 
 ```
-Front-Left  (A): throttle − pitch + roll − yaw
-Back-Left   (B): throttle + pitch + roll + yaw
-Back-Right  (C): throttle + pitch − roll − yaw
-Front-Right (D): throttle − pitch − roll + yaw
+Front-Left  (A): throttle − pitch + roll + yaw
+Back-Left   (B): throttle + pitch + roll − yaw
+Back-Right  (C): throttle + pitch − roll + yaw
+Front-Right (D): throttle − pitch − roll − yaw
 ```
 
 Each motor output is clamped to [1050, 2000] µs.

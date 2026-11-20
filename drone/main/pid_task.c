@@ -264,14 +264,17 @@ static void update_escs(float throttle, const struct flight_cfg_t *cfg)
     float roll = outputPID.roll_pid;
     float yaw = outputPID.yaw_pid;
 
+    // Positive pitch = rear motors faster = front tips down. Positive roll = left motors
+    // faster = right side tips down. Positive yaw = A and C faster = the frame turns left
+    // (counter-clockwise from above), matching the sensor's positive yaw.
     // Front left
-    motors.motorA = (uint16_t)constrainf(throttle - pitch + roll - yaw, idle, max);
+    motors.motorA = (uint16_t)constrainf(throttle - pitch + roll + yaw, idle, max);
     // Rear left
-    motors.motorB = (uint16_t)constrainf(throttle + pitch + roll + yaw, idle, max);
+    motors.motorB = (uint16_t)constrainf(throttle + pitch + roll - yaw, idle, max);
     // Rear right
-    motors.motorC = (uint16_t)constrainf(throttle + pitch - roll - yaw, idle, max);
+    motors.motorC = (uint16_t)constrainf(throttle + pitch - roll + yaw, idle, max);
     // Front right
-    motors.motorD = (uint16_t)constrainf(throttle - pitch - roll + yaw, idle, max);
+    motors.motorD = (uint16_t)constrainf(throttle - pitch - roll - yaw, idle, max);
 
     esc_pwm_set_duty_cycle(MOTOR_A, motors.motorA);
     esc_pwm_set_duty_cycle(MOTOR_B, motors.motorB);
