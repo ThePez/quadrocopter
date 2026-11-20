@@ -32,15 +32,6 @@ static TaskHandle_t inputTaskHandle = NULL;
 // Handles a remote data update
 static void handle_remote_update(struct remote_telemetry_t *remote)
 {
-    xSemaphoreTake(droneData.mutex, portMAX_DELAY);
-    droneData.lastRemoteTime = esp_timer_get_time();
-
-    // Only set armed state if not in angle failsafe state
-    if (!(droneData.status_mask & ANGLE_FAIL)) {
-        droneData.armed = 1;
-    }
-    xSemaphoreGive(droneData.mutex);
-
     xSemaphoreTake(cfgMutex, portMAX_DELAY);
     float minThrottle = (float)droneCfg.min_throttle;
     float maxThrottle = (float)droneCfg.max_throttle;
@@ -58,6 +49,24 @@ static void handle_remote_update(struct remote_telemetry_t *remote)
     // Yaw Input (inverted due to physical position of joystick on remote)
     reading = -mapf(remote->yaw, ADC_MIN, ADC_MAX, -maxRate, maxRate);
     remoteIn.yaw = (fabsf(reading) < 5) ? 0 : reading;
+
+    // Arm only with the throttle stick down, and never while the angle failsafe is
+    // active. This also applies after a lost link: when packets resume the drone
+    // stays disarmed until the stick is lowered, so it can't spin up on its own.
+    uint8_t justArmed = 0;
+    xSemaphoreTake(droneData.mutex, portMAX_DELAY);
+    droneData.lastRemoteTime = esp_timer_get_time();
+    if (!droneData.armed && !(droneData.status_mask & ANGLE_FAIL) &&
+        remoteIn.throttle < minThrottle + IDLE_OFFSET) {
+        droneData.armed = 1;
+        justArmed = 1;
+    }
+
+    xSemaphoreGive(droneData.mutex);
+    if (justArmed) {
+        ESP_LOGI(TAG, "Armed");
+    }
+
     // Flight mode
     set_flight_mode((remote->flight_mode == ACRO) ? ACRO : STABILISE);
 }

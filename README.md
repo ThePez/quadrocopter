@@ -27,9 +27,8 @@ Custom quadrocopter firmware written in C using the ESP-IDF framework. The syste
 | Component         | Interface | Pins / Notes                           |
 |-------------------|-----------|----------------------------------------|
 | 4× ESC            | MCPWM     | GPIOs 17, 16, 27, 26 — 250 Hz RC PWM  |
-| BNO085 IMU        | I2C       | 9-DOF attitude sensor                  |
-| MCP3208 ADC       | SPI       | 8-ch 12-bit ADC for battery monitoring |
-| Battery monitor   | GPIO 34   | Voltage divider (46.4 kΩ + 9.84 kΩ)   |
+| BNO085 IMU        | SPI       | 9-DOF attitude sensor                  |
+| Battery monitor   | GPIO 35   | ESP32 ADC1 ch 7, divider (46.4 kΩ + 9.84 kΩ) |
 
 ### Remote (ESP32)
 | Component       | Interface | Notes                               |
@@ -90,7 +89,7 @@ Each motor output is clamped to [1050, 2000] µs.
 
 ## Wireless Communication (ESP-NOW)
 
-- **Channel**: 9, long-range mode enabled
+- **Channel**: 9
 - **Encryption**: PMK + LMK configured per peer
 - **Remote → Drone**: 20 Hz control packets (throttle, pitch, roll, yaw, flight mode)
 - **Drone → Bridge**: 50 Hz telemetry packets (angles, rates, PID outputs, motor PWM, battery mV)

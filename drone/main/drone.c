@@ -209,8 +209,8 @@ static void battery_callback(void *args)
     // Only worth alerting if the remote is there to hear it. A send to a remote that
     // is off is never acknowledged, and the radio retries it for ~50 ms, holding
     // the send slot that telemetry needs. (lastRemoteTime is 0 until first contact.)
-    uint8_t remoteHeard = (lastRemoteTime != 0) &&
-                          (esp_timer_get_time() - lastRemoteTime < REMOTE_ALERT_TIMEOUT_US);
+    uint8_t remoteHeard =
+        (lastRemoteTime != 0) && (esp_timer_get_time() - lastRemoteTime < REMOTE_ALERT_TIMEOUT_US);
 
     if (battery_voltage < lowVoltage && remoteHeard) {
         struct wifi_packet_t packet = {.packet_id = POWER};
@@ -409,8 +409,58 @@ esp_err_t init_drone(void)
     return ESP_OK;
 }
 
+// Range-checks a DRONE_CFG update before it is applied. Written as !(x >= lo) style so
+// a NaN fails every check. Logs the first field that is out of range.
+static uint8_t drone_config_valid(const struct drone_config_telemetry_t *p)
+{
+    if (!(p->min_throttle >= MOTOR_SPEED_MIN && p->min_throttle <= 1500.0f)) {
+        ESP_LOGE(TAG, "Config rejected: min_throttle %.0f not in 1000-1500", p->min_throttle);
+        return 0;
+    }
+
+    if (!(p->max_throttle >= p->min_throttle + 200.0f && p->max_throttle <= MOTOR_SPEED_MAX)) {
+        ESP_LOGE(TAG, "Config rejected: max_throttle %.0f must be 200+ above min and <= 2000",
+                 p->max_throttle);
+        return 0;
+    }
+
+    if (!(p->max_rate > 0.0f && p->max_rate <= 1000.0f)) {
+        ESP_LOGE(TAG, "Config rejected: max_rate %.1f not in 0-1000", p->max_rate);
+        return 0;
+    }
+
+    if (!(p->max_angle > 0.0f && p->max_angle <= 45.0f)) {
+        ESP_LOGE(TAG, "Config rejected: max_angle %.1f not in 0-45", p->max_angle);
+        return 0;
+    }
+
+    if (!(p->fail_angle > p->max_angle && p->fail_angle <= 80.0f)) {
+        ESP_LOGE(TAG, "Config rejected: fail_angle %.1f must be above max_angle and <= 80",
+                 p->fail_angle);
+        return 0;
+    }
+
+    if (p->coms_timeout_us < 100000 || p->coms_timeout_us > 10000000) {
+        ESP_LOGE(TAG, "Config rejected: coms_timeout %lu us not in 0.1-10 s",
+                 (unsigned long)p->coms_timeout_us);
+        return 0;
+    }
+
+    if (p->critical_voltage > p->low_voltage) {
+        ESP_LOGE(TAG, "Config rejected: critical voltage %u mV is above low voltage %u mV",
+                 p->critical_voltage, p->low_voltage);
+        return 0;
+    }
+
+    return 1;
+}
+
 esp_err_t drone_config_handle_update(struct drone_config_telemetry_t *packet)
 {
+    if (!drone_config_valid(packet)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
     xSemaphoreTake(cfgMutex, portMAX_DELAY);
     droneCfg.max_rate = packet->max_rate;
     droneCfg.max_angle = packet->max_angle;
