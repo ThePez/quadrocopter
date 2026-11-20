@@ -38,6 +38,10 @@ FIELDS: List[str] = [
     "motor_fr",
     "battery",
     "loop_dt_max_us",
+    "cmd_pitch",
+    "cmd_roll",
+    "cmd_yaw",
+    "cmd_throttle",
 ]
 
 # Rows between flushes to disk, so a crash loses at most about a second

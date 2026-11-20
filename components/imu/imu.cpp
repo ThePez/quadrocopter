@@ -39,17 +39,20 @@ static void imu_data_callback(void)
     struct imu_packet_t packet;
 
     // With the sensor as mounted
-    // X-axis -> Pitch (angle and rate)
-    // Y-axis -> Roll  (angle and rate)
+    // X-axis -> Pitch (angle and rate), NEGATED: the sensor reads the front tipping down
+    //           as negative, but the motor mixer treats positive pitch as front down
+    //           (rear motors faster). Without the minus sign the pitch loop has positive
+    //           feedback and any forward lean grows. Positive pitch = front DOWN.
+    // Y-axis -> Roll  (angle and rate): positive = right side down, matching the mixer
     // Z-axis -> Yaw
 #ifdef ENABLE_SH2_HAL
     bno08x_ang_vel_t velocity = imu.rpt.rv_gyro_integrated.get_vel();
-    packet.pitchRate = RAD_2_DEG(velocity.x);
+    packet.pitchRate = -RAD_2_DEG(velocity.x);
     packet.rollRate = RAD_2_DEG(velocity.y);
     packet.yawRate = RAD_2_DEG(velocity.z);
 
     bno08x_euler_angle_t euler = imu.rpt.rv_gyro_integrated.get_euler(true);
-    packet.pitchAngle = euler.x;
+    packet.pitchAngle = -euler.x;
     packet.rollAngle = euler.y;
     packet.yawAngle = euler.z;
 

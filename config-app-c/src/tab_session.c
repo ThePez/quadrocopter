@@ -32,6 +32,10 @@ static const Group GROUPS[SESSION_PLOTS] = {
     {"Motors", "Pulse width (\xC2\xB5s)", 4, {"Front|Left", "Front|Right", "Back|Left", "Back|Right"},
      {RED_C, PURPLE_C, CYAN_C, ORANGE_C}, {F_MOTOR_FL, F_MOTOR_FR, F_MOTOR_BL, F_MOTOR_BR}},
     {"Battery", "Voltage (mV)", 1, {"Battery"}, {{228, 232, 240, 255}}, {F_BATTERY}},
+    {"Stick Commands", "Commanded rate (\xC2\xB0/s)", 3, {"Pitch", "Roll", "Yaw"},
+     {RED_C, GREEN_C, BLUE_C}, {F_CMD_PITCH, F_CMD_ROLL, F_CMD_YAW}},
+    {"Throttle Command", "Throttle (\xC2\xB5s)", 1, {"Throttle"}, {{228, 232, 240, 255}},
+     {F_CMD_THROTTLE}},
     {"Loop Timing", "Worst gap between control cycles (\xC2\xB5s)", 1, {"Loop dt max"},
      {{228, 232, 240, 255}}, {F_LOOP_DT_MAX_US}},
 };

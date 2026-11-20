@@ -46,6 +46,15 @@ PLOT_GROUPS: Dict[str, Tuple[str, List[Tuple[str, str, str]]]] = {
         ],
     ),
     "Battery": ("Voltage (mV)", [("Battery", "battery", "k")]),
+    "Stick Commands": (
+        "Commanded rate (°/s)",
+        [
+            ("Pitch", "cmd_pitch", "r"),
+            ("Roll", "cmd_roll", "g"),
+            ("Yaw", "cmd_yaw", "b"),
+        ],
+    ),
+    "Throttle Command": ("Throttle (µs)", [("Throttle", "cmd_throttle", "k")]),
     "Loop Timing": (
         "Worst gap between control cycles (µs)",
         [("Loop dt max", "loop_dt_max_us", "k")],

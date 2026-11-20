@@ -3,6 +3,7 @@
  * attitude view and the current values in a column on the right.
  */
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -18,6 +19,12 @@ static const char *const MOTOR_NAMES[4] = {"Front|Left", "Front|Right", "Back|Le
 /* FL, FR, BL, BR. The 3D view uses the same colours per motor. */
 static const Color MOTOR_COLORS[4] = {UI_SERIES_RED, UI_SERIES_PURPLE, UI_SERIES_CYAN, UI_SERIES_ORANGE};
 
+/* The pilot's five control signals on one axis, as a percentage of stick travel:
+ * throttle 0..100, pitch/roll/yaw -100..100, and the flight mode as 0 (ACRO) or 100 (STABILISE). */
+static const char *const CONTROL_NAMES[5] = {"Throttle", "Pitch", "Roll", "Yaw", "Mode"};
+static const Color CONTROL_COLORS[5] = {UI_SERIES_ORANGE, UI_SERIES_RED, UI_SERIES_GREEN, UI_SERIES_BLUE,
+                                        UI_SERIES_PURPLE};
+
 void telemetry_tab_init(TelemetryTab *t)
 {
     memset(t, 0, sizeof *t);
@@ -25,6 +32,8 @@ void telemetry_tab_init(TelemetryTab *t)
     plot_init_live(&t->rates, "Angular Rates", "\xC2\xB0/s", 3, AXIS_NAMES, AXIS_COLORS, LIVE_POINTS);
     plot_init_live(&t->pid, "PID Outputs", "\xC2\xB5s", 3, AXIS_NAMES, AXIS_COLORS, LIVE_POINTS);
     plot_init_live(&t->motors, "Motors", "pulse \xC2\xB5s", 4, MOTOR_NAMES, MOTOR_COLORS, LIVE_POINTS);
+    plot_init_live(&t->controls, "Controls", "% of stick (mode: 100 = STABILISE)", 5, CONTROL_NAMES,
+                   CONTROL_COLORS, LIVE_POINTS);
     att_init(&t->att);
 }
 
@@ -34,21 +43,33 @@ void telemetry_tab_free(TelemetryTab *t)
     plot_free(&t->rates);
     plot_free(&t->pid);
     plot_free(&t->motors);
+    plot_free(&t->controls);
     att_free(&t->att);
 }
 
-void telemetry_tab_push(TelemetryTab *t, const Sample *s)
+static float percent(float value, float lo, float hi)
+{
+    return hi > lo ? (value - lo) / (hi - lo) * 100.0f : 0.0f;
+}
+
+void telemetry_tab_push(TelemetryTab *t, const Sample *s, StickScale scale)
 {
     const float *v = s->v;
     float angles[3] = {v[F_PITCH_ANGLE], v[F_ROLL_ANGLE], v[F_YAW_ANGLE]};
     float rates[3] = {v[F_PITCH_RATE], v[F_ROLL_RATE], v[F_YAW_RATE]};
     float pid[3] = {v[F_PITCH_PID], v[F_ROLL_PID], v[F_YAW_PID]};
     float motors[4] = {v[F_MOTOR_FL], v[F_MOTOR_FR], v[F_MOTOR_BL], v[F_MOTOR_BR]};
+    float controls[5] = {percent(v[F_CMD_THROTTLE], scale.min_throttle, scale.max_throttle),
+                         percent(v[F_CMD_PITCH], -scale.max_rate, scale.max_rate) * 2.0f - 100.0f,
+                         percent(v[F_CMD_ROLL], -scale.max_rate, scale.max_rate) * 2.0f - 100.0f,
+                         percent(v[F_CMD_YAW], -scale.max_rate, scale.max_rate) * 2.0f - 100.0f,
+                         v[F_MODE] != 0.0f ? 100.0f : 0.0f};
 
     plot_push(&t->angles, s->t, angles);
     plot_push(&t->rates, s->t, rates);
     plot_push(&t->pid, s->t, pid);
     plot_push(&t->motors, s->t, motors);
+    plot_push(&t->controls, s->t, controls);
     att_set(&t->att, v[F_PITCH_ANGLE], v[F_ROLL_ANGLE], v[F_YAW_ANGLE]);
 }
 
@@ -74,6 +95,9 @@ static const ValueRow VALUES[] = {
     {"Roll rate", F_ROLL_RATE, " \xC2\xB0/s"}, {"Yaw rate", F_YAW_RATE, " \xC2\xB0/s"},
     {"Mode", F_MODE, ""},                    {"Battery", F_BATTERY, " V"},
     {"Loop dt max", F_LOOP_DT_MAX_US, " \xC2\xB5s"},
+    /* What the pilot is commanding, as the drone received it */
+    {"Cmd pitch", F_CMD_PITCH, " \xC2\xB0/s"}, {"Cmd roll", F_CMD_ROLL, " \xC2\xB0/s"},
+    {"Cmd yaw", F_CMD_YAW, " \xC2\xB0/s"},     {"Throttle cmd", F_CMD_THROTTLE, " \xC2\xB5s"},
 };
 #define N_VALUES ((int)(sizeof VALUES / sizeof VALUES[0]))
 
@@ -89,6 +113,7 @@ static Color format_value(const App *app, const ValueRow *row, char *out, size_t
         snprintf(out, cap, "%s", v != 0.0f ? "STABILISE" : "ACRO");
         return v != 0.0f ? UI_ACCENT : UI_ORANGE;
     case F_LOOP_DT_MAX_US:
+    case F_CMD_THROTTLE:
         snprintf(out, cap, "%.0f%s", (double)v, row->unit);
         break;
     case F_BATTERY: /* mV -> V */
@@ -146,7 +171,7 @@ void telemetry_tab_draw(App *app, Rectangle area)
     const float toolbar_h = 40;
 
     /* ---- toolbar ---- */
-    ui_segmented((Rectangle){area.x, area.y, 0, toolbar_h}, "All;Angles;Rates;PID;Motors", &t->sub);
+    ui_segmented((Rectangle){area.x, area.y, 0, toolbar_h}, "Overview;Angles;Rates;PID;Motors;Controls", &t->sub);
 
     float right = area.x + area.width;
     bool recording = recorder_active(&app->rec);
@@ -171,6 +196,7 @@ void telemetry_tab_draw(App *app, Rectangle area)
         plot_clear(&t->rates);
         plot_clear(&t->pid);
         plot_clear(&t->motors);
+        plot_clear(&t->controls);
     }
     right = clear_r.x - 16;
 
@@ -187,8 +213,9 @@ void telemetry_tab_draw(App *app, Rectangle area)
     Rectangle plots = {body.x, body.y, body.width - side_w - UI_GAP, body.height};
     Rectangle side = {plots.x + plots.width + UI_GAP, body.y, side_w, body.height};
 
-    Plot *all[4] = {&t->angles, &t->rates, &t->pid, &t->motors};
+    Plot *all[5] = {&t->angles, &t->rates, &t->pid, &t->motors, &t->controls};
     if (t->sub == 0) {
+        /* Overview: angles, rates, PID and motors in a 2x2 grid (Controls has its own tab) */
         for (int i = 0; i < 4; i++) {
             Rectangle cell = ui_col(ui_row(plots, 2, i / 2, UI_GAP), 2, i % 2, UI_GAP);
             plot_draw(all[i], cell);

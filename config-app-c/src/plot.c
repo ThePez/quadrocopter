@@ -443,6 +443,8 @@ void plot_draw(Plot *p, Rectangle b)
             continue;
         for (int i = i0; i <= i1; i++) {
             double v = p->y[s][i];
+            if (isnan(v))
+                continue;
             if (v < lo)
                 lo = v;
             if (v > hi)
@@ -505,11 +507,17 @@ void plot_draw(Plot *p, Rectangle b)
         if (!p->y[s] || visible < 2)
             continue;
         Vector2 prev = {PX(p->t[i0]), PY(p->y[s][i0])};
+        bool prev_ok = !isnan(p->y[s][i0]);
         for (int i = i0 + stride; i <= i1 + stride - 1; i += stride) {
             int idx = i > i1 ? i1 : i;
-            Vector2 cur = {PX(p->t[idx]), PY(p->y[s][idx])};
-            DrawLineEx(prev, cur, 2.2f, p->colors[s]);
+            float yv = p->y[s][idx];
+            bool cur_ok = !isnan(yv);
+            Vector2 cur = {PX(p->t[idx]), cur_ok ? PY(yv) : 0.0f};
+            /* A NaN sample is a gap: nothing is drawn to or from it. */
+            if (prev_ok && cur_ok)
+                DrawLineEx(prev, cur, 2.2f, p->colors[s]);
             prev = cur;
+            prev_ok = cur_ok;
         }
     }
     EndScissorMode();
@@ -535,8 +543,11 @@ void plot_draw(Plot *p, Rectangle b)
         for (int s = 0; s < p->nseries; s++) {
             char shown[48];
             display_name(p->names[s], shown, sizeof shown);
-            snprintf(rows[s + 1], sizeof rows[0], "%s  %.3f", shown,
-                     p->y[s] ? (double)p->y[s][near] : 0.0);
+            if (p->y[s] && isnan(p->y[s][near]))
+                snprintf(rows[s + 1], sizeof rows[0], "%s  --", shown);
+            else
+                snprintf(rows[s + 1], sizeof rows[0], "%s  %.3f", shown,
+                         p->y[s] ? (double)p->y[s][near] : 0.0);
             bw = fmaxf(bw, ui_text_width(rows[s + 1], UI_SMALL));
         }
         float bh = (float)(p->nseries + 1) * 18 + 12;

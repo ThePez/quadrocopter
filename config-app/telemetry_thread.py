@@ -53,6 +53,10 @@ class TelemetryThread(QThread):
                             "motor_fr": values[13],
                             "battery": values[14],
                             "loop_dt_max_us": values[15],
+                            "cmd_pitch": values[16],
+                            "cmd_roll": values[17],
+                            "cmd_yaw": values[18],
+                            "cmd_throttle": values[19],
                             "timestamp": datetime.now(),
                         }
                         self.telemetry_received.emit(telemetry)

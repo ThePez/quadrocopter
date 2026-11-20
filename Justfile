@@ -28,10 +28,15 @@ build target: _idf-check
 
     idf.py -C {{target}} -B {{target}}/build build
 
-flash target port=default_port: _idf-check
-    idf.py -C {{target}} -B {{target}}/build \
-        {{ if port != "" { "-p " + port } else { "" } }} \
-        flash
+# Flashes a target, after checking the connected board really is that device:
+# the chip type must match (ESP32 vs ESP32-S3) and its MAC must be the one
+# libs/espnow-comm/espnow_comm.c lists for the role (see scripts/check_device.sh).
+# Add `force` to override a MAC mismatch, e.g. `just flash drone /dev/ttyUSB0 force`.
+flash target port=default_port force="": _idf-check
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port=$(scripts/check_device.sh "{{target}}" "{{port}}" "{{force}}")
+    idf.py -C {{target}} -B {{target}}/build -p "$port" flash
 
 monitor target port=default_port: _idf-check
     idf.py -C {{target}} -B {{target}}/build \
@@ -55,12 +60,28 @@ build-esc-program: _idf-check
     fi
     idf.py -C drone -B drone/build-esc-program -D SDKCONFIG=sdkconfig.esc-program -D ESC_PROGRAMMING_MODE=1 build
 
-flash-esc-program port=default_port: _idf-check
-    idf.py -C drone -B drone/build-esc-program \
-        {{ if port != "" { "-p " + port } else { "" } }} \
-        flash
+# The ESC programming image runs on the drone's board, so it gets the same check
+flash-esc-program port=default_port force="": _idf-check
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port=$(CHECK_DEVICE_HINT="just flash-esc-program" scripts/check_device.sh drone "{{port}}" "{{force}}")
+    idf.py -C drone -B drone/build-esc-program -p "$port" flash
 
 monitor-esc-program port=default_port: _idf-check
     idf.py -C drone -B drone/build-esc-program \
         {{ if port != "" { "-p " + port } else { "" } }} \
         monitor
+
+# Desktop config app: live telemetry, PID tuning and session recording.
+# gui-c is the C app (raylib), gui-py is the Python (PyQt) one.
+gui-c:
+    make -C config-app-c run
+
+gui-c-build:
+    make -C config-app-c
+
+gui-c-clean:
+    make -C config-app-c clean
+
+gui-py:
+    cd config-app && python3 main.py

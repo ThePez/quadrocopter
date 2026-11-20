@@ -27,6 +27,10 @@ enum Field {
     F_MOTOR_FR,
     F_BATTERY,
     F_LOOP_DT_MAX_US,
+    F_CMD_PITCH,
+    F_CMD_ROLL,
+    F_CMD_YAW,
+    F_CMD_THROTTLE,
     F_COUNT
 };
 

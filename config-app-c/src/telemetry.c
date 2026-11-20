@@ -18,6 +18,7 @@ const char *const FIELD_NAMES[F_COUNT] = {
     "pitch_angle", "roll_angle", "yaw_angle", "pitch_rate", "roll_rate", "yaw_rate",
     "mode",        "pitch_pid",  "roll_pid",  "yaw_pid",    "motor_fl",  "motor_bl",
     "motor_br",    "motor_fr",   "battery",   "loop_dt_max_us",
+    "cmd_pitch",   "cmd_roll",   "cmd_yaw",   "cmd_throttle",
 };
 
 void sample_from_wire(Sample *s, const struct sensor_telemetry_t *w, double t)
@@ -39,6 +40,10 @@ void sample_from_wire(Sample *s, const struct sensor_telemetry_t *w, double t)
     s->v[F_MOTOR_FR] = w->motor_d;
     s->v[F_BATTERY] = w->battery;
     s->v[F_LOOP_DT_MAX_US] = w->loop_dt_max_us;
+    s->v[F_CMD_PITCH] = w->cmd_pitch;
+    s->v[F_CMD_ROLL] = w->cmd_roll;
+    s->v[F_CMD_YAW] = w->cmd_yaw;
+    s->v[F_CMD_THROTTLE] = w->cmd_throttle;
 }
 
 struct Telemetry {

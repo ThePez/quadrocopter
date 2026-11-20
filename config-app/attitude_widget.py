@@ -88,7 +88,8 @@ class Attitude3DWidget(QWidget):
         # aerospace ZYX Euler convention.
         tr: pg.Transform3D = pg.Transform3D()
         tr.rotate(yaw, 0, 0, 1)
-        tr.rotate(pitch, 1, 0, 0)
+        # Positive pitch is front DOWN (the firmware's convention), so tip the nose down
+        tr.rotate(-pitch, 1, 0, 0)
         tr.rotate(roll, 0, 1, 0)
 
         for item in self.rigid_body_items:

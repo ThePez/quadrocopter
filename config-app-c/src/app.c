@@ -189,7 +189,7 @@ static void handle_sample(App *app, const Sample *s)
     app->status = TS_RECEIVING;
     app->last = *s;
     app->have_last = true;
-    telemetry_tab_push(&app->ttab, s);
+    telemetry_tab_push(&app->ttab, s, drone_tab_stick_scale(&app->dtab));
 }
 
 static void open_dropped_session(App *app)

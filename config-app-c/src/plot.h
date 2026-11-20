@@ -33,7 +33,7 @@ typedef struct {
     /* Data. For live plots these are owned; for static plots they alias. */
     bool live;
     double *t;
-    float *y[PLOT_MAX_SERIES]; /* a NULL series is skipped */
+    float *y[PLOT_MAX_SERIES]; /* a NULL series is skipped; NaN values leave a gap */
     int count, cap;
 
     /* Live-plot controls */

@@ -12,8 +12,8 @@
 #include "util.h"
 
 /* If these fire, protocol.h no longer matches what the bridge frames. */
-_Static_assert(sizeof(struct sensor_telemetry_t) == 52, "sensor_telemetry_t size changed");
-_Static_assert(sizeof(struct wifi_packet_t) == 56, "wifi_packet_t size changed");
+_Static_assert(sizeof(struct sensor_telemetry_t) == 68, "sensor_telemetry_t size changed");
+_Static_assert(sizeof(struct wifi_packet_t) == 72, "wifi_packet_t size changed");
 
 uint16_t uart_crc16(const uint8_t *data, size_t len)
 {

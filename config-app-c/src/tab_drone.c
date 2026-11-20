@@ -34,6 +34,12 @@ static const DroneField FIELDS[DRONE_FIELDS] = {
     [D_CRITICAL_VOLTAGE] = {"Critical Voltage (mV)", "CRITICAL_VOLTAGE", 1.0},
 };
 
+StickScale drone_tab_stick_scale(const DroneTab *t)
+{
+    return (StickScale){(float)t->f[D_MAX_RATE].value, (float)t->f[D_MIN_THROTTLE].value,
+                        (float)t->f[D_MAX_THROTTLE].value};
+}
+
 void drone_tab_init(DroneTab *t, App *app)
 {
     memset(t, 0, sizeof *t);

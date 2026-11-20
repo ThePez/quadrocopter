@@ -289,6 +289,10 @@ static void system_data_callback(void *args)
     telemetry->motor_c = motors.motorC;
     telemetry->motor_d = motors.motorD;
     telemetry->loop_dt_max_us = pid_task_take_loop_dt_max_us();
+    telemetry->cmd_pitch = remoteIn.pitch;
+    telemetry->cmd_roll = remoteIn.roll;
+    telemetry->cmd_yaw = remoteIn.yaw;
+    telemetry->cmd_throttle = (uint16_t)remoteIn.throttle;
 
     // Only allow sending after the previous message was sent.
     static uint32_t attempts = 0;

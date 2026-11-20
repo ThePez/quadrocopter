@@ -22,6 +22,9 @@ struct sensor_telemetry_t {
     uint16_t motor_a, motor_b, motor_c, motor_d;
     uint16_t battery;
     uint16_t loop_dt_max_us;
+    // What the pilot is commanding, as the drone received it (stick -> deg/s, throttle in us)
+    float cmd_pitch, cmd_roll, cmd_yaw;
+    uint16_t cmd_throttle;
 };
 
 struct remote_telemetry_t {

@@ -23,7 +23,8 @@ static Vector3 to_rl(V3 v)
 static V3 rotate(V3 p, float pitch, float roll, float yaw)
 {
     float cr = cosf(roll * DEG2RAD), sr = sinf(roll * DEG2RAD);
-    float cp = cosf(pitch * DEG2RAD), sp = sinf(pitch * DEG2RAD);
+    /* Positive pitch is front DOWN (the firmware's convention), so the nose goes down. */
+    float cp = cosf(pitch * DEG2RAD), sp = -sinf(pitch * DEG2RAD);
     float cy = cosf(yaw * DEG2RAD), sy = sinf(yaw * DEG2RAD);
 
     V3 r = {p.x * cr + p.z * sr, p.y, -p.x * sr + p.z * cr};

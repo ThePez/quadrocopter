@@ -17,14 +17,20 @@ struct App;
 /* ---- Telemetry ---- */
 
 typedef struct {
-    int sub; /* 0..3 plots, 4 = 3D attitude */
-    Plot angles, rates, pid, motors;
+    int sub; /* 0 = overview (angles, rates, PID, motors), 1..5 = one plot (those four, then controls) */
+    Plot angles, rates, pid, motors, controls;
     Attitude3D att;
 } TelemetryTab;
 
 void telemetry_tab_init(TelemetryTab *t);
 void telemetry_tab_free(TelemetryTab *t);
-void telemetry_tab_push(TelemetryTab *t, const Sample *s);
+/* Limits needed to show the pilot's commands as a percentage of stick travel. */
+typedef struct {
+    float max_rate;                  /* deg/s at full stick */
+    float min_throttle, max_throttle; /* us at the bottom / top of the throttle stick */
+} StickScale;
+
+void telemetry_tab_push(TelemetryTab *t, const Sample *s, StickScale scale);
 void telemetry_tab_draw(struct App *app, Rectangle area);
 
 /* ---- PID tuning ---- */
@@ -60,6 +66,8 @@ typedef struct {
 } DroneTab;
 
 void drone_tab_init(DroneTab *t, struct App *app);
+/* Max rate and throttle range as set on the Drone Config tab. */
+StickScale drone_tab_stick_scale(const DroneTab *t);
 void drone_tab_draw(struct App *app, Rectangle area);
 
 /* ---- Remote config ---- */
@@ -94,7 +102,7 @@ void console_tab_draw(struct App *app, Rectangle area);
 
 /* ---- Session viewer ---- */
 
-#define SESSION_PLOTS 6
+#define SESSION_PLOTS 8
 
 typedef struct {
     bool open;
