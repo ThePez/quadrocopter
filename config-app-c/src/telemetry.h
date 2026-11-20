@@ -44,6 +44,12 @@ typedef struct {
 /* motor_a..d on the wire are FL, BL, BR, FR. */
 void sample_from_wire(Sample *s, const struct sensor_telemetry_t *w, double t);
 
+/* A config acknowledgement relayed by the bridge. */
+typedef struct {
+    uint8_t id;      /* PID_ACK, DRONE_CFG_ACK or REMOTE_CFG_ACK */
+    uint16_t status; /* 0 = applied; otherwise the firmware's esp_err_t */
+} AckEvent;
+
 typedef struct Telemetry Telemetry;
 
 /* Starts a reader thread on `fd`. The caller keeps ownership of the fd and must
@@ -53,6 +59,9 @@ void telemetry_stop(Telemetry *t);
 
 /* Moves up to `max` queued samples into `out` (oldest first). Returns the count. */
 int telemetry_poll(Telemetry *t, Sample *out, int max);
+
+/* Moves up to `max` queued acks into `out` (oldest first). Returns the count. */
+int telemetry_poll_acks(Telemetry *t, AckEvent *out, int max);
 
 /* True exactly once if the serial read failed (e.g. USB unplugged); the reason
  * is copied into `err`. */

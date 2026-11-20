@@ -65,7 +65,61 @@ static void current_values(const DroneTab *t, double out[DRONE_FIELDS])
         out[i] = t->f[i].value;
 }
 
-static bool send_config(DroneTab *t)
+/* What a request hands to its completion callback: a copy, since the fields may have changed
+ * by the time the ack arrives. */
+typedef struct {
+    double v[DRONE_FIELDS];
+    bool then_save; /* follow with the flash save once this update is confirmed */
+} DroneSnap;
+
+static void on_store_done(App *app, const void *user, bool ok)
+{
+    const DroneSnap *s = user;
+    if (!ok) {
+        app_log(app, "Drone config: not saved as default (the drone did not confirm the flash save)");
+        return;
+    }
+
+    /* The drone has it in flash: now remember the values as this GUI's working defaults. */
+    KVSet updates = {0};
+    for (int i = 0; i < DRONE_FIELDS; i++)
+        kv_set(&updates, FIELDS[i].define, s->v[i] * FIELDS[i].scale);
+
+    if (app_save_defaults(app, "drone", &updates, &app->drone_defaults))
+        app_log(app, "Saved drone config tab as default");
+    else
+        app_log(app, "Failed to save drone config defaults");
+}
+
+static bool send_store(App *app, const DroneSnap *s)
+{
+    if (!app_send_then(app, DRONE_CFG_STORE, NULL, 0, on_store_done, s, sizeof *s))
+        return false;
+    app_log(app, "-> Sent DRONE_CFG_STORE (persist to flash)");
+    return true;
+}
+
+static void on_config_done(App *app, const void *user, bool ok)
+{
+    DroneSnap s = *(const DroneSnap *)user; /* a copy: send_store() below may start another request */
+    DroneTab *t = &app->dtab;
+
+    if (!ok) {
+        if (s.then_save)
+            app_log(app, "Drone config: save cancelled, the update was not applied");
+        return;
+    }
+
+    /* Confirmed: only now is this what the drone is running */
+    memcpy(t->sent, s.v, sizeof s.v);
+    t->sent_valid = true;
+
+    if (s.then_save)
+        send_store(app, &s);
+}
+
+/* Sends the config live (RAM only). It only counts as sent once the drone confirms. */
+static bool send_config(DroneTab *t, bool then_save)
 {
     App *app = t->app;
     if (!app_require_connection(app))
@@ -84,36 +138,31 @@ static bool send_config(DroneTab *t)
         .low_voltage = to_u16(v[D_LOW_VOLTAGE]),
         .critical_voltage = to_u16(v[D_CRITICAL_VOLTAGE]),
     };
-    if (!app_send(app, DRONE_CFG, &p, sizeof p))
+    DroneSnap snap = {.then_save = then_save};
+    memcpy(snap.v, v, sizeof v);
+    if (!app_send_then(app, DRONE_CFG, &p, sizeof p, on_config_done, &snap, sizeof snap))
         return false;
 
-    app_log(app, "-> Sent drone config update (live, not yet saved)");
-    memcpy(t->sent, v, sizeof v);
-    t->sent_valid = true;
+    app_log(app, "-> Sent drone config update (live, not yet saved), waiting for confirmation");
     return true;
 }
 
+/* Saving writes flash on the drone: the update goes first if the values changed, the save follows
+ * once the drone confirms it, and the values become this GUI's defaults once the save is confirmed. */
 static void do_save(DroneTab *t)
 {
     App *app = t->app;
     double v[DRONE_FIELDS];
     current_values(t, v);
 
-    if ((!t->sent_valid || memcmp(t->sent, v, sizeof v) != 0) && !send_config(t))
+    if (!t->sent_valid || memcmp(t->sent, v, sizeof v) != 0) {
+        send_config(t, true);
         return;
+    }
 
-    if (!app_send(app, DRONE_CFG_STORE, NULL, 0))
-        return;
-    app_log(app, "-> Sent DRONE_CFG_STORE (persist to flash)");
-
-    KVSet updates = {0};
-    for (int i = 0; i < DRONE_FIELDS; i++)
-        kv_set(&updates, FIELDS[i].define, v[i] * FIELDS[i].scale);
-
-    if (app_save_defaults(app, "drone", &updates, &app->drone_defaults))
-        app_log(app, "Saved drone config tab as default");
-    else
-        app_log(app, "Failed to save drone config defaults");
+    DroneSnap snap = {0};
+    memcpy(snap.v, v, sizeof v);
+    send_store(app, &snap);
 }
 
 static void on_save_confirmed(void *ctx, int button)
@@ -158,7 +207,7 @@ void drone_tab_draw(App *app, Rectangle area)
     Rectangle save_r = {bx - 210, bar.y + (bar.height - UI_BTN_H) / 2, 210, UI_BTN_H};
     Rectangle send_r = {save_r.x - 10 - 160, save_r.y, 160, UI_BTN_H};
     if (ui_button(send_r, "Send to drone", UI_ACCENT))
-        send_config(t);
+        send_config(t, false);
     if (ui_button(save_r, "Save to flash & default", UI_ORANGE) && app_require_connection(app))
         ui_modal_open("Save to Flash & Default",
                       "Persist the drone's currently-live config (including PID gains) to flash, and "

@@ -300,7 +300,7 @@ void pid_task_config_changed(void)
     atomic_store(&cfgDirty, true);
 }
 
-void pid_handle_config_update(struct pid_config_telemetry_t *packet)
+esp_err_t pid_handle_config_update(struct pid_config_telemetry_t *packet)
 {
 
     const char *axis_names[] = {"Pitch & Roll", "Yaw"};
@@ -308,12 +308,12 @@ void pid_handle_config_update(struct pid_config_telemetry_t *packet)
 
     if (packet->axis > 1) {
         ESP_LOGE(TAG, "Invalid axis: %d", packet->axis);
-        return;
+        return ESP_FAIL;
     }
 
     if (packet->mode > 1) {
         ESP_LOGE(TAG, "Invalid mode: %d", packet->mode);
-        return;
+        return ESP_FAIL;
     }
 
     // Yaw only supports Rate mode
@@ -353,6 +353,7 @@ void pid_handle_config_update(struct pid_config_telemetry_t *packet)
     // New gains also clear the integrators
     atomic_store(&gainsDirty, true);
     atomic_store(&cfgDirty, true);
+    return ESP_OK;
 }
 
 // Main PID task loop: runs once per IMU sample. Checks failsafes, runs the

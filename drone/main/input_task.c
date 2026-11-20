@@ -28,6 +28,9 @@
 #define INPUT_TASK_PRIO  (tskIDLE_PRIORITY + 2)
 
 static TaskHandle_t inputTaskHandle = NULL;
+static TaskHandle_t ackTaskHandle = NULL;
+
+static QueueHandle_t ackQueue = NULL;
 
 // Handles a remote data update
 static void handle_remote_update(struct remote_telemetry_t *remote)
@@ -71,13 +74,37 @@ static void handle_remote_update(struct remote_telemetry_t *remote)
     set_flight_mode((remote->flight_mode == ACRO) ? ACRO : STABILISE);
 }
 
+static void send_bridge_ack(enum esp_now_packet_id type, uint16_t status)
+{
+    struct wifi_packet_t packet = {.packet_id = type};
+    packet.data.result.status = status;
+    xQueueSendToBack(ackQueue, &packet, 0);
+}
+
+static void ack_task(void *pvParams)
+{
+    ARG_UNUSED(pvParams);
+
+    struct wifi_packet_t packet = {0};
+
+    while (1) {
+        xQueueReceive(ackQueue, &packet, portMAX_DELAY);
+        xSemaphoreTake(wifiSendSemaphore, portMAX_DELAY);
+        esp_err_t result = esp_now_send_packet(bridge_mac, &packet);
+        if (result != ESP_OK) {
+            xSemaphoreGive(wifiSendSemaphore);
+        }
+    }
+}
+
 // Main input task loop: blocks on wifiQueue and dispatches REMOTE, PID_CONFIG,
 // DRONE_CONFIG, and CONFIG_SAVE packets to their respective handlers.
 static void input_control(void *pvParams)
 {
     ARG_UNUSED(pvParams);
 
-    struct wifi_packet_t packet;
+    struct wifi_packet_t packet = {0};
+    esp_err_t err = ESP_OK;
 
     // Wait for the radio queue to be initialised (should already be done by this point)
     while (!wifiQueue) {
@@ -98,16 +125,19 @@ static void input_control(void *pvParams)
 
         case PID_CONFIG:
             ESP_LOGI(TAG, "PID Coefficient update");
-            pid_handle_config_update(&packet.data.pid_config);
+            err = pid_handle_config_update(&packet.data.pid_config);
+            send_bridge_ack(PID_ACK, err);
             break;
 
         case DRONE_CFG:
             ESP_LOGI(TAG, "Drone config update");
-            drone_config_handle_update(&packet.data.drone_config);
+            err = drone_config_handle_update(&packet.data.drone_config);
+            send_bridge_ack(DRONE_CFG_ACK, err);
             break;
 
         case DRONE_CFG_STORE:
-            drone_config_handle_save();
+            err = drone_config_handle_save();
+            send_bridge_ack(DRONE_CFG_ACK, err);
             break;
 
         default:
@@ -119,7 +149,10 @@ static void input_control(void *pvParams)
 
 esp_err_t input_task_init(void)
 {
+    ackQueue = xQueueCreate(10, sizeof(struct wifi_packet_t));
     BaseType_t result = xTaskCreatePinnedToCore(input_control, "INPUT_TASK", INPUT_TASK_STACK, NULL,
                                                 INPUT_TASK_PRIO, &inputTaskHandle, (BaseType_t)0);
-    return (result == pdPASS) ? ESP_OK : ESP_FAIL;
+    BaseType_t res2 = xTaskCreatePinnedToCore(ack_task, "ACK_TASK", INPUT_TASK_STACK, NULL,
+                                              INPUT_TASK_PRIO, &ackTaskHandle, (BaseType_t)0);
+    return (result == pdPASS && res2 == pdPASS && ackQueue) ? ESP_OK : ESP_FAIL;
 }

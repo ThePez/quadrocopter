@@ -13,6 +13,7 @@
 #include "util.h"
 
 #define QUEUE_CAP 2048
+#define ACK_CAP   32
 
 const char *const FIELD_NAMES[F_COUNT] = {
     "pitch_angle", "roll_angle", "yaw_angle", "pitch_rate", "roll_rate", "yaw_rate",
@@ -55,6 +56,8 @@ struct Telemetry {
     pthread_mutex_t mutex; /* guards everything below */
     Sample queue[QUEUE_CAP];
     int head, count;
+    AckEvent acks[ACK_CAP];
+    int ack_head, ack_count;
     bool lost;
     char err[160];
 };
@@ -75,6 +78,21 @@ static void on_frame(const struct sensor_telemetry_t *payload, void *ctx)
     pthread_mutex_unlock(&t->mutex);
 }
 
+static void on_ack(const struct wifi_packet_t *pkt, void *ctx)
+{
+    Telemetry *t = ctx;
+    AckEvent e = {.id = pkt->packet_id, .status = pkt->data.result.status};
+
+    pthread_mutex_lock(&t->mutex);
+    if (t->ack_count == ACK_CAP) { /* UI stalled: drop the oldest */
+        t->ack_head = (t->ack_head + 1) % ACK_CAP;
+        t->ack_count--;
+    }
+    t->acks[(t->ack_head + t->ack_count) % ACK_CAP] = e;
+    t->ack_count++;
+    pthread_mutex_unlock(&t->mutex);
+}
+
 static void *reader_main(void *arg)
 {
     Telemetry *t = arg;
@@ -83,7 +101,7 @@ static void *reader_main(void *arg)
     while (atomic_load(&t->running)) {
         ssize_t n = read(t->fd, buf, sizeof buf);
         if (n > 0) {
-            decoder_feed(&t->decoder, buf, (size_t)n, on_frame, t);
+            decoder_feed(&t->decoder, buf, (size_t)n, on_frame, on_ack, t);
         } else if (n < 0 && errno != EINTR && errno != EAGAIN) {
             pthread_mutex_lock(&t->mutex);
             t->lost = true;
@@ -133,6 +151,19 @@ int telemetry_poll(Telemetry *t, Sample *out, int max)
         out[n++] = t->queue[t->head];
         t->head = (t->head + 1) % QUEUE_CAP;
         t->count--;
+    }
+    pthread_mutex_unlock(&t->mutex);
+    return n;
+}
+
+int telemetry_poll_acks(Telemetry *t, AckEvent *out, int max)
+{
+    int n = 0;
+    pthread_mutex_lock(&t->mutex);
+    while (t->ack_count > 0 && n < max) {
+        out[n++] = t->acks[t->ack_head];
+        t->ack_head = (t->ack_head + 1) % ACK_CAP;
+        t->ack_count--;
     }
     pthread_mutex_unlock(&t->mutex);
     return n;

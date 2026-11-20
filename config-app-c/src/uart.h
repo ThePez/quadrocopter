@@ -1,11 +1,16 @@
 /*
  * Serial link to the bridge ESP32.
  *
- * Two frame shapes (mirrors bridge/main/bridge.c):
- *   bridge -> GUI : [0xAA 0x55][struct sensor_telemetry_t][crc16 LE]
- *   GUI -> bridge : [0xAA 0x55][struct wifi_packet_t]   (crc16 lives inside)
+ * One frame shape in both directions (mirrors bridge/main/bridge.c):
+ *   [0xAA 0x55][struct wifi_packet_t]   (the packet's crc16 lives inside it)
  *
- * Because both structs come from protocol.h, the wire layout is whatever the
+ * What the packet is comes from its packet_id:
+ *   bridge -> GUI : SENSOR (data.sensor is the telemetry), or a config ack
+ *                   PID_ACK / DRONE_CFG_ACK / REMOTE_CFG_ACK (data.result.status, 0 = OK).
+ *                   The bridge forwards the packet exactly as it received it.
+ *   GUI -> bridge : PID_CONFIG, DRONE_CFG, DRONE_CFG_STORE, REMOTE_CFG, REMOTE_CFG_STORE.
+ *
+ * Because the struct comes from protocol.h, the wire layout is whatever the
  * compiler says it is - the same as the firmware - so nothing is hand-parsed.
  */
 #ifndef UART_H
@@ -21,9 +26,9 @@
 
 #define UART_MAX_PORTS 32
 
-/* [magic x2][payload][crc16] - the bridge declares this struct __packed. */
-#define UART_TELEMETRY_FRAME_SIZE (2 + sizeof(struct sensor_telemetry_t) + 2)
-#define UART_CONFIG_FRAME_SIZE    (2 + sizeof(struct wifi_packet_t))
+/* [magic x2][struct wifi_packet_t] */
+#define UART_FRAME_SIZE        (2 + sizeof(struct wifi_packet_t))
+#define UART_CONFIG_FRAME_SIZE UART_FRAME_SIZE /* GUI -> bridge: same frame */
 
 typedef struct {
     char device[64];
@@ -53,17 +58,20 @@ size_t uart_encode_config_packet(uint8_t packet_id, const void *payload, size_t 
 /* ---- Telemetry frame decoder ---- */
 
 typedef void (*TelemetryFrameCb)(const struct sensor_telemetry_t *payload, void *ctx);
+typedef void (*AckFrameCb)(const struct wifi_packet_t *packet, void *ctx);
 
 typedef struct {
-    uint8_t buf[2 * UART_TELEMETRY_FRAME_SIZE + 256];
+    uint8_t buf[2 * UART_FRAME_SIZE + 256];
     size_t len;
 } FrameDecoder;
 
 void decoder_init(FrameDecoder *d);
 
-/* Feeds raw bytes and invokes `cb` once per CRC-valid frame. Resyncs after
- * corruption by discarding only the two magic bytes of a bad candidate frame.
+/* Feeds raw bytes and invokes `cb` once per CRC-valid SENSOR frame and `ack_cb` (may be
+ * NULL) once per CRC-valid ack frame; any other packet id is consumed and ignored. Resyncs
+ * after corruption by discarding only the two magic bytes of a bad candidate frame.
  * Returns the number of valid frames decoded. */
-int decoder_feed(FrameDecoder *d, const uint8_t *data, size_t n, TelemetryFrameCb cb, void *ctx);
+int decoder_feed(FrameDecoder *d, const uint8_t *data, size_t n, TelemetryFrameCb cb,
+                 AckFrameCb ack_cb, void *ctx);
 
 #endif

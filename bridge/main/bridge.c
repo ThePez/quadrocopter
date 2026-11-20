@@ -28,19 +28,12 @@
 #define UART_MAGIC_0 0xAA
 #define UART_MAGIC_1 0x55
 
-struct __packed uart_packet {
-    uint8_t magic[2];
-    struct sensor_telemetry_t payload;
-    uint16_t crc;
-};
-
 // Frames a sensor telemetry payload with a magic header and CRC16, then writes it to UART.
-static void uart_comm_write_frame(uart_port_t port, struct sensor_telemetry_t *payload)
+static void uart_comm_write_frame(uart_port_t port, const struct wifi_packet_t *packet)
 {
-    struct uart_packet packet = {.magic = {UART_MAGIC_0, UART_MAGIC_1}};
-    packet.payload = *payload;
-    packet.crc = esp_rom_crc16_le(0, (uint8_t *)payload, sizeof(struct sensor_telemetry_t));
-    uart_write_bytes(port, &packet, sizeof(struct uart_packet));
+    const uint8_t MAGIC[2] = {UART_MAGIC_0, UART_MAGIC_1};
+    uart_write_bytes(port, &MAGIC, sizeof(MAGIC));
+    uart_write_bytes(port, packet, sizeof(struct wifi_packet_t));
 }
 
 // Blocking state machine that reads a config-update frame off UART
@@ -98,9 +91,13 @@ static void telemetry_task(void *pvParameters)
     while (1) {
         // Check for telemetry from drone (ESP-NOW -> UART)
         if (xQueueReceive(wifiQueue, &telemetry, portMAX_DELAY) == pdTRUE) {
-            if (telemetry.packet_id == SENSOR) {
-                // Forward to laptop via UART
-                uart_comm_write_frame(UART_NUM, &telemetry.data.sensor);
+            switch (telemetry.packet_id) {
+            case SENSOR:
+            case DRONE_CFG_ACK:
+            case REMOTE_CFG_ACK:
+            case PID_ACK:
+                uart_comm_write_frame(UART_NUM, &telemetry);
+                break;
             }
         }
     }

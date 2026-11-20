@@ -35,6 +35,41 @@ typedef enum { TS_NONE, TS_RECEIVING, TS_TIMEOUT } TelemetryStatus;
 enum MainTab { TAB_TELEMETRY, TAB_PID, TAB_DRONE, TAB_REMOTE, TAB_CONSOLE, TAB_SESSION, TAB_COUNT };
 #define TAB_COUNT_VISIBLE(app) ((app)->stab.open ? TAB_COUNT : TAB_SESSION)
 
+/* ---- Config acknowledgements ----
+ * Each config packet gets an ack from the drone or remote (relayed by the bridge). Requests are
+ * tracked per ack type, one in flight at a time, so an ack can only belong to that request.
+ * Unanswered requests are re-sent; later ones for the same device wait their turn. */
+struct App;
+
+/* Called once when a tracked request finishes: ok = the device confirmed it applied it.
+ * Not ok covers a rejection, no ack after every retry, a failed write, and a disconnect.
+ * `user` is the copy of the caller's context given to app_send_then(). */
+typedef void (*AckDone)(struct App *app, const void *user, bool ok);
+#define ACK_USER_MAX 192
+
+typedef struct {
+    uint8_t frame[UART_CONFIG_FRAME_SIZE]; /* the encoded frame, re-sent on a retry */
+    size_t len;
+    AckDone done;
+    uint8_t user[ACK_USER_MAX];
+    size_t user_len;
+    const char *what; /* for messages, e.g. "Drone config" */
+    double timeout;   /* seconds to wait for each attempt's ack */
+    int max_attempts, attempts;
+} AckRequest;
+
+#define ACK_CHANNELS  3 /* PID gains, drone config, remote config */
+#define ACK_QUEUE_CAP 8
+
+typedef struct {
+    bool in_flight;
+    AckRequest cur;
+    double sent_at;
+    double quiet_until; /* ignore acks until then: a late duplicate must not count for the next request */
+    AckRequest queue[ACK_QUEUE_CAP];
+    int qhead, qcount;
+} AckChannel;
+
 typedef struct App {
     /* Connection */
     int fd;
@@ -53,6 +88,12 @@ typedef struct App {
     bool live_plots;
 
     Recorder rec;
+
+    /* Config acks, and the latest result shown in the sidebar */
+    AckChannel ack[ACK_CHANNELS];
+    char cfg_what[48], cfg_result[80];
+    bool cfg_ok;
+    double cfg_t; /* when the result was set; 0 = none */
 
     /* Firmware defaults overlaid with the GUI's saved overrides */
     KVSet pid_defaults, drone_defaults, remote_defaults;
@@ -87,8 +128,17 @@ bool app_require_connection(App *app);
 /* ---- Sending ---- */
 
 /* Frames `payload` as packet `id` and writes it to the bridge. Shows an error
- * dialog and returns false on failure. */
+ * dialog and returns false on failure. Config packets are then tracked until the ack
+ * arrives (or retried / reported as unconfirmed); one for a device that is still waiting
+ * on an earlier request is queued behind it. */
 bool app_send(App *app, uint8_t id, const void *payload, size_t len);
+
+/* As app_send(), but `done` is called once with the outcome (from app_update() or
+ * app_disconnect(), never from inside this call), and `user_len` bytes of `user` are copied
+ * for it. Returns false, without calling `done`, if the request could not be started or queued.
+ * `done` may itself call app_send_then(), e.g. to follow an update with a flash save. */
+bool app_send_then(App *app, uint8_t id, const void *payload, size_t len, AckDone done,
+                   const void *user, size_t user_len);
 
 /* Merges `updates` into the given section of user_defaults.json (re-reading
  * the file first so edits by the Python app aren't lost) and into `live`. */

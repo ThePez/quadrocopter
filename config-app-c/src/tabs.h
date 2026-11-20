@@ -35,6 +35,9 @@ void telemetry_tab_draw(struct App *app, Rectangle area);
 
 /* ---- PID tuning ---- */
 
+/* State of a group's last Send: waiting for the drone's ack, or not confirmed. */
+enum { PID_SENT_IDLE, PID_SENT_PENDING, PID_SENT_FAILED };
+
 typedef struct {
     struct App *app;
     int axis, mode; /* axis: 0 = pitch/roll, 1 = yaw; mode: 0 = rate, 1 = angle */
@@ -43,8 +46,10 @@ typedef struct {
     NumField kp, ki, kd, alpha;
     bool sent_valid; /* have the values below been sent live? */
     double sent_kp, sent_ki, sent_kd, sent_alpha;
-    char current[128];
+    char current[128]; /* the gains the drone last confirmed */
     bool current_set;
+    int state;         /* PID_SENT_* for the most recent Send */
+    char attempt[128]; /* that Send's gains, shown while it is unconfirmed */
 } PidGroup;
 
 typedef struct {

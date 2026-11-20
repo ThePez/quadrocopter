@@ -60,6 +60,10 @@ struct remote_config_telemetry_t {
     struct joystick_cal_telemetry_t throttle, pitch, roll, yaw;
 };
 
+struct config_ack {
+    uint16_t status;
+};
+
 union packet_data {
     struct sensor_telemetry_t sensor;
     struct remote_telemetry_t remote;
@@ -67,6 +71,7 @@ union packet_data {
     struct power_data_telemetry_t power;
     struct drone_config_telemetry_t drone_config;
     struct remote_config_telemetry_t remote_config;
+    struct config_ack result;
 };
 
 struct wifi_packet_t {
@@ -78,12 +83,15 @@ struct wifi_packet_t {
 enum esp_now_packet_id {
     SENSOR,
     REMOTE,
-    PID_CONFIG,
     POWER,
+    PID_CONFIG,
+    PID_ACK,
     DRONE_CFG,
     DRONE_CFG_STORE,
+    DRONE_CFG_ACK,
     REMOTE_CFG,
     REMOTE_CFG_STORE,
+    REMOTE_CFG_ACK,
 };
 
 #endif

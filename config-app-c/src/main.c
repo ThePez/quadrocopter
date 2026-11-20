@@ -74,6 +74,48 @@ static void draw_sidebar(App *app, float height, DropdownRects *dd)
         ny += 46;
     }
 
+    /* ---- Config requests: unconfirmed while waiting for the ack, then the result ---- */
+    const AckChannel *waiting = NULL;
+    double newest = -1.0;
+    for (int ch = 0; ch < ACK_CHANNELS; ch++)
+        if (app->ack[ch].in_flight && app->ack[ch].sent_at > newest) {
+            newest = app->ack[ch].sent_at;
+            waiting = &app->ack[ch];
+        }
+    for (int ch = 0; ch < ACK_CHANNELS && !waiting; ch++)
+        if (app->ack[ch].qcount > 0)
+            waiting = &app->ack[ch];
+
+    const char *what_src = NULL;
+    char result[96] = "";
+    Color c = UI_MUTED;
+    if (waiting) {
+        const AckRequest *r = waiting->in_flight ? &waiting->cur : &waiting->queue[waiting->qhead];
+        what_src = r->what;
+        if (waiting->in_flight && r->attempts > 1)
+            snprintf(result, sizeof result, "unconfirmed (try %d/%d)", r->attempts, r->max_attempts);
+        else
+            snprintf(result, sizeof result, "unconfirmed");
+        c = UI_ORANGE;
+    } else if (app->cfg_t > 0.0 && now_s() - app->cfg_t < 12.0) {
+        what_src = app->cfg_what; /* the latest result stays for a few seconds */
+        str_copy(result, sizeof result, app->cfg_result);
+        c = app->cfg_ok ? UI_GREEN : UI_RED;
+    }
+
+    if (what_src) {
+        char what[64];
+        str_copy(what, sizeof what, what_src);
+        /* Keep both lines inside the sidebar */
+        for (size_t n = strlen(what); n > 3 && ui_text_width(what, UI_SMALL + 1) > SIDEBAR_W - 56; )
+            what[--n] = '\0';
+        for (size_t n = strlen(result); n > 3 && ui_text_width(result, UI_SMALL) > SIDEBAR_W - 56; )
+            result[--n] = '\0';
+        ui_dot(26, height - 83, 5, c);
+        ui_text(what, 40, height - 91, UI_SMALL + 1, UI_TEXT);
+        ui_text(result, 40, height - 72, UI_SMALL, c);
+    }
+
     /* ---- Recording badge ---- */
     if (recorder_active(&app->rec)) {
         char text[64];

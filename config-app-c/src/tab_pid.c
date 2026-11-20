@@ -66,8 +66,93 @@ void pid_tab_init(PidTab *t, App *app)
 /* Actions                                                                   */
 /* ------------------------------------------------------------------------ */
 
-/* Sends the group's gains live (RAM only). */
-static bool send_pid(PidGroup *g)
+/* What a request hands to its completion callback: a copy, since the fields may have changed
+ * by the time the ack arrives. */
+typedef struct {
+    int group;
+    double kp, ki, kd, alpha;
+    bool then_save; /* follow with the flash save once this update is confirmed */
+} PidSnap;
+
+static void snap_text(const PidSnap *s, char *out, size_t cap)
+{
+    snprintf(out, cap, "Kp %.4g  Ki %.4g  Kd %.4g  a %.2g", s->kp, s->ki, s->kd, s->alpha);
+}
+
+static void on_store_done(App *app, const void *user, bool ok)
+{
+    const PidSnap *s = user;
+    PidGroup *g = &app->ptab.group[s->group];
+
+    if (!ok) {
+        app_log(app, "%s %s: not saved as default (the drone did not confirm the flash save)",
+                AXIS_NAMES[g->axis], g->title);
+        return;
+    }
+
+    /* The drone has it in flash: now remember the gains as this GUI's working defaults. */
+    char key[64];
+    KVSet updates = {0};
+    snprintf(key, sizeof key, "%s_KP", g->defaults_prefix);
+    kv_set(&updates, key, s->kp);
+    snprintf(key, sizeof key, "%s_KI", g->defaults_prefix);
+    kv_set(&updates, key, s->ki);
+    snprintf(key, sizeof key, "%s_KD", g->defaults_prefix);
+    kv_set(&updates, key, s->kd);
+    snprintf(key, sizeof key, "%s_KD_ALPHA", g->defaults_prefix);
+    kv_set(&updates, key, s->alpha);
+
+    if (app_save_defaults(app, "pid", &updates, &app->pid_defaults))
+        app_log(app, "Saved %s %s as default: Kp=%.4f, Ki=%.4f, Kd=%.4f", AXIS_NAMES[g->axis],
+                g->title, s->kp, s->ki, s->kd);
+    else
+        app_log(app, "Failed to save %s %s defaults", AXIS_NAMES[g->axis], g->title);
+}
+
+static bool send_store(App *app, const PidSnap *s)
+{
+    if (!app_send_then(app, DRONE_CFG_STORE, NULL, 0, on_store_done, s, sizeof *s))
+        return false;
+    app_log(app, "-> Sent DRONE_CFG_STORE (persist to flash)");
+    return true;
+}
+
+static void on_pid_done(App *app, const void *user, bool ok)
+{
+    PidSnap s = *(const PidSnap *)user; /* a copy: send_store() below may start another request */
+    PidGroup *g = &app->ptab.group[s.group];
+
+    if (!ok) {
+        g->state = PID_SENT_FAILED;
+        if (s.then_save)
+            app_log(app, "%s %s: save cancelled, the gains were not applied", AXIS_NAMES[g->axis],
+                    g->title);
+        return;
+    }
+
+    /* Confirmed: only now is this what the drone is running */
+    g->state = PID_SENT_IDLE;
+    g->sent_valid = true;
+    g->sent_kp = s.kp;
+    g->sent_ki = s.ki;
+    g->sent_kd = s.kd;
+    g->sent_alpha = s.alpha;
+    snprintf(g->current, sizeof g->current, "Kp %.4g   Ki %.4g   Kd %.4g   alpha %.2g", s.kp, s.ki,
+             s.kd, s.alpha);
+    g->current_set = true;
+
+    char event[160];
+    snprintf(event, sizeof event, "%s %s: Kp=%.4f Ki=%.4f Kd=%.4f a=%.2f", AXIS_NAMES[g->axis],
+             MODE_NAMES[g->mode], s.kp, s.ki, s.kd, s.alpha);
+    app_record_event(app, event);
+
+    if (s.then_save)
+        send_store(app, &s);
+}
+
+/* Sends the group's gains live (RAM only). They only count as sent, and only show as the
+ * drone's current gains, once the drone confirms. */
+static bool send_pid(PidGroup *g, bool then_save)
 {
     App *app = g->app;
     if (!app_require_connection(app))
@@ -85,29 +170,23 @@ static bool send_pid(PidGroup *g)
         .axis = (uint16_t)g->axis,
         .mode = (uint16_t)g->mode,
     };
-    if (!app_send(app, PID_CONFIG, &p, sizeof p))
+    PidSnap s = {.group = (int)(g - app->ptab.group),
+                 .kp = g->kp.value,
+                 .ki = g->ki.value,
+                 .kd = g->kd.value,
+                 .alpha = g->alpha.value,
+                 .then_save = then_save};
+    if (!app_send_then(app, PID_CONFIG, &p, sizeof p, on_pid_done, &s, sizeof s))
         return false;
 
-    g->sent_valid = true;
-    g->sent_kp = g->kp.value;
-    g->sent_ki = g->ki.value;
-    g->sent_kd = g->kd.value;
-    g->sent_alpha = g->alpha.value;
-
-    snprintf(g->current, sizeof g->current, "Kp %.4g   Ki %.4g   Kd %.4g   alpha %.2g", g->kp.value,
-             g->ki.value, g->kd.value, g->alpha.value);
-    g->current_set = true;
+    g->state = PID_SENT_PENDING;
+    snap_text(&s, g->attempt, sizeof g->attempt);
 
     char hint[48];
     d_filter_text(g->alpha.value, hint, sizeof hint);
-    app_log(app, "-> Sent %s %s: Kp=%.4f, Ki=%.4f, Kd=%.4f, D filter alpha=%.2f (%s)",
+    app_log(app, "-> Sent %s %s: Kp=%.4f, Ki=%.4f, Kd=%.4f, D filter alpha=%.2f (%s), waiting for confirmation",
             AXIS_NAMES[g->axis], MODE_NAMES[g->mode], g->kp.value, g->ki.value, g->kd.value,
             g->alpha.value, hint);
-
-    char event[160];
-    snprintf(event, sizeof event, "%s %s: Kp=%.4f Ki=%.4f Kd=%.4f a=%.2f", AXIS_NAMES[g->axis],
-             MODE_NAMES[g->mode], g->kp.value, g->ki.value, g->kd.value, g->alpha.value);
-    app_record_event(app, event);
     return true;
 }
 
@@ -117,36 +196,24 @@ static bool values_match_sent(const PidGroup *g)
            g->sent_kd == g->kd.value && g->sent_alpha == g->alpha.value;
 }
 
-/* The drone keeps PID gains inside its own config, so "save" means: make sure
- * the live gains are what's on screen, tell the drone to persist its config,
- * and remember the gains as this GUI's working defaults. */
+/* The drone keeps PID gains inside its own config, so "save" means: make sure the live gains are
+ * what's on screen (and confirmed), tell the drone to persist its config, and, once that is
+ * confirmed too, remember the gains as this GUI's working defaults. */
 static void do_save(PidGroup *g)
 {
     App *app = g->app;
 
-    if (!values_match_sent(g) && !send_pid(g))
+    if (!values_match_sent(g)) {
+        send_pid(g, true); /* the save follows once the drone confirms the gains */
         return;
+    }
 
-    if (!app_send(app, DRONE_CFG_STORE, NULL, 0))
-        return;
-    app_log(app, "-> Sent DRONE_CFG_STORE (persist to flash)");
-
-    char key[64];
-    KVSet updates = {0};
-    snprintf(key, sizeof key, "%s_KP", g->defaults_prefix);
-    kv_set(&updates, key, g->kp.value);
-    snprintf(key, sizeof key, "%s_KI", g->defaults_prefix);
-    kv_set(&updates, key, g->ki.value);
-    snprintf(key, sizeof key, "%s_KD", g->defaults_prefix);
-    kv_set(&updates, key, g->kd.value);
-    snprintf(key, sizeof key, "%s_KD_ALPHA", g->defaults_prefix);
-    kv_set(&updates, key, g->alpha.value);
-
-    if (app_save_defaults(app, "pid", &updates, &app->pid_defaults))
-        app_log(app, "Saved %s %s as default: Kp=%.4f, Ki=%.4f, Kd=%.4f", AXIS_NAMES[g->axis],
-                g->title, g->kp.value, g->ki.value, g->kd.value);
-    else
-        app_log(app, "Failed to save %s %s defaults", AXIS_NAMES[g->axis], g->title);
+    PidSnap s = {.group = (int)(g - app->ptab.group),
+                 .kp = g->kp.value,
+                 .ki = g->ki.value,
+                 .kd = g->kd.value,
+                 .alpha = g->alpha.value};
+    send_store(app, &s);
 }
 
 static void on_save_confirmed(void *ctx, int button)
@@ -187,7 +254,15 @@ static void draw_group(PidGroup *g, const char *title, Rectangle r)
     /* What the drone is currently running (as of the last Send). */
     Rectangle chip = {b.x, y, b.width, 30};
     ui_rrect(chip, 6, UI_FIELD);
-    if (g->current_set) {
+    if (g->state != PID_SENT_IDLE) {
+        /* The last Send hasn't been confirmed: show its gains, flagged */
+        bool pending = g->state == PID_SENT_PENDING;
+        Color flag = pending ? UI_ORANGE : UI_RED;
+        const char *label = pending ? "unconfirmed" : "not confirmed";
+        ui_dot(chip.x + 13, chip.y + 15, 3.5f, flag);
+        ui_text(g->attempt, chip.x + 24, chip.y + 7, UI_SMALL, UI_TEXT);
+        ui_text_right(label, chip.x + chip.width - 10, chip.y + 7, UI_SMALL, flag);
+    } else if (g->current_set) {
         ui_dot(chip.x + 13, chip.y + 15, 3.5f, UI_GREEN);
         ui_text(g->current, chip.x + 24, chip.y + 7, UI_SMALL, UI_TEXT);
     } else {
@@ -214,7 +289,7 @@ static void draw_group(PidGroup *g, const char *title, Rectangle r)
     if (ui_button((Rectangle){b.x, by, b.width, UI_BTN_H}, "Save to flash & default", UI_ORANGE))
         request_save(g);
     if (ui_button((Rectangle){b.x, by - UI_BTN_H - 8, b.width, UI_BTN_H}, "Send to drone", UI_ACCENT))
-        send_pid(g);
+        send_pid(g, false);
 }
 
 void pid_tab_draw(App *app, Rectangle area)

@@ -79,7 +79,69 @@ static struct joystick_cal_telemetry_t cal(const double j[3])
     return (struct joystick_cal_telemetry_t){to_u16(j[0]), to_u16(j[1]), to_u16(j[2])};
 }
 
-static bool send_config(RemoteTab *t)
+/* What a request hands to its completion callback: a copy, since the fields may have changed
+ * by the time the ack arrives. */
+typedef struct {
+    double v[3];
+    double j[4][3];
+    bool then_save; /* follow with the flash save once this update is confirmed */
+} RemoteSnap;
+
+static void on_store_done(App *app, const void *user, bool ok)
+{
+    const RemoteSnap *s = user;
+    if (!ok) {
+        app_log(app, "Remote config: not saved as default (the remote did not confirm the flash save)");
+        return;
+    }
+
+    /* The remote has it in flash: now remember the values as this GUI's working defaults. */
+    KVSet updates = {0};
+    for (int i = 0; i < 3; i++)
+        kv_set(&updates, VOLTAGE_DEFINES[i], s->v[i]);
+    for (int c = 0; c < 4; c++)
+        for (int w = 0; w < 3; w++) {
+            char key[48];
+            joystick_define(key, sizeof key, c, w);
+            kv_set(&updates, key, s->j[c][w]);
+        }
+
+    if (app_save_defaults(app, "remote", &updates, &app->remote_defaults))
+        app_log(app, "Saved remote config tab as default");
+    else
+        app_log(app, "Failed to save remote config defaults");
+}
+
+static bool send_store(App *app, const RemoteSnap *s)
+{
+    if (!app_send_then(app, REMOTE_CFG_STORE, NULL, 0, on_store_done, s, sizeof *s))
+        return false;
+    app_log(app, "-> Sent REMOTE_CFG_STORE (persist to flash)");
+    return true;
+}
+
+static void on_config_done(App *app, const void *user, bool ok)
+{
+    RemoteSnap s = *(const RemoteSnap *)user; /* a copy: send_store() below may start another request */
+    RemoteTab *t = &app->rtab;
+
+    if (!ok) {
+        if (s.then_save)
+            app_log(app, "Remote config: save cancelled, the update was not applied");
+        return;
+    }
+
+    /* Confirmed: only now is this what the remote is running */
+    memcpy(t->sent_voltage, s.v, sizeof s.v);
+    memcpy(t->sent_joystick, s.j, sizeof s.j);
+    t->sent_valid = true;
+
+    if (s.then_save)
+        send_store(app, &s);
+}
+
+/* Sends the config live (RAM only). It only counts as sent once the remote confirms. */
+static bool send_config(RemoteTab *t, bool then_save)
 {
     App *app = t->app;
     if (!app_require_connection(app))
@@ -97,16 +159,18 @@ static bool send_config(RemoteTab *t)
         .roll = cal(j[2]),
         .yaw = cal(j[3]),
     };
-    if (!app_send(app, REMOTE_CFG, &p, sizeof p))
+    RemoteSnap snap = {.then_save = then_save};
+    memcpy(snap.v, v, sizeof v);
+    memcpy(snap.j, j, sizeof j);
+    if (!app_send_then(app, REMOTE_CFG, &p, sizeof p, on_config_done, &snap, sizeof snap))
         return false;
 
-    app_log(app, "-> Sent remote config update (live, not yet saved)");
-    memcpy(t->sent_voltage, v, sizeof v);
-    memcpy(t->sent_joystick, j, sizeof j);
-    t->sent_valid = true;
+    app_log(app, "-> Sent remote config update (live, not yet saved), waiting for confirmation");
     return true;
 }
 
+/* Saving writes flash on the remote: the update goes first if the values changed, the save follows
+ * once the remote confirms it, and the values become this GUI's defaults once the save is confirmed. */
 static void do_save(RemoteTab *t)
 {
     App *app = t->app;
@@ -115,27 +179,15 @@ static void do_save(RemoteTab *t)
 
     bool same = t->sent_valid && memcmp(t->sent_voltage, v, sizeof v) == 0 &&
                 memcmp(t->sent_joystick, j, sizeof j) == 0;
-    if (!same && !send_config(t))
+    if (!same) {
+        send_config(t, true);
         return;
+    }
 
-    if (!app_send(app, REMOTE_CFG_STORE, NULL, 0))
-        return;
-    app_log(app, "-> Sent REMOTE_CFG_STORE (persist to flash)");
-
-    KVSet updates = {0};
-    for (int i = 0; i < 3; i++)
-        kv_set(&updates, VOLTAGE_DEFINES[i], v[i]);
-    for (int c = 0; c < 4; c++)
-        for (int w = 0; w < 3; w++) {
-            char key[48];
-            joystick_define(key, sizeof key, c, w);
-            kv_set(&updates, key, j[c][w]);
-        }
-
-    if (app_save_defaults(app, "remote", &updates, &app->remote_defaults))
-        app_log(app, "Saved remote config tab as default");
-    else
-        app_log(app, "Failed to save remote config defaults");
+    RemoteSnap snap = {0};
+    memcpy(snap.v, v, sizeof v);
+    memcpy(snap.j, j, sizeof j);
+    send_store(app, &snap);
 }
 
 static void on_save_confirmed(void *ctx, int button)
@@ -184,7 +236,7 @@ void remote_tab_draw(App *app, Rectangle area)
     float half = (ib.width - 8) / 2;
     float by = ib.y + ib.height - UI_BTN_H - 2;
     if (ui_button((Rectangle){ib.x, by, half, UI_BTN_H}, "Send", UI_ACCENT))
-        send_config(t);
+        send_config(t, false);
     if (ui_button((Rectangle){ib.x + half + 8, by, half, UI_BTN_H}, "Save", UI_ORANGE) &&
         app_require_connection(app))
         ui_modal_open("Save to Flash & Default",

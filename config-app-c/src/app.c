@@ -152,6 +152,8 @@ void app_connect(App *app)
     app_log(app, "Connected to %s at %d baud", device, baud);
 }
 
+static void ack_fail_all(App *app);
+
 void app_disconnect(App *app)
 {
     if (!app->connected && !app->tel)
@@ -171,6 +173,7 @@ void app_disconnect(App *app)
 
     app->connected = false;
     app->status = TS_NONE;
+    ack_fail_all(app); /* nothing can be answered any more */
 }
 
 /* ------------------------------------------------------------------------ */
@@ -202,6 +205,193 @@ static void open_dropped_session(App *app)
     UnloadDroppedFiles(files);
 }
 
+/* ------------------------------------------------------------------------ */
+/* Config acks                                                               */
+/* ------------------------------------------------------------------------ */
+
+enum { CH_PID, CH_DRONE, CH_REMOTE };
+
+static const uint8_t CHANNEL_ACK_ID[ACK_CHANNELS] = {PID_ACK, DRONE_CFG_ACK, REMOTE_CFG_ACK};
+
+typedef struct {
+    int channel;
+    const char *what;
+    double timeout;
+    int attempts;
+} AckRule;
+
+/* Saving writes flash on the device, so it gets a longer wait and fewer repeats. */
+static bool ack_rule(uint8_t id, AckRule *r)
+{
+    switch (id) {
+    case PID_CONFIG:
+        *r = (AckRule){CH_PID, "PID gains", 0.6, 3};
+        return true;
+    case DRONE_CFG:
+        *r = (AckRule){CH_DRONE, "Drone config", 0.6, 3};
+        return true;
+    case DRONE_CFG_STORE:
+        *r = (AckRule){CH_DRONE, "Drone config save", 1.5, 2};
+        return true;
+    case REMOTE_CFG:
+        *r = (AckRule){CH_REMOTE, "Remote config", 0.6, 3};
+        return true;
+    case REMOTE_CFG_STORE:
+        *r = (AckRule){CH_REMOTE, "Remote config save", 1.5, 2};
+        return true;
+    default:
+        return false;
+    }
+}
+
+static const char *channel_device(int ch)
+{
+    return ch == CH_REMOTE ? "remote" : "drone";
+}
+
+static void set_cfg_status(App *app, bool ok, const char *what, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(app->cfg_result, sizeof app->cfg_result, fmt, ap);
+    va_end(ap);
+
+    str_copy(app->cfg_what, sizeof app->cfg_what, what);
+    app->cfg_ok = ok;
+    app->cfg_t = now_s();
+    app_log(app, "%s: %s", app->cfg_what, app->cfg_result);
+}
+
+static const char *status_text(uint16_t status, char *buf, size_t cap)
+{
+    if (status == 0x102) /* ESP_ERR_INVALID_ARG: the drone range-checks config values */
+        return "invalid value";
+    snprintf(buf, cap, "error 0x%X", status);
+    return buf;
+}
+
+static bool ack_transmit(App *app, AckChannel *c)
+{
+    if (uart_write_all(app->fd, c->cur.frame, c->cur.len) != 0)
+        return false;
+    c->cur.attempts++;
+    c->sent_at = now_s();
+    return true;
+}
+
+/* Reports a request's outcome to whoever asked for it. */
+static void ack_finish(App *app, const AckRequest *r, bool ok)
+{
+    if (r->done)
+        r->done(app, r->user, ok);
+}
+
+static bool ack_start(App *app, AckChannel *c, const AckRequest *r)
+{
+    c->cur = *r;
+    c->cur.attempts = 0;
+    if (!ack_transmit(app, c)) {
+        c->in_flight = false;
+        set_cfg_status(app, false, r->what, "send failed (%s)", strerror(errno));
+        return false;
+    }
+    c->in_flight = true;
+    return true;
+}
+
+/* Starts the next waiting request once the channel is free and quiet. */
+static void ack_pump(App *app, AckChannel *c)
+{
+    if (c->in_flight || now_s() < c->quiet_until || c->qcount == 0)
+        return;
+    AckRequest next = c->queue[c->qhead];
+    c->qhead = (c->qhead + 1) % ACK_QUEUE_CAP;
+    c->qcount--;
+    if (!ack_start(app, c, &next))
+        ack_finish(app, &next, false);
+}
+
+static void handle_ack(App *app, const AckEvent *ev)
+{
+    for (int ch = 0; ch < ACK_CHANNELS; ch++) {
+        if (CHANNEL_ACK_ID[ch] != ev->id)
+            continue;
+
+        AckChannel *c = &app->ack[ch];
+        if (!c->in_flight || now_s() < c->quiet_until)
+            return; /* a late duplicate of an answer already used */
+
+        bool ok = ev->status == 0;
+        char buf[24];
+        if (ok)
+            set_cfg_status(app, true, c->cur.what, "confirmed");
+        else
+            set_cfg_status(app, false, c->cur.what, "rejected (%s)",
+                           status_text(ev->status, buf, sizeof buf));
+
+        /* After a retry the first attempt's ack may still be on its way: let it pass
+         * before the next request for this device starts. */
+        AckRequest finished = c->cur;
+        c->quiet_until = finished.attempts > 1 ? now_s() + 0.4 : 0.0;
+        c->in_flight = false;
+        ack_finish(app, &finished, ok);
+        ack_pump(app, c);
+        return;
+    }
+}
+
+static void ack_tick(App *app)
+{
+    for (int ch = 0; ch < ACK_CHANNELS; ch++) {
+        AckChannel *c = &app->ack[ch];
+
+        if (c->in_flight && now_s() - c->sent_at > c->cur.timeout) {
+            bool give_up = false;
+            if (c->cur.attempts < c->cur.max_attempts) {
+                app_log(app, "%s: no ack from the %s yet, sending again (%d of %d)", c->cur.what,
+                        channel_device(ch), c->cur.attempts + 1, c->cur.max_attempts);
+                if (!ack_transmit(app, c)) {
+                    set_cfg_status(app, false, c->cur.what, "send failed (%s)", strerror(errno));
+                    give_up = true;
+                }
+            } else {
+                set_cfg_status(app, false, c->cur.what, "no confirmation (%d tries)",
+                               c->cur.max_attempts);
+                c->quiet_until = now_s() + 0.4;
+                give_up = true;
+            }
+
+            if (give_up) {
+                AckRequest finished = c->cur;
+                c->in_flight = false;
+                ack_finish(app, &finished, false);
+            }
+        }
+
+        ack_pump(app, c);
+    }
+}
+
+/* On disconnect every waiting request is reported as unconfirmed, then the tracker is cleared. */
+static void ack_fail_all(App *app)
+{
+    for (int ch = 0; ch < ACK_CHANNELS; ch++) {
+        AckChannel *c = &app->ack[ch];
+        if (c->in_flight) {
+            AckRequest r = c->cur;
+            c->in_flight = false;
+            ack_finish(app, &r, false);
+        }
+        while (c->qcount > 0) {
+            AckRequest r = c->queue[c->qhead];
+            c->qhead = (c->qhead + 1) % ACK_QUEUE_CAP;
+            c->qcount--;
+            ack_finish(app, &r, false);
+        }
+    }
+    memset(app->ack, 0, sizeof app->ack);
+}
+
 void app_update(App *app)
 {
     if (app->tel) {
@@ -210,6 +400,12 @@ void app_update(App *app)
         while ((n = telemetry_poll(app->tel, batch, 128)) > 0)
             for (int i = 0; i < n; i++)
                 handle_sample(app, &batch[i]);
+
+        AckEvent acks[16];
+        while ((n = telemetry_poll_acks(app->tel, acks, 16)) > 0)
+            for (int i = 0; i < n; i++)
+                handle_ack(app, &acks[i]);
+        ack_tick(app);
 
         char err[160];
         if (telemetry_lost(app->tel, err, sizeof err)) {
@@ -229,10 +425,15 @@ void app_update(App *app)
 /* Sending / saving                                                          */
 /* ------------------------------------------------------------------------ */
 
-bool app_send(App *app, uint8_t id, const void *payload, size_t len)
+bool app_send_then(App *app, uint8_t id, const void *payload, size_t len, AckDone done,
+                   const void *user, size_t user_len)
 {
     if (!app_require_connection(app))
         return false;
+    if (user_len > ACK_USER_MAX) {
+        app_log(app, "Internal error: ack context too large (%zu bytes)", user_len);
+        return false;
+    }
 
     uint8_t frame[UART_CONFIG_FRAME_SIZE];
     size_t n = uart_encode_config_packet(id, payload, len, frame, sizeof frame);
@@ -241,13 +442,51 @@ bool app_send(App *app, uint8_t id, const void *payload, size_t len)
         return false;
     }
 
+    AckRule rule;
+    if (ack_rule(id, &rule)) {
+        /* Tracked: wait for the device's ack, re-sending if it doesn't come */
+        AckChannel *c = &app->ack[rule.channel];
+        AckRequest req = {.len = n,
+                          .done = done,
+                          .user_len = user_len,
+                          .what = rule.what,
+                          .timeout = rule.timeout,
+                          .max_attempts = rule.attempts};
+        memcpy(req.frame, frame, n);
+        if (user_len)
+            memcpy(req.user, user, user_len);
+
+        if (c->in_flight || now_s() < c->quiet_until || c->qcount > 0) {
+            if (c->qcount == ACK_QUEUE_CAP) {
+                app_log(app, "%s: too many requests waiting, dropped", rule.what);
+                return false;
+            }
+            c->queue[(c->qhead + c->qcount) % ACK_QUEUE_CAP] = req;
+            c->qcount++;
+            return true;
+        }
+
+        if (!ack_start(app, c, &req)) {
+            app_error("Send Error", "Failed to send: %s", strerror(errno));
+            return false;
+        }
+        return true;
+    }
+
     if (uart_write_all(app->fd, frame, n) != 0) {
         const char *why = strerror(errno);
         app_log(app, "Send failed: %s", why);
         app_error("Send Error", "Failed to send: %s", why);
         return false;
     }
+    if (done)
+        done(app, user, true); /* nothing to wait for */
     return true;
+}
+
+bool app_send(App *app, uint8_t id, const void *payload, size_t len)
+{
+    return app_send_then(app, id, payload, len, NULL, NULL, 0);
 }
 
 bool app_save_defaults(App *app, const char *section, const KVSet *updates, KVSet *live)

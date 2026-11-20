@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <termios.h>
+#include <stdbool.h>
 #include <unistd.h>
 
 #include "util.h"
@@ -167,9 +168,13 @@ void decoder_init(FrameDecoder *d)
     d->len = 0;
 }
 
-static int decoder_process(FrameDecoder *d, TelemetryFrameCb cb, void *ctx)
+static bool is_ack_id(uint8_t id)
 {
-    const size_t payload = sizeof(struct sensor_telemetry_t);
+    return id == PID_ACK || id == DRONE_CFG_ACK || id == REMOTE_CFG_ACK;
+}
+
+static int decoder_process(FrameDecoder *d, TelemetryFrameCb cb, AckFrameCb ack_cb, void *ctx)
+{
     int frames = 0;
 
     for (;;) {
@@ -192,11 +197,12 @@ static int decoder_process(FrameDecoder *d, TelemetryFrameCb cb, void *ctx)
             d->len -= idx;
         }
 
-        if (d->len < UART_TELEMETRY_FRAME_SIZE)
+        if (d->len < UART_FRAME_SIZE)
             break;
 
-        uint16_t rx_crc = (uint16_t)(d->buf[2 + payload] | (d->buf[3 + payload] << 8));
-        if (uart_crc16(d->buf + 2, payload) != rx_crc) {
+        struct wifi_packet_t pkt;
+        memcpy(&pkt, d->buf + 2, sizeof pkt);
+        if (pkt.crc16 != uart_crc16((const uint8_t *)&pkt.data, sizeof pkt.data)) {
             /* Only drop the magic bytes: the real frame boundary may be
              * somewhere inside what we just examined. */
             memmove(d->buf, d->buf + 2, d->len - 2);
@@ -204,18 +210,20 @@ static int decoder_process(FrameDecoder *d, TelemetryFrameCb cb, void *ctx)
             continue;
         }
 
-        struct sensor_telemetry_t t;
-        memcpy(&t, d->buf + 2, sizeof t);
-        cb(&t, ctx);
+        if (pkt.packet_id == SENSOR)
+            cb(&pkt.data.sensor, ctx);
+        else if (is_ack_id(pkt.packet_id) && ack_cb)
+            ack_cb(&pkt, ctx);
         frames++;
 
-        memmove(d->buf, d->buf + UART_TELEMETRY_FRAME_SIZE, d->len - UART_TELEMETRY_FRAME_SIZE);
-        d->len -= UART_TELEMETRY_FRAME_SIZE;
+        memmove(d->buf, d->buf + UART_FRAME_SIZE, d->len - UART_FRAME_SIZE);
+        d->len -= UART_FRAME_SIZE;
     }
     return frames;
 }
 
-int decoder_feed(FrameDecoder *d, const uint8_t *data, size_t n, TelemetryFrameCb cb, void *ctx)
+int decoder_feed(FrameDecoder *d, const uint8_t *data, size_t n, TelemetryFrameCb cb,
+                 AckFrameCb ack_cb, void *ctx)
 {
     int frames = 0;
     while (n > 0) {
@@ -225,7 +233,7 @@ int decoder_feed(FrameDecoder *d, const uint8_t *data, size_t n, TelemetryFrameC
         d->len += take;
         data += take;
         n -= take;
-        frames += decoder_process(d, cb, ctx);
+        frames += decoder_process(d, cb, ack_cb, ctx);
     }
     return frames;
 }

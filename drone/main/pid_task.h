@@ -68,7 +68,7 @@ void set_flight_mode(enum flight_mode_t mode);
  *
  * @param packet Gain update to apply; packet->mode may be corrected in place.
  */
-void pid_handle_config_update(struct pid_config_telemetry_t *packet);
+esp_err_t pid_handle_config_update(struct pid_config_telemetry_t *packet);
 
 /**
  * @brief Tells the PID task that droneCfg has changed.
