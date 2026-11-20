@@ -22,8 +22,8 @@
 #define TAG "CONTROLLER_TASK"
 
 #define CONTROLLER_TASK_STACK (configMINIMAL_STACK_SIZE * 2)
-#define CONTROLLER_TASK_PRIO (tskIDLE_PRIORITY + 2)
-#define CONTROLLER_DELAY (pdMS_TO_TICKS(50))
+#define CONTROLLER_TASK_PRIO  (tskIDLE_PRIORITY + 2)
+#define CONTROLLER_DELAY      (pdMS_TO_TICKS(50))
 
 #define STATUS_LED 2
 
@@ -39,17 +39,19 @@ struct remote_state_t {
 TaskHandle_t remoteTaskHandle = NULL;
 
 // Remaps a raw ADC reading through its per-channel calibration
-static uint16_t apply_joystick_cal(uint16_t raw, struct nvs_joystick_cal_t cal) {
+static uint16_t apply_joystick_cal(uint16_t raw, struct nvs_joystick_cal_t cal)
+{
     double adcMid = (ADC_MIN + ADC_MAX) / 2.0;
     double corrected = (raw < cal.centre) ? mapf(raw, cal.min, cal.centre, ADC_MIN, adcMid)
                                           : mapf(raw, cal.centre, cal.max, adcMid, ADC_MAX);
-    return (uint16_t) constrainf(corrected, ADC_MIN, ADC_MAX);
+    return (uint16_t)constrainf(corrected, ADC_MIN, ADC_MAX);
 }
 
 // Periodic tick: triggers an ADC read, handles arm/re-arm logic from the
 // joystick-press gesture, and sends the resulting REMOTE packet to the drone.
-static void handle_timer_tick(struct remote_state_t* state, uint32_t notifyValue,
-                              struct wifi_packet_t* packet) {
+static void handle_timer_tick(struct remote_state_t *state, uint32_t notifyValue,
+                              struct wifi_packet_t *packet)
+{
     // Notify the MCPx task to perform an ADC reading, then wait for the reply
     xTaskNotify(mcpxTaskHandle, 0, eNoAction);
     uint16_t adcValues[MCP3208_MAX_CHANNELS];
@@ -88,7 +90,7 @@ static void handle_timer_tick(struct remote_state_t* state, uint32_t notifyValue
         }
     }
 
-    struct remote_telemetry_t* wifiData = &packet->data.remote;
+    struct remote_telemetry_t *wifiData = &packet->data.remote;
     wifiData->flight_mode = state->flightMode;
     wifiData->throttle = (state->emergency) ? 0 : adcValues[2];
     wifiData->pitch = adcValues[1];
@@ -106,7 +108,8 @@ static void handle_timer_tick(struct remote_state_t* state, uint32_t notifyValue
 }
 
 // Toggles flight mode (and the status LED) on a mode-button press, if armed.
-static void handle_mode_button(struct remote_state_t* state) {
+static void handle_mode_button(struct remote_state_t *state)
+{
     if (!state->armed) {
         return;
     }
@@ -120,7 +123,8 @@ static void handle_mode_button(struct remote_state_t* state) {
 }
 
 // Sets the emergency flag on an emergency-button press, if armed.
-static void handle_emergency_button(struct remote_state_t* state) {
+static void handle_emergency_button(struct remote_state_t *state)
+{
     if (!state->armed) {
         return;
     }
@@ -133,8 +137,9 @@ static void handle_emergency_button(struct remote_state_t* state) {
 }
 
 // Main remote task
-static void remote_controller(void* pvParams) {
-    (void) pvParams;
+static void remote_controller(void *pvParams)
+{
+    (void)pvParams;
     struct wifi_packet_t packet = {.packet_id = REMOTE};
 
     // Idle until all queue's are created
@@ -172,7 +177,8 @@ static void remote_controller(void* pvParams) {
     }
 }
 
-esp_err_t controller_task_init(void) {
+esp_err_t controller_task_init(void)
+{
     BaseType_t result = xTaskCreate(remote_controller, "REMOTE_TASK", CONTROLLER_TASK_STACK, NULL,
                                     CONTROLLER_TASK_PRIO, &remoteTaskHandle);
     return (result == pdPASS) ? ESP_OK : ESP_FAIL;

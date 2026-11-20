@@ -61,9 +61,10 @@ static struct nvs_remote_cfg_t remoteDefaults = {
 //////////////////////////////////////////////////////////////////////////////
 
 // ISR: Callback for button interrupts
-static void IRAM_ATTR intr_handler(void* args) {
+static void IRAM_ATTR intr_handler(void *args)
+{
 
-    struct button_state_t* button = (struct button_state_t*) args;
+    struct button_state_t *button = (struct button_state_t *)args;
     int state = gpio_get_level(button->pin);
     uint64_t currentTick = esp_timer_get_time();
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
@@ -83,7 +84,8 @@ static void IRAM_ATTR intr_handler(void* args) {
 }
 
 // ISR: Callback for signalling remote task to compelete one loop
-static void IRAM_ATTR remote_callback(void* args) {
+static void IRAM_ATTR remote_callback(void *args)
+{
     ARG_UNUSED(args);
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     if (remoteTaskHandle) {
@@ -94,7 +96,8 @@ static void IRAM_ATTR remote_callback(void* args) {
 }
 
 // Configures a button's GPIO as an interrupt input and installs the given ISR handler.
-static esp_err_t interrupt_init(void* handler, struct button_state_t* button) {
+static esp_err_t interrupt_init(void *handler, struct button_state_t *button)
+{
 
     gpio_config_t config = {
         .mode = GPIO_MODE_INPUT,               // Direction of the pin
@@ -121,7 +124,8 @@ static esp_err_t interrupt_init(void* handler, struct button_state_t* button) {
 }
 
 // Initialises a timer callback for signaling a periodic task action.
-static esp_err_t remote_timer_init(void) {
+static esp_err_t remote_timer_init(void)
+{
     const esp_timer_create_args_t args = {.callback = remote_callback,
                                           .dispatch_method = ESP_TIMER_ISR};
     esp_timer_handle_t remote_timer = NULL;
@@ -132,11 +136,13 @@ static esp_err_t remote_timer_init(void) {
 }
 
 // Converts a wire-format joystick calibration into the NVS-stored shape
-static struct nvs_joystick_cal_t to_nvs_cal(struct joystick_cal_telemetry_t cal) {
+static struct nvs_joystick_cal_t to_nvs_cal(struct joystick_cal_telemetry_t cal)
+{
     return (struct nvs_joystick_cal_t){.min = cal.min, .centre = cal.centre, .max = cal.max};
 }
 
-esp_err_t remote_config_handle_update(struct remote_config_telemetry_t* packet) {
+esp_err_t remote_config_handle_update(struct remote_config_telemetry_t *packet)
+{
     xSemaphoreTake(cfgMutex, portMAX_DELAY);
     remoteCfg.voltage_cal_multiplier = packet->voltage_cal_multiplier;
     remoteCfg.low_voltage = packet->low_voltage;
@@ -151,7 +157,8 @@ esp_err_t remote_config_handle_update(struct remote_config_telemetry_t* packet) 
     return ESP_OK;
 }
 
-esp_err_t remote_config_handle_save(void) {
+esp_err_t remote_config_handle_save(void)
+{
     xSemaphoreTake(cfgMutex, portMAX_DELAY);
     struct nvs_remote_cfg_t snapshot = remoteCfg;
     xSemaphoreGive(cfgMutex);
@@ -163,7 +170,8 @@ esp_err_t remote_config_handle_save(void) {
 }
 
 // Logs the currently loaded remoteCfg.
-static void print_config(void) {
+static void print_config(void)
+{
     xSemaphoreTake(cfgMutex, portMAX_DELAY);
     struct nvs_remote_cfg_t cfg = remoteCfg;
     xSemaphoreGive(cfgMutex);
@@ -181,7 +189,8 @@ static void print_config(void) {
     ESP_LOGI(TAG, "Yaw:      min=%u centre=%u max=%u", cfg.yaw.min, cfg.yaw.centre, cfg.yaw.max);
 }
 
-esp_err_t init_remote(void) {
+esp_err_t init_remote(void)
+{
     CHECK_ERR(nvs_init(), "NVS init failed");
 
     esp_err_t err = device_config_load("remoteCfg", &remoteCfg, sizeof(struct nvs_remote_cfg_t),
@@ -197,7 +206,7 @@ esp_err_t init_remote(void) {
     // Display loaded config
     print_config();
 
-    const uint8_t* macs[] = {drone_mac, bridge_mac};
+    const uint8_t *macs[] = {drone_mac, bridge_mac};
     CHECK_ERR_NO_LOG(esp_now_module_init(macs, 2));
 
     CHECK_ERR_NO_LOG(interrupt_init(intr_handler, &mode_button));

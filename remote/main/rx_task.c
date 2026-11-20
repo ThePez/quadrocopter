@@ -20,10 +20,11 @@
 #define TAG "RX_TASK"
 
 #define RX_TASK_STACK (configMINIMAL_STACK_SIZE * 2)
-#define RX_TASK_PRIO (tskIDLE_PRIORITY + 2)
+#define RX_TASK_PRIO  (tskIDLE_PRIORITY + 2)
 
 // Consumes incoming ESP-NOW config packets
-static void rx_task(void* pvParameters) {
+static void rx_task(void *pvParameters)
+{
     ARG_UNUSED(pvParameters);
     struct wifi_packet_t packet;
 
@@ -45,7 +46,8 @@ static void rx_task(void* pvParameters) {
     }
 }
 
-esp_err_t rx_task_init(void) {
+esp_err_t rx_task_init(void)
+{
     BaseType_t result = xTaskCreate(rx_task, "RX_TASK", RX_TASK_STACK, NULL, RX_TASK_PRIO, NULL);
     return (result == pdPASS) ? ESP_OK : ESP_FAIL;
 }

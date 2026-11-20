@@ -1,0 +1,14 @@
+# Settings applied whenever remote/sdkconfig is (re)generated, which happens after
+# `idf.py set-target` (the Justfile runs it for any target with no build folder, e.g.
+# after `just clean remote`). A reset wipes sdkconfig back to IDF defaults, so anything
+# the firmware depends on must be listed here as well.
+
+# Flash chip size
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# esp_timer callbacks dispatched from the ISR (ESP_TIMER_ISR, used in remote.c)
+CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD=y
+
+# vTaskList() in print_task_stats() (common_functions.c)
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y

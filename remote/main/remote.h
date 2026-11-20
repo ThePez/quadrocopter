@@ -14,7 +14,7 @@
 
 #include <esp_err.h>
 
-#define MODE_BUTTON_PIN 25
+#define MODE_BUTTON_PIN    25
 #define SHUTOFF_BUTTON_PIN 32
 
 extern struct nvs_remote_cfg_t remoteCfg;
@@ -27,7 +27,7 @@ extern struct nvs_remote_cfg_t remoteCfg;
  *
  * @param packet New values to apply.
  */
-esp_err_t remote_config_handle_update(struct remote_config_telemetry_t* packet);
+esp_err_t remote_config_handle_update(struct remote_config_telemetry_t *packet);
 
 /**
  * @brief Persists the currently-live remoteCfg to flash.

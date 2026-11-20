@@ -13,9 +13,9 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
-#define MODE_BUTTON_BIT (1UL << 0)
+#define MODE_BUTTON_BIT      (1UL << 0)
 #define EMERGENCY_BUTTON_BIT (1UL << 1)
-#define TIMER_BIT (1UL << 31)
+#define TIMER_BIT            (1UL << 31)
 
 extern TaskHandle_t remoteTaskHandle;
 
