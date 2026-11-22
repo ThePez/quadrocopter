@@ -18,7 +18,11 @@
 
 #define FAILSAFE_TIMEOUT_US 2000000 // 1 second
 
-#define LOW_VOLTAGE      14000 // mV (Warn operator at this voltage)
+// Gyro low-pass coefficient: 0.6 at 400 Hz is a cutoff of roughly 95 Hz
+// (alpha = dt / (dt + 1 / (2 * pi * fc))). 1 = unfiltered, lower = smoother but laggier.
+#define GYRO_FILTER_ALPHA 0.6
+
+#define LOW_VOLTAGE     14000 // mV (Warn operator at this voltage)
 #define CRITICAL_VOLTAGE 13600 // mV (min voltage the battery can be)
 
 #endif

@@ -48,6 +48,7 @@ struct drone_config_telemetry_t {
     float min_throttle, max_throttle;
     uint32_t coms_timeout_us;
     uint16_t low_voltage, critical_voltage;
+    float gyro_alpha; // gyro low-pass coefficient, 0.05-1 (1 = unfiltered)
 };
 
 struct joystick_cal_telemetry_t {

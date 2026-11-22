@@ -42,11 +42,18 @@
 // Smallest D-term filter coefficient accepted from the ground station
 #define MIN_DTERM_ALPHA 0.01f
 
-// Gyro low-pass coefficient: 0.6 at 400 Hz is a cutoff of roughly 95 Hz
-// (alpha = dt / (dt + 1 / (2 * pi * fc))). 1 = unfiltered.
-#define GYRO_LPF_ALPHA 0.6f
-
 #define CRITICAL_THROTTLE_FRACTION 0.5f
+
+// Static mixer trims (us, in the same sign as the PID outputs) that cancel this airframe's
+// constant imbalance, so the PID outputs sit near zero in a hover instead of the integrators
+// having to carry it. Measured from a STABILISE hover at about TRIM_REF_THROTTLE with the
+// sticks centred, where the loop settled at pitch -17, roll 0, yaw +26. The imbalance comes
+// from thrust, so the trims are scaled by throttle above idle (full value at the reference).
+// Re-measure after moving the battery or changing props/motors.
+#define TRIM_REF_THROTTLE 1325.0f
+#define PITCH_TRIM_US     (-17.0f) // negative = front motors faster (nose-heavy frame)
+#define ROLL_TRIM_US      0.0f
+#define YAW_TRIM_US       26.0f
 
 struct pid_feedback_t {
     struct pid_result_t pitch;
@@ -62,6 +69,7 @@ struct flight_cfg_t {
     float maxRate;
     float maxAngle;
     float failAngle;
+    float gyroAlpha; // gyro low-pass coefficient, 1 = unfiltered
     uint16_t criticalVoltage;
     int64_t comsTimeoutUs;
 };
@@ -120,6 +128,7 @@ static void load_config(struct flight_cfg_t *cfg)
     cfg->maxRate = (float)snapshot.max_rate;
     cfg->maxAngle = (float)snapshot.max_angle;
     cfg->failAngle = (float)snapshot.fail_angle;
+    cfg->gyroAlpha = snapshot.gyro_alpha;
     cfg->comsTimeoutUs = snapshot.coms_timeout_us;
     cfg->criticalVoltage = snapshot.critical_voltage;
 
@@ -164,8 +173,9 @@ static void stop_motors(const struct flight_cfg_t *cfg)
 }
 
 // Low-pass filters the gyro rates in place (the BNO085's fused angles are
-// used as-is). The first sample seeds the filter.
-static void filter_rates(struct imu_packet_t *sample)
+// used as-is). `alpha` comes from the drone config (1 = unfiltered). The first
+// sample seeds the filter.
+static void filter_rates(struct imu_packet_t *sample, float alpha)
 {
     static struct imu_packet_t filtered;
     static uint8_t seeded = 0;
@@ -176,9 +186,9 @@ static void filter_rates(struct imu_packet_t *sample)
         return;
     }
 
-    filtered.pitchRate += GYRO_LPF_ALPHA * (sample->pitchRate - filtered.pitchRate);
-    filtered.rollRate += GYRO_LPF_ALPHA * (sample->rollRate - filtered.rollRate);
-    filtered.yawRate += GYRO_LPF_ALPHA * (sample->yawRate - filtered.yawRate);
+    filtered.pitchRate += alpha * (sample->pitchRate - filtered.pitchRate);
+    filtered.rollRate += alpha * (sample->rollRate - filtered.rollRate);
+    filtered.yawRate += alpha * (sample->yawRate - filtered.yawRate);
 
     sample->pitchRate = filtered.pitchRate;
     sample->rollRate = filtered.rollRate;
@@ -260,9 +270,11 @@ static void update_escs(float throttle, const struct flight_cfg_t *cfg)
     float idle = cfg->minThrottle + IDLE_OFFSET;
     float max = cfg->maxThrottle;
 
-    float pitch = outputPID.pitch_pid;
-    float roll = outputPID.roll_pid;
-    float yaw = outputPID.yaw_pid;
+    // Trims grow with thrust (0 at idle, full at the reference throttle, capped at 1.5x)
+    float trimScale = constrainf((throttle - idle) / (TRIM_REF_THROTTLE - idle), 0.0f, 1.5f);
+    float pitch = outputPID.pitch_pid + PITCH_TRIM_US * trimScale;
+    float roll = outputPID.roll_pid + ROLL_TRIM_US * trimScale;
+    float yaw = outputPID.yaw_pid + YAW_TRIM_US * trimScale;
 
     // Positive pitch = rear motors faster = front tips down. Positive roll = left motors
     // faster = right side tips down. Positive yaw = A and C faster = the frame turns left
@@ -413,7 +425,7 @@ static void pid_control(void *pvParams)
             reset_controllers();
         }
 
-        filter_rates(&sample);
+        filter_rates(&sample, cfg.gyroAlpha);
         attitude = sample;
 
         // Check drone for critical angles

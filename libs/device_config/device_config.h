@@ -26,7 +26,8 @@
  */
 
 // v2: gains and limits changed from double to float
-#define NVS_DRONE_CFG_VERSION 2
+// v3: added gyro_alpha
+#define NVS_DRONE_CFG_VERSION 3
 
 #define NVS_REMOTE_CFG_VERSION 1
 
@@ -49,6 +50,7 @@ struct __packed nvs_drone_cfg_t {
     float min_throttle, max_throttle;
     int64_t coms_timeout_us;
     uint16_t low_voltage, critical_voltage;
+    float gyro_alpha; // gyro low-pass coefficient (1 = unfiltered)
 };
 
 // Configuration data for the remote

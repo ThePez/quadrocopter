@@ -68,7 +68,8 @@ static struct nvs_drone_cfg_t droneDefaults = {
     .max_throttle = MAX_THROTTLE,
     .coms_timeout_us = FAILSAFE_TIMEOUT_US,
     .low_voltage = LOW_VOLTAGE,
-    .critical_voltage = CRITICAL_VOLTAGE};
+    .critical_voltage = CRITICAL_VOLTAGE,
+    .gyro_alpha = GYRO_FILTER_ALPHA};
 
 // ADC
 static adc_oneshot_unit_handle_t adcHandle;
@@ -343,6 +344,7 @@ static void print_config(void)
     ESP_LOGI(TAG, "Max rate: %.2f deg/s   Max angle: %.2f deg   Fail angle: %.2f deg", cfg.max_rate,
              cfg.max_angle, cfg.fail_angle);
     ESP_LOGI(TAG, "Throttle range: %.2f - %.2f", cfg.min_throttle, cfg.max_throttle);
+    ESP_LOGI(TAG, "Gyro filter alpha: %.2f", cfg.gyro_alpha);
     ESP_LOGI(TAG, "== Saftey ==");
     ESP_LOGI(TAG, "Coms timeout: %lld ms", cfg.coms_timeout_us / 1000);
     ESP_LOGI(TAG, "Battery: low=%u mV critical=%u mV", cfg.low_voltage, cfg.critical_voltage);
@@ -444,6 +446,11 @@ static uint8_t drone_config_valid(const struct drone_config_telemetry_t *p)
         return 0;
     }
 
+    if (!(p->gyro_alpha >= 0.05f && p->gyro_alpha <= 1.0f)) {
+        ESP_LOGE(TAG, "Config rejected: gyro_alpha %.3f not in 0.05-1", p->gyro_alpha);
+        return 0;
+    }
+
     if (p->coms_timeout_us < 100000 || p->coms_timeout_us > 10000000) {
         ESP_LOGE(TAG, "Config rejected: coms_timeout %lu us not in 0.1-10 s",
                  (unsigned long)p->coms_timeout_us);
@@ -474,6 +481,7 @@ esp_err_t drone_config_handle_update(struct drone_config_telemetry_t *packet)
     droneCfg.coms_timeout_us = packet->coms_timeout_us;
     droneCfg.low_voltage = packet->low_voltage;
     droneCfg.critical_voltage = packet->critical_voltage;
+    droneCfg.gyro_alpha = packet->gyro_alpha;
     xSemaphoreGive(cfgMutex);
 
     // The PID task flies from its own copy of the config

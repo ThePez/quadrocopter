@@ -230,7 +230,7 @@ Press **both** the mode button and emergency button simultaneously on the remote
 
 - **Dual-core**: Core 0 handles incoming remote packets; Core 1 runs the PID loop at elevated FreeRTOS priority, one cycle per IMU sample (400 Hz)
 - **Thread safety**: Shared drone state (`droneData`) is guarded by a mutex, since `pid_task` and `input_task` write to it from separate cores
-- **IMU filtering**: Angles are the BNO085's fused rotation vector, used as-is; gyro rates get a first-order low-pass (`GYRO_LPF_ALPHA` in `pid_task.c`). `imuQueue` is a one-deep mailbox, so the loop always flies on the newest sample
+- **IMU filtering**: Angles are the BNO085's fused rotation vector, used as-is; gyro rates get a first-order low-pass whose coefficient is a live drone config setting (`gyro_alpha`, default `GYRO_FILTER_ALPHA` in `drone_defaults.h`, set from the Drone Config tab). `imuQueue` is a one-deep mailbox, so the loop always flies on the newest sample
 - **ADC calibration**: Battery voltage uses ESP-IDF ADC calibration for mV-level accuracy
 - **Memory**: All dynamic allocations checked at startup; device restarts on malloc failure
 
