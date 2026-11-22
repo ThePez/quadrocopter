@@ -7,14 +7,14 @@
 
 void console_tab_init(ConsoleTab *t)
 {
-    memset(t, 0, sizeof *t);
-    t->lines = calloc(LOG_LINES, sizeof *t->lines);
+    memset(t, 0, sizeof(*t));
+    t->lines = calloc(LOG_LINES, sizeof(*t->lines));
 }
 
 void console_tab_free(ConsoleTab *t)
 {
     free(t->lines);
-    memset(t, 0, sizeof *t);
+    memset(t, 0, sizeof(*t));
 }
 
 void console_tab_add(ConsoleTab *t, const char *line)
@@ -66,7 +66,7 @@ void console_tab_draw(App *app, Rectangle area)
     ui_card(area, NULL);
 
     char count[48];
-    snprintf(count, sizeof count, "%d lines", t->count);
+    snprintf(count, sizeof(count), "%d lines", t->count);
     ui_text(count, area.x + UI_PAD, area.y + 19, UI_SMALL + 1, UI_MUTED);
     if (ui_btn((Rectangle){area.x + area.width - UI_PAD - 90, area.y + 10, 90, 34}, "Clear")) {
         t->head = 0;

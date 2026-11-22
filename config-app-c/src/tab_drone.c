@@ -49,7 +49,7 @@ StickScale drone_tab_stick_scale(const DroneTab *t)
 
 void drone_tab_init(DroneTab *t, App *app)
 {
-    memset(t, 0, sizeof *t);
+    memset(t, 0, sizeof(*t));
     t->app = app;
     for (int i = 0; i < DRONE_FIELDS; i++) {
         double v = kv_get(&app->drone_defaults, FIELDS[i].define, 0.0) / FIELDS[i].scale;
@@ -114,7 +114,7 @@ static void on_store_done(App *app, const void *user, bool ok)
 
 static bool send_store(App *app, const DroneSnap *s)
 {
-    if (!app_send_then(app, DRONE_CFG_STORE, NULL, 0, on_store_done, s, sizeof *s)) {
+    if (!app_send_then(app, DRONE_CFG_STORE, NULL, 0, on_store_done, s, sizeof(*s))) {
         return false;
     }
 
@@ -137,7 +137,7 @@ static void on_config_done(App *app, const void *user, bool ok)
     }
 
     /* Confirmed: only now is this what the drone is running */
-    memcpy(t->sent, s.v, sizeof s.v);
+    memcpy(t->sent, s.v, sizeof(s.v));
     t->sent_valid = true;
 
     if (s.then_save) {
@@ -168,8 +168,8 @@ static bool send_config(DroneTab *t, bool then_save)
         .gyro_alpha = (float)v[D_GYRO_ALPHA],
     };
     DroneSnap snap = {.then_save = then_save};
-    memcpy(snap.v, v, sizeof v);
-    if (!app_send_then(app, DRONE_CFG, &p, sizeof p, on_config_done, &snap, sizeof snap)) {
+    memcpy(snap.v, v, sizeof(v));
+    if (!app_send_then(app, DRONE_CFG, &p, sizeof(p), on_config_done, &snap, sizeof(snap))) {
         return false;
     }
 
@@ -186,13 +186,13 @@ static void do_save(DroneTab *t)
     double v[DRONE_FIELDS];
     current_values(t, v);
 
-    if (!t->sent_valid || memcmp(t->sent, v, sizeof v) != 0) {
+    if (!t->sent_valid || memcmp(t->sent, v, sizeof(v)) != 0) {
         send_config(t, true);
         return;
     }
 
     DroneSnap snap = {0};
-    memcpy(snap.v, v, sizeof v);
+    memcpy(snap.v, v, sizeof(v));
     send_store(app, &snap);
 }
 
@@ -232,9 +232,9 @@ void drone_tab_draw(App *app, Rectangle area)
     double alpha = t->f[D_GYRO_ALPHA].value;
     char hint[48];
     if (alpha >= 1.0) {
-        snprintf(hint, sizeof hint, "gyro unfiltered");
+        snprintf(hint, sizeof(hint), "gyro unfiltered");
     } else {
-        snprintf(hint, sizeof hint, "gyro ~ %.0f Hz cutoff",
+        snprintf(hint, sizeof(hint), "gyro ~ %.0f Hz cutoff",
                  alpha / (1.0 - alpha) * LOOP_RATE_HZ / (2.0 * M_PI));
     }
 

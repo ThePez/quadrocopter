@@ -28,8 +28,8 @@ int recorder_start(Recorder *r, const char *dir, char *err, size_t errlen)
     struct tm tmv;
     localtime_r(&now, &tmv);
     char stamp[32];
-    strftime(stamp, sizeof stamp, "%Y%m%d_%H%M%S", &tmv);
-    snprintf(r->path, sizeof r->path, "%s/session_%s.csv", dir, stamp);
+    strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", &tmv);
+    snprintf(r->path, sizeof(r->path), "%s/session_%s.csv", dir, stamp);
 
     r->file = fopen(r->path, "w");
     if (!r->file) {
@@ -37,7 +37,7 @@ int recorder_start(Recorder *r, const char *dir, char *err, size_t errlen)
         return -1;
     }
 
-    strftime(stamp, sizeof stamp, "%Y-%m-%dT%H:%M:%S", &tmv);
+    strftime(stamp, sizeof(stamp), "%Y-%m-%dT%H:%M:%S", &tmv);
     fprintf(r->file, "# started,%s\n", stamp);
     fprintf(r->file, "time_s");
     for (int i = 0; i < F_COUNT; i++) {
@@ -79,7 +79,7 @@ void recorder_event(Recorder *r, const char *text)
     }
 
     char clean[256];
-    str_copy(clean, sizeof clean, text);
+    str_copy(clean, sizeof(clean), text);
     for (char *p = clean; *p; p++) {
         if (*p == '\n' || *p == '\r') {
             *p = ' ';
@@ -108,7 +108,7 @@ bool recorder_stop(Recorder *r)
 static bool grow(Session *s, int *cap)
 {
     int ncap = *cap ? *cap * 2 : 1024;
-    double *t = realloc(s->t, (size_t)ncap * sizeof *t);
+    double *t = realloc(s->t, (size_t)ncap * sizeof(*t));
     if (!t) {
         return false;
     }
@@ -119,7 +119,7 @@ static bool grow(Session *s, int *cap)
             continue;
         }
 
-        float *c = realloc(s->col[i], (size_t)ncap * sizeof *c);
+        float *c = realloc(s->col[i], (size_t)ncap * sizeof(*c));
         if (!c) {
             return false;
         }
@@ -139,7 +139,7 @@ void session_free(Session *s)
     }
 
     free(s->events);
-    memset(s, 0, sizeof *s);
+    memset(s, 0, sizeof(*s));
 }
 
 /* Splits `line` in place on commas. Returns the number of cells. */
@@ -163,8 +163,8 @@ static int split_csv(char *line, char **cells, int max)
 
 int session_load(Session *s, const char *path, char *err, size_t errlen)
 {
-    memset(s, 0, sizeof *s);
-    str_copy(s->path, sizeof s->path, path);
+    memset(s, 0, sizeof(*s));
+    str_copy(s->path, sizeof(s->path), path);
 
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -182,7 +182,7 @@ int session_load(Session *s, const char *path, char *err, size_t errlen)
     bool have_header = false;
     int cap = 0, ev_cap = 0;
 
-    while (fgets(line, sizeof line, f)) {
+    while (fgets(line, sizeof(line), f)) {
         line[strcspn(line, "\r\n")] = '\0';
         char *p = line;
         while (*p == ' ' || *p == '\t') {
@@ -209,7 +209,7 @@ int session_load(Session *s, const char *path, char *err, size_t errlen)
                     if (end != p + 6) {
                         if (s->nevents == ev_cap) {
                             ev_cap = ev_cap ? ev_cap * 2 : 16;
-                            SessionEvent *ne = realloc(s->events, (size_t)ev_cap * sizeof *ne);
+                            SessionEvent *ne = realloc(s->events, (size_t)ev_cap * sizeof(*ne));
                             if (!ne) {
                                 break;
                             }
@@ -218,7 +218,7 @@ int session_load(Session *s, const char *path, char *err, size_t errlen)
                         }
 
                         s->events[s->nevents].t = when;
-                        str_copy(s->events[s->nevents].text, sizeof s->events[0].text, comma + 1);
+                        str_copy(s->events[s->nevents].text, sizeof(s->events[0].text), comma + 1);
                         s->nevents++;
                     }
                 }

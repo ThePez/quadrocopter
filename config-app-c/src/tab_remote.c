@@ -28,7 +28,7 @@ static void joystick_define(char *out, size_t cap, int channel, int which)
 {
     char up[16];
     size_t i = 0;
-    for (; CHANNELS[channel][i] && i + 1 < sizeof up; i++) {
+    for (; CHANNELS[channel][i] && i + 1 < sizeof(up); i++) {
         up[i] = (char)(CHANNELS[channel][i] - 'a' + 'A');
     }
 
@@ -38,7 +38,7 @@ static void joystick_define(char *out, size_t cap, int channel, int which)
 
 void remote_tab_init(RemoteTab *t, App *app)
 {
-    memset(t, 0, sizeof *t);
+    memset(t, 0, sizeof(*t));
     t->app = app;
     const KVSet *d = &app->remote_defaults;
 
@@ -56,7 +56,7 @@ void remote_tab_init(RemoteTab *t, App *app)
     for (int c = 0; c < 4; c++) {
         for (int w = 0; w < 3; w++) {
             char key[48];
-            joystick_define(key, sizeof key, c, w);
+            joystick_define(key, sizeof(key), c, w);
             numfield_init(&t->joystick[c][w], kv_get(d, key, shared[w]), 1.0, 0, 4095, 0);
         }
     }
@@ -119,7 +119,7 @@ static void on_store_done(App *app, const void *user, bool ok)
     for (int c = 0; c < 4; c++) {
         for (int w = 0; w < 3; w++) {
             char key[48];
-            joystick_define(key, sizeof key, c, w);
+            joystick_define(key, sizeof(key), c, w);
             kv_set(&updates, key, s->j[c][w]);
         }
     }
@@ -133,7 +133,7 @@ static void on_store_done(App *app, const void *user, bool ok)
 
 static bool send_store(App *app, const RemoteSnap *s)
 {
-    if (!app_send_then(app, REMOTE_CFG_STORE, NULL, 0, on_store_done, s, sizeof *s)) {
+    if (!app_send_then(app, REMOTE_CFG_STORE, NULL, 0, on_store_done, s, sizeof(*s))) {
         return false;
     }
 
@@ -156,8 +156,8 @@ static void on_config_done(App *app, const void *user, bool ok)
     }
 
     /* Confirmed: only now is this what the remote is running */
-    memcpy(t->sent_voltage, s.v, sizeof s.v);
-    memcpy(t->sent_joystick, s.j, sizeof s.j);
+    memcpy(t->sent_voltage, s.v, sizeof(s.v));
+    memcpy(t->sent_joystick, s.j, sizeof(s.j));
     t->sent_valid = true;
 
     if (s.then_save) {
@@ -186,9 +186,9 @@ static bool send_config(RemoteTab *t, bool then_save)
         .yaw = cal(j[3]),
     };
     RemoteSnap snap = {.then_save = then_save};
-    memcpy(snap.v, v, sizeof v);
-    memcpy(snap.j, j, sizeof j);
-    if (!app_send_then(app, REMOTE_CFG, &p, sizeof p, on_config_done, &snap, sizeof snap)) {
+    memcpy(snap.v, v, sizeof(v));
+    memcpy(snap.j, j, sizeof(j));
+    if (!app_send_then(app, REMOTE_CFG, &p, sizeof(p), on_config_done, &snap, sizeof(snap))) {
         return false;
     }
 
@@ -205,16 +205,16 @@ static void do_save(RemoteTab *t)
     double v[3], j[4][3];
     snapshot(t, v, j);
 
-    bool same = t->sent_valid && memcmp(t->sent_voltage, v, sizeof v) == 0 &&
-                memcmp(t->sent_joystick, j, sizeof j) == 0;
+    bool same = t->sent_valid && memcmp(t->sent_voltage, v, sizeof(v)) == 0 &&
+                memcmp(t->sent_joystick, j, sizeof(j)) == 0;
     if (!same) {
         send_config(t, true);
         return;
     }
 
     RemoteSnap snap = {0};
-    memcpy(snap.v, v, sizeof v);
-    memcpy(snap.j, j, sizeof j);
+    memcpy(snap.v, v, sizeof(v));
+    memcpy(snap.j, j, sizeof(j));
     send_store(app, &snap);
 }
 

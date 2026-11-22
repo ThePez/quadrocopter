@@ -101,13 +101,13 @@ static void *reader_main(void *arg)
     uint8_t buf[4096];
 
     while (atomic_load(&t->running)) {
-        ssize_t n = read(t->fd, buf, sizeof buf);
+        ssize_t n = read(t->fd, buf, sizeof(buf));
         if (n > 0) {
             decoder_feed(&t->decoder, buf, (size_t)n, on_frame, on_ack, t);
         } else if (n < 0 && errno != EINTR && errno != EAGAIN) {
             pthread_mutex_lock(&t->mutex);
             t->lost = true;
-            snprintf(t->err, sizeof t->err, "%s", strerror(errno));
+            snprintf(t->err, sizeof(t->err), "%s", strerror(errno));
             pthread_mutex_unlock(&t->mutex);
             break;
         }
@@ -120,7 +120,7 @@ static void *reader_main(void *arg)
 
 Telemetry *telemetry_start(int fd)
 {
-    Telemetry *t = calloc(1, sizeof *t);
+    Telemetry *t = calloc(1, sizeof(*t));
     if (!t) {
         return NULL;
     }

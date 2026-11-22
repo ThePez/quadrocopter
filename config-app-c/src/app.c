@@ -27,14 +27,14 @@ static void load_defaults(App *app)
         {REPO_DIR "/remote/main/remote_defaults.h", &app->remote_defaults, "remote"},
     };
 
-    Overrides *ov = malloc(sizeof *ov);
+    Overrides *ov = malloc(sizeof(*ov));
     char err[256] = "";
-    bool have_overrides = ov && overrides_load(ov, USER_DEFAULTS_PATH, err, sizeof err) == 0;
+    bool have_overrides = ov && overrides_load(ov, USER_DEFAULTS_PATH, err, sizeof(err)) == 0;
     if (!have_overrides) {
         app_log(app, "Could not read saved defaults: %s", err[0] ? err : "out of memory");
     }
 
-    for (size_t i = 0; i < sizeof sources / sizeof sources[0]; i++) {
+    for (size_t i = 0; i < sizeof(sources) / sizeof(sources[0]); i++) {
         if (defines_load(sources[i].header, sources[i].set) != 0) {
             app_log(app, "Warning: could not read defaults from %s", sources[i].header);
         }
@@ -52,7 +52,7 @@ static void load_defaults(App *app)
 
 void app_init(App *app)
 {
-    memset(app, 0, sizeof *app);
+    memset(app, 0, sizeof(*app));
     app->fd = -1;
     app->baud_active = 1; /* 115200 */
     app->live_plots = true;
@@ -86,12 +86,12 @@ void app_log(App *app, const char *fmt, ...)
     char msg[LOG_LEN - 24]; /* room for the "[HH:MM:SS.mmm] " prefix */
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(msg, sizeof msg, fmt, ap);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
 
     char clock[16], line[LOG_LEN];
-    format_clock(clock, sizeof clock);
-    snprintf(line, sizeof line, "[%s] %s", clock, msg);
+    format_clock(clock, sizeof(clock));
+    snprintf(line, sizeof(line), "[%s] %s", clock, msg);
     console_tab_add(&app->ctab, line);
 }
 
@@ -100,7 +100,7 @@ void app_error(const char *title, const char *fmt, ...)
     char msg[768];
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(msg, sizeof msg, fmt, ap);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
     ui_modal_open(title, msg, "OK", NULL, NULL);
 }
@@ -142,7 +142,7 @@ void app_connect(App *app)
     int baud = BAUD_RATES[app->baud_active];
 
     char err[256];
-    int fd = uart_open(device, baud, err, sizeof err);
+    int fd = uart_open(device, baud, err, sizeof(err));
     if (fd < 0) {
         app_log(app, "Connection failed: %s", err);
         app_error("Connection Error", "Failed to connect: %s", err);
@@ -274,10 +274,10 @@ static void set_cfg_status(App *app, bool ok, const char *what, const char *fmt,
 {
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(app->cfg_result, sizeof app->cfg_result, fmt, ap);
+    vsnprintf(app->cfg_result, sizeof(app->cfg_result), fmt, ap);
     va_end(ap);
 
-    str_copy(app->cfg_what, sizeof app->cfg_what, what);
+    str_copy(app->cfg_what, sizeof(app->cfg_what), what);
     app->cfg_ok = ok;
     app->cfg_t = now_s();
     app_log(app, "%s: %s", app->cfg_what, app->cfg_result);
@@ -359,7 +359,7 @@ static void handle_ack(App *app, const AckEvent *ev)
             set_cfg_status(app, true, c->cur.what, "confirmed");
         } else {
             set_cfg_status(app, false, c->cur.what, "rejected (%s)",
-                           status_text(ev->status, buf, sizeof buf));
+                           status_text(ev->status, buf, sizeof(buf)));
         }
 
         /* After a retry the first attempt's ack may still be on its way: let it pass
@@ -424,7 +424,7 @@ static void ack_fail_all(App *app)
         }
     }
 
-    memset(app->ack, 0, sizeof app->ack);
+    memset(app->ack, 0, sizeof(app->ack));
 }
 
 void app_update(App *app)
@@ -448,7 +448,7 @@ void app_update(App *app)
         ack_tick(app);
 
         char err[160];
-        if (telemetry_lost(app->tel, err, sizeof err)) {
+        if (telemetry_lost(app->tel, err, sizeof(err))) {
             app_log(app, "Serial connection lost: %s", err);
             app_disconnect(app);
             app_error("Connection Lost", "The serial connection was lost:\n%s", err);
@@ -479,7 +479,7 @@ bool app_send_then(App *app, uint8_t id, const void *payload, size_t len, AckDon
     }
 
     uint8_t frame[UART_CONFIG_FRAME_SIZE];
-    size_t n = uart_encode_config_packet(id, payload, len, frame, sizeof frame);
+    size_t n = uart_encode_config_packet(id, payload, len, frame, sizeof(frame));
     if (n == 0) {
         app_error("Send Error", "Failed to send: payload does not fit in a packet.");
         return false;
@@ -540,20 +540,20 @@ bool app_send(App *app, uint8_t id, const void *payload, size_t len)
 
 bool app_save_defaults(App *app, const char *section, const KVSet *updates, KVSet *live)
 {
-    Overrides *ov = malloc(sizeof *ov);
+    Overrides *ov = malloc(sizeof(*ov));
     if (!ov) {
         return false;
     }
 
     char err[256] = "";
     bool ok = false;
-    if (overrides_load(ov, USER_DEFAULTS_PATH, err, sizeof err) == 0) {
+    if (overrides_load(ov, USER_DEFAULTS_PATH, err, sizeof(err)) == 0) {
         KVSet *sec = overrides_section(ov, section, true);
         if (sec) {
             kv_merge(sec, updates);
-            ok = overrides_save(ov, USER_DEFAULTS_PATH, err, sizeof err) == 0;
+            ok = overrides_save(ov, USER_DEFAULTS_PATH, err, sizeof(err)) == 0;
         } else {
-            snprintf(err, sizeof err, "too many sections");
+            snprintf(err, sizeof(err), "too many sections");
         }
     }
 
@@ -580,7 +580,7 @@ void app_toggle_recording(App *app)
     }
 
     char err[256];
-    if (recorder_start(&app->rec, SESSIONS_DIR, err, sizeof err) != 0) {
+    if (recorder_start(&app->rec, SESSIONS_DIR, err, sizeof(err)) != 0) {
         app_error("Recording Error", "Could not start: %s", err);
         return;
     }
@@ -591,8 +591,8 @@ void app_toggle_recording(App *app)
 void app_stop_recording(App *app)
 {
     int rows = app->rec.rows;
-    char path[sizeof app->rec.path];
-    str_copy(path, sizeof path, app->rec.path);
+    char path[sizeof(app->rec.path)];
+    str_copy(path, sizeof(path), app->rec.path);
     if (recorder_stop(&app->rec)) {
         app_log(app, "Session saved (%d samples): %s", rows, path);
     }

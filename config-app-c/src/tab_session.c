@@ -70,7 +70,7 @@ static const Group GROUPS[SESSION_PLOTS] = {
 
 void session_tab_init(SessionTab *t)
 {
-    memset(t, 0, sizeof *t);
+    memset(t, 0, sizeof(*t));
 }
 
 void session_tab_close(SessionTab *t)
@@ -98,7 +98,7 @@ void session_tab_open(App *app, const char *path)
 
     Session loaded;
     char err[256];
-    if (session_load(&loaded, path, err, sizeof err) != 0) {
+    if (session_load(&loaded, path, err, sizeof(err)) != 0) {
         app_error("Open Session", "Could not open: %s", err);
         return;
     }
@@ -158,7 +158,7 @@ void session_tab_draw(App *app, Rectangle area)
     }
 
     char summary[700];
-    snprintf(summary, sizeof summary, "%s   |   %d samples   |   %.1f s   |   %d events",
+    snprintf(summary, sizeof(summary), "%s   |   %d samples   |   %.1f s   |   %d events",
              GetFileName(t->session.path), t->session.count, t->session.duration,
              t->session.nevents);
     ui_text(summary, area.x + 2, area.y + toolbar_h + 12, UI_TEXT_SIZE - 1, UI_MUTED);

@@ -28,7 +28,7 @@ static const Color CONTROL_COLORS[5] = {UI_SERIES_ORANGE, UI_SERIES_RED, UI_SERI
 
 void telemetry_tab_init(TelemetryTab *t)
 {
-    memset(t, 0, sizeof *t);
+    memset(t, 0, sizeof(*t));
     plot_init_live(&t->angles, "Attitude Angles", "\xC2\xB0", 3, AXIS_NAMES, AXIS_COLORS,
                    LIVE_POINTS);
     plot_init_live(&t->rates, "Angular Rates", "\xC2\xB0/s", 3, AXIS_NAMES, AXIS_COLORS,
@@ -110,7 +110,7 @@ static const ValueRow VALUES[] = {
     {"Cmd yaw", F_CMD_YAW, " \xC2\xB0/s"},
     {"Throttle cmd", F_CMD_THROTTLE, " \xC2\xB5s"},
 };
-#define N_VALUES ((int)(sizeof VALUES / sizeof VALUES[0]))
+#define N_VALUES ((int)(sizeof(VALUES) / sizeof(VALUES[0])))
 
 static Color format_value(const App *app, const ValueRow *row, char *out, size_t cap)
 {
@@ -164,7 +164,7 @@ static void draw_values_card(App *app, Rectangle r)
         }
 
         char text[48];
-        Color c = format_value(app, &VALUES[i], text, sizeof text);
+        Color c = format_value(app, &VALUES[i], text, sizeof(text));
         float ty = y + (row_h - UI_TEXT_SIZE) / 2 - 1;
         ui_text(VALUES[i].label, r.x + UI_PAD, ty, UI_TEXT_SIZE, UI_MUTED);
         ui_text_right(text, right, ty, UI_TEXT_SIZE, c);

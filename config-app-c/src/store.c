@@ -43,7 +43,7 @@ bool kv_set(KVSet *s, const char *name, double val)
         }
 
         kv = &s->items[s->n++];
-        str_copy(kv->name, sizeof kv->name, name);
+        str_copy(kv->name, sizeof(kv->name), name);
     }
 
     kv->val = val;
@@ -91,7 +91,7 @@ int defines_load(const char *path, KVSet *out)
     }
 
     char line[512];
-    while (fgets(line, sizeof line, f)) {
+    while (fgets(line, sizeof(line), f)) {
         const char *p = line;
         while (isspace((unsigned char)*p)) {
             p++;
@@ -108,7 +108,7 @@ int defines_load(const char *path, KVSet *out)
 
         char name[KV_NAME_MAX];
         size_t n = 0;
-        while ((isalnum((unsigned char)*p) || *p == '_') && n + 1 < sizeof name) {
+        while ((isalnum((unsigned char)*p) || *p == '_') && n + 1 < sizeof(name)) {
             name[n++] = *p++;
         }
 
@@ -125,7 +125,7 @@ int defines_load(const char *path, KVSet *out)
         char tok[64];
         size_t t = 0;
         while (*p && !isspace((unsigned char)*p) &&
-               !(p[0] == '/' && (p[1] == '/' || p[1] == '*')) && t + 1 < sizeof tok) {
+               !(p[0] == '/' && (p[1] == '/' || p[1] == '*')) && t + 1 < sizeof(tok)) {
             tok[t++] = *p++;
         }
 
@@ -217,7 +217,7 @@ static bool parse_number(Cursor *c, double *out)
     char tmp[64];
     size_t n = 0;
     while (c->p < c->end && (isdigit((unsigned char)*c->p) || strchr("+-.eE", *c->p)) &&
-           n + 1 < sizeof tmp) {
+           n + 1 < sizeof(tmp)) {
         tmp[n++] = *c->p++;
     }
 
@@ -244,14 +244,14 @@ KVSet *overrides_section(Overrides *o, const char *name, bool create)
     }
 
     OverrideSection *s = &o->sec[o->n++];
-    memset(s, 0, sizeof *s);
-    str_copy(s->name, sizeof s->name, name);
+    memset(s, 0, sizeof(*s));
+    str_copy(s->name, sizeof(s->name), name);
     return &s->kv;
 }
 
 int overrides_load(Overrides *o, const char *path, char *err, size_t errlen)
 {
-    memset(o, 0, sizeof *o);
+    memset(o, 0, sizeof(*o));
 
     FILE *f = fopen(path, "rb");
     if (!f) {
@@ -280,8 +280,8 @@ int overrides_load(Overrides *o, const char *path, char *err, size_t errlen)
     bool ok = expect(&c, '{');
 
     while (ok && !peek_is(&c, '}')) {
-        char section[sizeof o->sec[0].name];
-        ok = parse_string(&c, section, sizeof section) && expect(&c, ':') && expect(&c, '{');
+        char section[sizeof(o->sec[0].name)];
+        ok = parse_string(&c, section, sizeof(section)) && expect(&c, ':') && expect(&c, '{');
         if (!ok) {
             break;
         }
@@ -291,7 +291,7 @@ int overrides_load(Overrides *o, const char *path, char *err, size_t errlen)
         while (ok && !peek_is(&c, '}')) {
             char key[KV_NAME_MAX];
             double val;
-            ok = parse_string(&c, key, sizeof key) && expect(&c, ':') && parse_number(&c, &val);
+            ok = parse_string(&c, key, sizeof(key)) && expect(&c, ':') && parse_number(&c, &val);
             if (!ok) {
                 break;
             }
@@ -313,7 +313,7 @@ int overrides_load(Overrides *o, const char *path, char *err, size_t errlen)
     free(text);
     if (!ok) {
         snprintf(err, errlen, "%s is not a {section:{key:number}} JSON file", path);
-        memset(o, 0, sizeof *o);
+        memset(o, 0, sizeof(*o));
         return -1;
     }
 
@@ -334,17 +334,17 @@ int overrides_save(const Overrides *o, const char *path, char *err, size_t errle
 {
     /* Sorted like json.dump(sort_keys=True) so the Python app and this one
      * produce near-identical files. */
-    Overrides *sorted = malloc(sizeof *sorted);
+    Overrides *sorted = malloc(sizeof(*sorted));
     if (!sorted) {
         snprintf(err, errlen, "out of memory");
         return -1;
     }
 
     *sorted = *o;
-    qsort(sorted->sec, (size_t)sorted->n, sizeof sorted->sec[0], cmp_sec);
+    qsort(sorted->sec, (size_t)sorted->n, sizeof(sorted->sec[0]), cmp_sec);
 
     char tmp_path[600];
-    snprintf(tmp_path, sizeof tmp_path, "%s.tmp", path);
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
     FILE *f = fopen(tmp_path, "wb");
     if (!f) {
         snprintf(err, errlen, "%s: %s", tmp_path, strerror(errno));
@@ -355,7 +355,7 @@ int overrides_save(const Overrides *o, const char *path, char *err, size_t errle
     fprintf(f, "{\n");
     for (int i = 0; i < sorted->n; i++) {
         OverrideSection *s = &sorted->sec[i];
-        qsort(s->kv.items, (size_t)s->kv.n, sizeof s->kv.items[0], cmp_kv);
+        qsort(s->kv.items, (size_t)s->kv.n, sizeof(s->kv.items[0]), cmp_kv);
         fprintf(f, "  \"%s\": {\n", s->name);
         for (int k = 0; k < s->kv.n; k++) {
             fprintf(f, "    \"%s\": %.10g%s\n", s->kv.items[k].name, s->kv.items[k].val,

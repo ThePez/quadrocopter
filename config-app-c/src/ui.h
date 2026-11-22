@@ -41,15 +41,16 @@
 
 /* ---- Metrics ---- */
 
-#define UI_TEXT_SIZE 16
-#define UI_SMALL     13
-#define UI_PAD       16 /* card inner padding */
-#define UI_GAP       12 /* space between cards */
-#define UI_RADIUS    8
-#define UI_FIELD_H   32
-#define UI_ROW_H     40 /* label + field row */
-#define UI_BTN_H     36
-#define UI_CARD_HEAD 42 /* height of a card's title strip */
+#define UI_TEXT_SIZE    16
+#define UI_SMALL        13
+#define UI_PAD          16 /* card inner padding */
+#define UI_GAP          12 /* space between cards */
+#define UI_RADIUS       8
+#define UI_FIELD_H      32
+#define UI_ROW_H        40 /* label + field row */
+#define UI_BTN_H        36
+#define UI_CARD_HEAD    42   /* height of a card's title strip */
+#define UI_TEXT_SPACING 0.0f /* whole-pixel glyph advances keep small text evenly sharp */
 
 /* ---- Setup ---- */
 

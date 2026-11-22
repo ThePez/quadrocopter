@@ -16,7 +16,7 @@
 static void init_common(Plot *p, const char *title, const char *ylabel, int nseries,
                         const char *const *names, const Color *colors)
 {
-    memset(p, 0, sizeof *p);
+    memset(p, 0, sizeof(*p));
     p->title = title;
     p->ylabel = ylabel;
     p->xlabel = "Time (s)";
@@ -33,9 +33,9 @@ void plot_init_live(Plot *p, const char *title, const char *ylabel, int nseries,
     init_common(p, title, ylabel, nseries, names, colors);
     p->live = true;
     p->cap = capacity;
-    p->t = malloc((size_t)capacity * sizeof *p->t);
+    p->t = malloc((size_t)capacity * sizeof(*p->t));
     for (int i = 0; i < p->nseries; i++) {
-        p->y[i] = malloc((size_t)capacity * sizeof *p->y[i]);
+        p->y[i] = malloc((size_t)capacity * sizeof(*p->y[i]));
     }
 
     p->t0 = now_s();
@@ -57,7 +57,7 @@ void plot_free(Plot *p)
         }
     }
 
-    memset(p, 0, sizeof *p);
+    memset(p, 0, sizeof(*p));
 }
 
 void plot_push(Plot *p, double t, const float *values)
@@ -67,9 +67,9 @@ void plot_push(Plot *p, double t, const float *values)
     }
 
     if (p->count == p->cap) { /* slide the window by one sample */
-        memmove(p->t, p->t + 1, (size_t)(p->cap - 1) * sizeof *p->t);
+        memmove(p->t, p->t + 1, (size_t)(p->cap - 1) * sizeof(*p->t));
         for (int i = 0; i < p->nseries; i++) {
-            memmove(p->y[i], p->y[i] + 1, (size_t)(p->cap - 1) * sizeof *p->y[i]);
+            memmove(p->y[i], p->y[i] + 1, (size_t)(p->cap - 1) * sizeof(*p->y[i]));
         }
 
         p->count--;
@@ -295,7 +295,7 @@ static const char *split_name(const char *name, char *group, size_t cap)
 static void display_name(const char *name, char *out, size_t cap)
 {
     char group[24];
-    const char *leaf = split_name(name, group, sizeof group);
+    const char *leaf = split_name(name, group, sizeof(group));
     snprintf(out, cap, "%s%s%s", group, group[0] ? " " : "", leaf);
 }
 
@@ -308,7 +308,7 @@ static float legend_layout(const Plot *p, float x, float y, bool draw)
 
     for (int s = 0; s < p->nseries; s++) {
         char group[24];
-        const char *leaf = split_name(p->names[s], group, sizeof group);
+        const char *leaf = split_name(p->names[s], group, sizeof(group));
 
         if (group[0] && strcmp(group, prev) != 0) {
             if (s > 0) {
@@ -322,7 +322,7 @@ static float legend_layout(const Plot *p, float x, float y, bool draw)
             x += ui_text_width(group, UI_SMALL + 1) + 12;
         }
 
-        str_copy(prev, sizeof prev, group);
+        str_copy(prev, sizeof(prev), group);
 
         if (draw) {
             ui_dot(x + 4, y + 8, 4.5f, p->colors[s]);
@@ -345,7 +345,7 @@ static int legend_stacked(const Plot *p, float x, float y, bool draw)
 
     for (int s = 0; s < p->nseries; s++) {
         char group[24];
-        const char *leaf = split_name(p->names[s], group, sizeof group);
+        const char *leaf = split_name(p->names[s], group, sizeof(group));
 
         if (s == 0 || strcmp(group, prev) != 0) {
             rows++;
@@ -359,7 +359,7 @@ static int legend_stacked(const Plot *p, float x, float y, bool draw)
             }
         }
 
-        str_copy(prev, sizeof prev, group);
+        str_copy(prev, sizeof(prev), group);
 
         if (draw) {
             float ry = y + (float)(rows - 1) * LEGEND_ROW_H;
@@ -541,7 +541,7 @@ void plot_draw(Plot *p, Rectangle b)
     for (double v = ceil(ylo / ystep) * ystep; v <= yhi && guard < 200; v += ystep, guard++) {
         float py = PY(v);
         DrawLine((int)a.x, (int)py, (int)(a.x + a.width), (int)py, UI_GRID);
-        format_tick(label, sizeof label, v, ystep);
+        format_tick(label, sizeof(label), v, ystep);
         ui_text_right(label, a.x - 8, py - 7, UI_SMALL, UI_MUTED);
     }
 
@@ -550,7 +550,7 @@ void plot_draw(Plot *p, Rectangle b)
     for (double v = ceil(x0 / xstep) * xstep; v <= x1 && guard < 200; v += xstep, guard++) {
         float px = PX(v);
         DrawLine((int)px, (int)a.y, (int)px, (int)(a.y + a.height), UI_GRID);
-        format_tick(label, sizeof label, v, xstep);
+        format_tick(label, sizeof(label), v, xstep);
         ui_text(label, px - ui_text_width(label, UI_SMALL) / 2, a.y + a.height + 6, UI_SMALL,
                 UI_MUTED);
     }
@@ -623,15 +623,15 @@ void plot_draw(Plot *p, Rectangle b)
         DrawLine((int)px, (int)a.y, (int)px, (int)(a.y + a.height), Fade(UI_TEXT, 0.35f));
 
         char rows[PLOT_MAX_SERIES + 1][64];
-        snprintf(rows[0], sizeof rows[0], "t = %.3f s", p->t[near]);
+        snprintf(rows[0], sizeof(rows[0]), "t = %.3f s", p->t[near]);
         float bw = ui_text_width(rows[0], UI_SMALL);
         for (int s = 0; s < p->nseries; s++) {
             char shown[48];
-            display_name(p->names[s], shown, sizeof shown);
+            display_name(p->names[s], shown, sizeof(shown));
             if (p->y[s] && isnan(p->y[s][near])) {
-                snprintf(rows[s + 1], sizeof rows[0], "%s  --", shown);
+                snprintf(rows[s + 1], sizeof(rows[0]), "%s  --", shown);
             } else {
-                snprintf(rows[s + 1], sizeof rows[0], "%s  %.3f", shown,
+                snprintf(rows[s + 1], sizeof(rows[0]), "%s  %.3f", shown,
                          p->y[s] ? (double)p->y[s][near] : 0.0);
             }
 

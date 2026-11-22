@@ -53,17 +53,17 @@ int uart_list_ports(PortInfo *out, int max)
         }
 
         char name[40];
-        str_copy(name, sizeof name, e->d_name);
-        snprintf(out[n].device, sizeof out[n].device, "/dev/%s", name);
+        str_copy(name, sizeof(name), e->d_name);
+        snprintf(out[n].device, sizeof(out[n].device), "/dev/%s", name);
         out[n].description[0] = '\0';
 
         /* The USB device's "product" string sits one level above the tty's
          * interface directory. */
         char path[160];
-        snprintf(path, sizeof path, "/sys/class/tty/%s/device/../product", name);
+        snprintf(path, sizeof(path), "/sys/class/tty/%s/device/../product", name);
         FILE *f = fopen(path, "r");
         if (f) {
-            if (fgets(out[n].description, sizeof out[n].description, f)) {
+            if (fgets(out[n].description, sizeof(out[n].description), f)) {
                 out[n].description[strcspn(out[n].description, "\r\n")] = '\0';
             }
 
@@ -75,7 +75,7 @@ int uart_list_ports(PortInfo *out, int max)
 
     closedir(d);
 
-    qsort(out, (size_t)n, sizeof out[0], cmp_ports);
+    qsort(out, (size_t)n, sizeof(out[0]), cmp_ports);
     return n;
 }
 
@@ -181,17 +181,17 @@ size_t uart_encode_config_packet(uint8_t packet_id, const void *payload, size_t 
     /* Zeroed so struct padding (and the unused tail of the union) is
      * deterministic on the wire. */
     struct wifi_packet_t pkt;
-    memset(&pkt, 0, sizeof pkt);
+    memset(&pkt, 0, sizeof(pkt));
     pkt.packet_id = packet_id;
     if (payload && payload_len) {
         memcpy(&pkt.data, payload, payload_len);
     }
 
-    pkt.crc16 = uart_crc16((const uint8_t *)&pkt.data, sizeof pkt.data);
+    pkt.crc16 = uart_crc16((const uint8_t *)&pkt.data, sizeof(pkt.data));
 
     out[0] = UART_MAGIC0;
     out[1] = UART_MAGIC1;
-    memcpy(out + 2, &pkt, sizeof pkt);
+    memcpy(out + 2, &pkt, sizeof(pkt));
     return UART_CONFIG_FRAME_SIZE;
 }
 
@@ -237,8 +237,8 @@ static int decoder_process(FrameDecoder *d, TelemetryFrameCb cb, AckFrameCb ack_
         }
 
         struct wifi_packet_t pkt;
-        memcpy(&pkt, d->buf + 2, sizeof pkt);
-        if (pkt.crc16 != uart_crc16((const uint8_t *)&pkt.data, sizeof pkt.data)) {
+        memcpy(&pkt, d->buf + 2, sizeof(pkt));
+        if (pkt.crc16 != uart_crc16((const uint8_t *)&pkt.data, sizeof(pkt.data))) {
             /* Only drop the magic bytes: the real frame boundary may be
              * somewhere inside what we just examined. */
             memmove(d->buf, d->buf + 2, d->len - 2);
@@ -266,7 +266,7 @@ int decoder_feed(FrameDecoder *d, const uint8_t *data, size_t n, TelemetryFrameC
 {
     int frames = 0;
     while (n > 0) {
-        size_t room = sizeof d->buf - d->len;
+        size_t room = sizeof(d->buf) - d->len;
         size_t take = n < room ? n : room;
         memcpy(d->buf + d->len, data, take);
         d->len += take;

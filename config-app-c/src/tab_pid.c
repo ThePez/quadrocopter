@@ -40,7 +40,7 @@ static void d_filter_text(double alpha, char *out, size_t cap)
 static void init_group(PidGroup *g, App *app, int axis, int mode, const char *title,
                        const char *prefix)
 {
-    memset(g, 0, sizeof *g);
+    memset(g, 0, sizeof(*g));
     g->app = app;
     g->axis = axis;
     g->mode = mode;
@@ -48,13 +48,13 @@ static void init_group(PidGroup *g, App *app, int axis, int mode, const char *ti
     g->defaults_prefix = prefix;
 
     char key[64];
-    snprintf(key, sizeof key, "%s_KP", prefix);
+    snprintf(key, sizeof(key), "%s_KP", prefix);
     numfield_init(&g->kp, kv_get(&app->pid_defaults, key, 0.0), 0.001, 0, 100, 4);
-    snprintf(key, sizeof key, "%s_KI", prefix);
+    snprintf(key, sizeof(key), "%s_KI", prefix);
     numfield_init(&g->ki, kv_get(&app->pid_defaults, key, 0.0), 0.001, 0, 100, 4);
-    snprintf(key, sizeof key, "%s_KD", prefix);
+    snprintf(key, sizeof(key), "%s_KD", prefix);
     numfield_init(&g->kd, kv_get(&app->pid_defaults, key, 0.0), 0.001, 0, 100, 4);
-    snprintf(key, sizeof key, "%s_KD_ALPHA", prefix);
+    snprintf(key, sizeof(key), "%s_KD_ALPHA", prefix);
     numfield_init(&g->alpha, kv_get(&app->pid_defaults, key, 1.0), 0.05, 0.01, 1.0, 2);
 }
 
@@ -96,13 +96,13 @@ static void on_store_done(App *app, const void *user, bool ok)
     /* The drone has it in flash: now remember the gains as this GUI's working defaults. */
     char key[64];
     KVSet updates = {0};
-    snprintf(key, sizeof key, "%s_KP", g->defaults_prefix);
+    snprintf(key, sizeof(key), "%s_KP", g->defaults_prefix);
     kv_set(&updates, key, s->kp);
-    snprintf(key, sizeof key, "%s_KI", g->defaults_prefix);
+    snprintf(key, sizeof(key), "%s_KI", g->defaults_prefix);
     kv_set(&updates, key, s->ki);
-    snprintf(key, sizeof key, "%s_KD", g->defaults_prefix);
+    snprintf(key, sizeof(key), "%s_KD", g->defaults_prefix);
     kv_set(&updates, key, s->kd);
-    snprintf(key, sizeof key, "%s_KD_ALPHA", g->defaults_prefix);
+    snprintf(key, sizeof(key), "%s_KD_ALPHA", g->defaults_prefix);
     kv_set(&updates, key, s->alpha);
 
     if (app_save_defaults(app, "pid", &updates, &app->pid_defaults)) {
@@ -115,7 +115,7 @@ static void on_store_done(App *app, const void *user, bool ok)
 
 static bool send_store(App *app, const PidSnap *s)
 {
-    if (!app_send_then(app, DRONE_CFG_STORE, NULL, 0, on_store_done, s, sizeof *s)) {
+    if (!app_send_then(app, DRONE_CFG_STORE, NULL, 0, on_store_done, s, sizeof(*s))) {
         return false;
     }
 
@@ -145,12 +145,12 @@ static void on_pid_done(App *app, const void *user, bool ok)
     g->sent_ki = s.ki;
     g->sent_kd = s.kd;
     g->sent_alpha = s.alpha;
-    snprintf(g->current, sizeof g->current, "Kp %.4g   Ki %.4g   Kd %.4g   alpha %.2g", s.kp, s.ki,
+    snprintf(g->current, sizeof(g->current), "Kp %.4g   Ki %.4g   Kd %.4g   alpha %.2g", s.kp, s.ki,
              s.kd, s.alpha);
     g->current_set = true;
 
     char event[160];
-    snprintf(event, sizeof event, "%s %s: Kp=%.4f Ki=%.4f Kd=%.4f a=%.2f", AXIS_NAMES[g->axis],
+    snprintf(event, sizeof(event), "%s %s: Kp=%.4f Ki=%.4f Kd=%.4f a=%.2f", AXIS_NAMES[g->axis],
              MODE_NAMES[g->mode], s.kp, s.ki, s.kd, s.alpha);
     app_record_event(app, event);
 
@@ -187,15 +187,15 @@ static bool send_pid(PidGroup *g, bool then_save)
                  .kd = g->kd.value,
                  .alpha = g->alpha.value,
                  .then_save = then_save};
-    if (!app_send_then(app, PID_CONFIG, &p, sizeof p, on_pid_done, &s, sizeof s)) {
+    if (!app_send_then(app, PID_CONFIG, &p, sizeof(p), on_pid_done, &s, sizeof(s))) {
         return false;
     }
 
     g->state = PID_SENT_PENDING;
-    snap_text(&s, g->attempt, sizeof g->attempt);
+    snap_text(&s, g->attempt, sizeof(g->attempt));
 
     char hint[48];
-    d_filter_text(g->alpha.value, hint, sizeof hint);
+    d_filter_text(g->alpha.value, hint, sizeof(hint));
     app_log(app,
             "-> Sent %s %s: Kp=%.4f, Ki=%.4f, Kd=%.4f, D filter alpha=%.2f (%s), waiting for "
             "confirmation",
@@ -244,7 +244,7 @@ static void request_save(PidGroup *g)
     }
 
     char msg[512];
-    snprintf(msg, sizeof msg,
+    snprintf(msg, sizeof(msg),
              "Persist the drone's currently-live config to flash, and save the %s %s gains as "
              "your local working default:\nKp=%.4f, Ki=%.4f, Kd=%.4f, D filter alpha=%.2f?",
              AXIS_NAMES[g->axis], g->title, g->kp.value, g->ki.value, g->kd.value, g->alpha.value);
@@ -269,7 +269,7 @@ static void save_all_to_file(App *app)
                       {"KD", g->kd.value},
                       {"KD_ALPHA", g->alpha.value}};
         for (int k = 0; k < 4; k++) {
-            snprintf(key, sizeof key, "%s_%s", g->defaults_prefix, items[k].suffix);
+            snprintf(key, sizeof(key), "%s_%s", g->defaults_prefix, items[k].suffix);
             kv_set(&updates, key, items[k].value);
         }
     }
@@ -336,7 +336,7 @@ static void draw_group(PidGroup *g, const char *title, Rectangle r)
     y += UI_ROW_H - 4;
 
     char hint[48];
-    d_filter_text(g->alpha.value, hint, sizeof hint);
+    d_filter_text(g->alpha.value, hint, sizeof(hint));
     ui_text_right(hint, b.x + b.width, y, UI_SMALL, UI_MUTED);
     if (g->axis == 1) {
         ui_text("Rate mode only", b.x, y, UI_SMALL, UI_MUTED);

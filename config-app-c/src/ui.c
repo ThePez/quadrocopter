@@ -39,7 +39,7 @@ static void apply_raygui_theme(void)
         {BASE_COLOR_DISABLED, UI_FIELD},   {TEXT_COLOR_DISABLED, UI_MUTED},
         {BACKGROUND_COLOR, UI_BG},         {LINE_COLOR, UI_BORDER},
     };
-    for (size_t i = 0; i < sizeof theme / sizeof theme[0]; i++) {
+    for (size_t i = 0; i < sizeof(theme) / sizeof(theme[0]); i++) {
         GuiSetStyle(DEFAULT, theme[i].prop, ColorToInt(theme[i].c));
     }
 }
@@ -60,15 +60,16 @@ void ui_init(void)
     codepoints[n++] = 0x03B1; /* alpha */
     codepoints[n++] = 0x00B7; /* middle dot */
 
-    for (size_t i = 0; i < sizeof FONT_PATHS / sizeof FONT_PATHS[0]; i++) {
+    for (size_t i = 0; i < sizeof(FONT_PATHS) / sizeof(FONT_PATHS[0]); i++) {
         if (!FileExists(FONT_PATHS[i])) {
             continue;
         }
 
-        Font f = LoadFontEx(FONT_PATHS[i], 32, codepoints, n);
+        /* Rasterised at the body text size so most text is drawn 1:1; shrinking a larger
+         * mipmapped atlas made small text look blurred. */
+        Font f = LoadFontEx(FONT_PATHS[i], UI_TEXT_SIZE, codepoints, n);
         if (f.texture.id != 0) {
-            GenTextureMipmaps(&f.texture);
-            SetTextureFilter(f.texture, TEXTURE_FILTER_TRILINEAR);
+            SetTextureFilter(f.texture, TEXTURE_FILTER_BILINEAR);
             g_font = f;
             g_font_loaded = true;
             break;
@@ -98,7 +99,7 @@ Font ui_font(void)
 
 void ui_text(const char *text, float x, float y, float size, Color c)
 {
-    DrawTextEx(g_font, text, (Vector2){x, y}, size, 0.5f, c);
+    DrawTextEx(g_font, text, (Vector2){x, y}, size, UI_TEXT_SPACING, c);
 }
 
 void ui_text_bold(const char *text, float x, float y, float size, Color c)
@@ -109,7 +110,7 @@ void ui_text_bold(const char *text, float x, float y, float size, Color c)
 
 float ui_text_width(const char *text, float size)
 {
-    return MeasureTextEx(g_font, text, size, 0.5f).x;
+    return MeasureTextEx(g_font, text, size, UI_TEXT_SPACING).x;
 }
 
 void ui_text_right(const char *text, float right, float y, float size, Color c)
@@ -361,7 +362,7 @@ static NumField *g_editing; /* at most one field is mid-edit */
 
 void numfield_init(NumField *f, double value, double step, double min, double max, int decimals)
 {
-    memset(f, 0, sizeof *f);
+    memset(f, 0, sizeof(*f));
     f->value = value;
     f->step = step;
     f->min = min;
@@ -405,7 +406,7 @@ static void field_begin(NumField *f)
         field_commit(g_editing);
     }
 
-    snprintf(f->buf, sizeof f->buf, "%.*f", f->decimals, f->value);
+    snprintf(f->buf, sizeof(f->buf), "%.*f", f->decimals, f->value);
     f->cursor = (int)strlen(f->buf);
     f->editing = true;
     g_editing = f;
@@ -417,7 +418,7 @@ static int caret_from_x(const char *buf, float x)
     int len = (int)strlen(buf);
     char prefix[32];
     float prev = 0;
-    for (int i = 1; i <= len && i < (int)sizeof prefix; i++) {
+    for (int i = 1; i <= len && i < (int)sizeof(prefix); i++) {
         memcpy(prefix, buf, (size_t)i);
         prefix[i] = '\0';
         float w = ui_text_width(prefix, UI_TEXT_SIZE);
@@ -493,7 +494,7 @@ void numfield_draw(NumField *f, Rectangle b)
         int ch;
         while ((ch = GetCharPressed()) != 0) {
             int len = (int)strlen(f->buf);
-            if (ch < 128 && strchr("0123456789.-+eE", ch) && len + 1 < (int)sizeof f->buf) {
+            if (ch < 128 && strchr("0123456789.-+eE", ch) && len + 1 < (int)sizeof(f->buf)) {
                 /* insert at the caret */
                 memmove(f->buf + f->cursor + 1, f->buf + f->cursor, (size_t)(len - f->cursor + 1));
                 f->buf[f->cursor++] = (char)ch;
@@ -538,13 +539,16 @@ void numfield_draw(NumField *f, Rectangle b)
 
     char shown[40];
     if (f->editing) {
-        snprintf(shown, sizeof shown, "%s", f->buf);
+        snprintf(shown, sizeof(shown), "%s", f->buf);
     } else {
-        snprintf(shown, sizeof shown, "%.*f", f->decimals, f->value);
+        snprintf(shown, sizeof(shown), "%.*f", f->decimals, f->value);
     }
 
-    float ty = b.y + (b.height - UI_TEXT_SIZE) / 2 - 1;
-    ui_text(shown, b.x + 10, ty, UI_TEXT_SIZE, UI_TEXT);
+    /* Whole-pixel origin: text at a fractional position is filtered across pixels and looks
+     * faded. */
+    float tx = roundf(b.x + 10);
+    float ty = roundf(b.y + (b.height - UI_TEXT_SIZE) / 2 - 1);
+    ui_text(shown, tx, ty, UI_TEXT_SIZE, UI_TEXT);
     /* The caret stays solid while it is being moved or typed, then blinks */
     static double caret_moved_at;
     static int caret_last = -1;
@@ -555,10 +559,10 @@ void numfield_draw(NumField *f, Rectangle b)
 
     if (f->editing && (GetTime() - caret_moved_at < 0.5 || (int)(GetTime() * 2) % 2 == 0)) {
         char before[32];
-        int n = f->cursor < (int)sizeof before - 1 ? f->cursor : (int)sizeof before - 1;
+        int n = f->cursor < (int)sizeof(before) - 1 ? f->cursor : (int)sizeof(before) - 1;
         memcpy(before, shown, (size_t)n);
         before[n] = '\0';
-        float cx = b.x + 11 + ui_text_width(before, UI_TEXT_SIZE);
+        float cx = tx + 1 + ui_text_width(before, UI_TEXT_SIZE);
         DrawLine((int)cx, (int)(ty + 1), (int)cx, (int)(ty + UI_TEXT_SIZE), UI_ACCENT);
     }
 
@@ -620,9 +624,9 @@ void ui_modal_open(const char *title, const char *msg, const char *buttons, Moda
 {
     ui_commit_edit();
     M.kind = MODAL_MESSAGE;
-    str_copy(M.title, sizeof M.title, title);
-    str_copy(M.msg, sizeof M.msg, msg);
-    str_copy(M.buttons, sizeof M.buttons, buttons);
+    str_copy(M.title, sizeof(M.title), title);
+    str_copy(M.msg, sizeof(M.msg), msg);
+    str_copy(M.buttons, sizeof(M.buttons), buttons);
     M.cb = cb;
     M.ctx = ctx;
 }
@@ -637,21 +641,21 @@ void ui_file_picker_open(const char *title, const char *dir, const char *ext, Fi
 {
     ui_commit_edit();
     free(M.paths);
-    M.paths = malloc(MAX_FILES * sizeof *M.paths);
+    M.paths = malloc(MAX_FILES * sizeof(*M.paths));
     M.nfiles = 0;
 
     FilePathList list = LoadDirectoryFilesEx(dir, ext, false);
     for (unsigned i = 0; i < list.count && M.nfiles < MAX_FILES; i++) {
-        str_copy(M.paths[M.nfiles++], sizeof M.paths[0], list.paths[i]);
+        str_copy(M.paths[M.nfiles++], sizeof(M.paths[0]), list.paths[i]);
     }
 
     UnloadDirectoryFiles(list);
     /* Session names embed a timestamp, so reverse order = newest first. */
-    qsort(M.paths, (size_t)M.nfiles, sizeof M.paths[0], cmp_desc);
+    qsort(M.paths, (size_t)M.nfiles, sizeof(M.paths[0]), cmp_desc);
 
     M.kind = MODAL_FILES;
-    str_copy(M.title, sizeof M.title, title);
-    str_copy(M.dir, sizeof M.dir, dir);
+    str_copy(M.title, sizeof(M.title), title);
+    str_copy(M.dir, sizeof(M.dir), dir);
     M.pick_cb = cb;
     M.ctx = ctx;
     M.selected = M.nfiles ? 0 : -1;
@@ -686,12 +690,12 @@ static int wrap_text(const char *msg, float max_w, float size, char out[][200], 
         }
 
         char trial[400];
-        snprintf(trial, sizeof trial, "%s%s%s", line, line[0] ? " " : "", word);
+        snprintf(trial, sizeof(trial), "%s%s%s", line, line[0] ? " " : "", word);
         if (line[0] && ui_text_width(trial, size) > max_w) {
             str_copy(out[n++], 200, line);
-            str_copy(line, sizeof line, word);
+            str_copy(line, sizeof(line), word);
         } else {
-            str_copy(line, sizeof line, trial);
+            str_copy(line, sizeof(line), trial);
         }
     }
 
@@ -730,13 +734,13 @@ static void draw_message_modal(void)
     char labels[MAX_BTN][32];
     int nb = 0;
     char tmp[128];
-    str_copy(tmp, sizeof tmp, M.buttons);
+    str_copy(tmp, sizeof(tmp), M.buttons);
     for (char *save = NULL, *tok = strtok_r(tmp, ";", &save); tok && nb < MAX_BTN;
          tok = strtok_r(NULL, ";", &save)) {
-        str_copy(labels[nb++], sizeof labels[0], tok);
+        str_copy(labels[nb++], sizeof(labels[0]), tok);
     }
     if (nb == 0) {
-        str_copy(labels[nb++], sizeof labels[0], "OK");
+        str_copy(labels[nb++], sizeof(labels[0]), "OK");
     }
 
     /* Buttons right-aligned, primary (first) rightmost. */
@@ -775,7 +779,7 @@ static void close_picker(const char *chosen)
     void *ctx = M.ctx;
     char path[512] = "";
     if (chosen) {
-        str_copy(path, sizeof path, chosen);
+        str_copy(path, sizeof(path), chosen);
     }
 
     M.kind = MODAL_NONE;
@@ -791,7 +795,7 @@ static void draw_file_modal(void)
     draw_panel(r, M.title);
 
     char hint[600];
-    snprintf(hint, sizeof hint, "%s  -  or drop a .csv file on the window", M.dir);
+    snprintf(hint, sizeof(hint), "%s  -  or drop a .csv file on the window", M.dir);
     ui_text(hint, r.x + 24, r.y + 50, UI_SMALL, UI_MUTED);
 
     Rectangle list = {r.x + 24, r.y + 78, w - 48, h - 78 - 24 - UI_BTN_H - 16};

@@ -34,7 +34,7 @@ static V3 rotate(V3 p, float pitch, float roll, float yaw)
 
 void att_init(Attitude3D *a)
 {
-    memset(a, 0, sizeof *a);
+    memset(a, 0, sizeof(*a));
     a->azimuth = 35;
     a->elevation = 28;
     a->distance = 5.5f;
@@ -165,7 +165,7 @@ void att_draw(Attitude3D *a, Rectangle card, const char *title)
     DrawRectangleLinesEx(b, 1, UI_BORDER);
 
     char info[96];
-    snprintf(info, sizeof info, "P %.1f   R %.1f   Y %.1f", (double)a->pitch, (double)a->roll,
+    snprintf(info, sizeof(info), "P %.1f   R %.1f   Y %.1f", (double)a->pitch, (double)a->roll,
              (double)a->yaw);
     ui_text(info, b.x + 10, b.y + 8, UI_SMALL + 1, UI_TEXT);
     ui_text("drag to orbit", b.x + 10, b.y + b.height - 22, UI_SMALL - 1, UI_MUTED);
