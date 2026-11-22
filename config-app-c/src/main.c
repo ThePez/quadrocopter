@@ -40,8 +40,10 @@ static void draw_sidebar(App *app, float height, DropdownRects *dd)
 
     y += 34;
     ui_text("PORT", x, y, UI_SMALL - 1, UI_MUTED);
-    if (ui_link((Rectangle){x + w - 40, y - 4, 40, 20}, "Scan"))
+    if (ui_link((Rectangle){x + w - 40, y - 4, 40, 20}, "Scan")) {
         app_refresh_ports(app);
+    }
+
     dd->port = (Rectangle){x, y + 18, w, 32};
 
     y += 62;
@@ -51,8 +53,9 @@ static void draw_sidebar(App *app, float height, DropdownRects *dd)
     y += 62;
     Rectangle connect = {x, y, w, UI_BTN_H};
     if (app->connected) {
-        if (ui_button(connect, "Disconnect", UI_RED))
+        if (ui_button(connect, "Disconnect", UI_RED)) {
             app_disconnect(app);
+        }
     } else if (ui_button(connect, "Connect", UI_ACCENT)) {
         app_connect(app);
     }
@@ -62,29 +65,35 @@ static void draw_sidebar(App *app, float height, DropdownRects *dd)
     int count = TAB_COUNT_VISIBLE(app);
     for (int i = 0; i < count; i++) {
         char label[96];
-        if (i == TAB_SESSION)
+        if (i == TAB_SESSION) {
             snprintf(label, sizeof label, "Session");
-        else
+        } else {
             str_copy(label, sizeof label, NAV_LABELS[i]);
+        }
 
         if (ui_nav_item((Rectangle){12, ny, SIDEBAR_W - 24, 42}, label, app->main_tab == i)) {
             ui_commit_edit();
             app->main_tab = i;
         }
+
         ny += 46;
     }
 
     /* ---- Config requests: unconfirmed while waiting for the ack, then the result ---- */
     const AckChannel *waiting = NULL;
     double newest = -1.0;
-    for (int ch = 0; ch < ACK_CHANNELS; ch++)
+    for (int ch = 0; ch < ACK_CHANNELS; ch++) {
         if (app->ack[ch].in_flight && app->ack[ch].sent_at > newest) {
             newest = app->ack[ch].sent_at;
             waiting = &app->ack[ch];
         }
-    for (int ch = 0; ch < ACK_CHANNELS && !waiting; ch++)
-        if (app->ack[ch].qcount > 0)
+    }
+
+    for (int ch = 0; ch < ACK_CHANNELS && !waiting; ch++) {
+        if (app->ack[ch].qcount > 0) {
             waiting = &app->ack[ch];
+        }
+    }
 
     const char *what_src = NULL;
     char result[96] = "";
@@ -92,10 +101,13 @@ static void draw_sidebar(App *app, float height, DropdownRects *dd)
     if (waiting) {
         const AckRequest *r = waiting->in_flight ? &waiting->cur : &waiting->queue[waiting->qhead];
         what_src = r->what;
-        if (waiting->in_flight && r->attempts > 1)
-            snprintf(result, sizeof result, "unconfirmed (try %d/%d)", r->attempts, r->max_attempts);
-        else
+        if (waiting->in_flight && r->attempts > 1) {
+            snprintf(result, sizeof result, "unconfirmed (try %d/%d)", r->attempts,
+                     r->max_attempts);
+        } else {
             snprintf(result, sizeof result, "unconfirmed");
+        }
+
         c = UI_ORANGE;
     } else if (app->cfg_t > 0.0 && now_s() - app->cfg_t < 12.0) {
         what_src = app->cfg_what; /* the latest result stays for a few seconds */
@@ -107,10 +119,15 @@ static void draw_sidebar(App *app, float height, DropdownRects *dd)
         char what[64];
         str_copy(what, sizeof what, what_src);
         /* Keep both lines inside the sidebar */
-        for (size_t n = strlen(what); n > 3 && ui_text_width(what, UI_SMALL + 1) > SIDEBAR_W - 56; )
+        for (size_t n = strlen(what);
+             n > 3 && ui_text_width(what, UI_SMALL + 1) > SIDEBAR_W - 56;) {
             what[--n] = '\0';
-        for (size_t n = strlen(result); n > 3 && ui_text_width(result, UI_SMALL) > SIDEBAR_W - 56; )
+        }
+
+        for (size_t n = strlen(result);
+             n > 3 && ui_text_width(result, UI_SMALL) > SIDEBAR_W - 56;) {
             result[--n] = '\0';
+        }
         ui_dot(26, height - 83, 5, c);
         ui_text(what, 40, height - 91, UI_SMALL + 1, UI_TEXT);
         ui_text(result, 40, height - 72, UI_SMALL, c);
@@ -136,11 +153,15 @@ static void draw_dropdowns(App *app, const DropdownRects *dd)
         size_t len = 0;
         for (int i = 0; i < app->nports && len + 1 < sizeof items; i++) {
             const char *dev = app->ports[i].device;
-            if (strncmp(dev, "/dev/", 5) == 0)
+            if (strncmp(dev, "/dev/", 5) == 0) {
                 dev += 5;
+            }
+
             int n = snprintf(items + len, sizeof items - len, "%s%s", i ? ";" : "", dev);
-            if (n < 0)
+            if (n < 0) {
                 break;
+            }
+
             len += (size_t)n;
         }
     }
@@ -148,16 +169,24 @@ static void draw_dropdowns(App *app, const DropdownRects *dd)
     bool modal = ui_modal_active();
 
     /* Only one list may take input at a time; the port can't change mid-session. */
-    if (modal || app->baud_edit || app->connected)
+    if (modal || app->baud_edit || app->connected) {
         GuiLock();
-    if (GuiDropdownBox(dd->port, items, &app->port_active, app->port_edit))
+    }
+
+    if (GuiDropdownBox(dd->port, items, &app->port_active, app->port_edit)) {
         app->port_edit = !app->port_edit;
+    }
+
     GuiUnlock();
 
-    if (modal || app->port_edit || app->connected)
+    if (modal || app->port_edit || app->connected) {
         GuiLock();
-    if (GuiDropdownBox(dd->baud, BAUD_LIST_TEXT, &app->baud_active, app->baud_edit))
+    }
+
+    if (GuiDropdownBox(dd->baud, BAUD_LIST_TEXT, &app->baud_active, app->baud_edit)) {
         app->baud_edit = !app->baud_edit;
+    }
+
     GuiUnlock();
 }
 
@@ -174,14 +203,16 @@ static void draw_frame(App *app)
     float w = (float)GetScreenWidth(), h = (float)GetScreenHeight();
 
     /* Anything modal or any open dropdown list owns the mouse this frame. */
-    if (ui_modal_active() || app->port_edit || app->baud_edit)
+    if (ui_modal_active() || app->port_edit || app->baud_edit) {
         GuiLock();
+    }
 
     DropdownRects dd;
     draw_sidebar(app, h, &dd);
 
-    if (app->main_tab == TAB_SESSION && !app->stab.open)
+    if (app->main_tab == TAB_SESSION && !app->stab.open) {
         app->main_tab = TAB_TELEMETRY;
+    }
 
     Rectangle content = {SIDEBAR_W + 20, 18, w - SIDEBAR_W - 40, h - 36};
 
@@ -194,7 +225,8 @@ static void draw_frame(App *app)
         pid_tab_draw(app, content);
         break;
     case TAB_DRONE:
-        page_header("Drone Config", "Flight limits, throttle range and failsafe thresholds", &content);
+        page_header("Drone Config", "Flight limits, throttle range and failsafe thresholds",
+                    &content);
         drone_tab_draw(app, content);
         break;
     case TAB_REMOTE:
@@ -228,8 +260,10 @@ int main(void)
     ui_init();
 
     App *app = calloc(1, sizeof *app);
-    if (!app)
+    if (!app) {
         return 1;
+    }
+
     app_init(app);
 
     while (!WindowShouldClose()) {

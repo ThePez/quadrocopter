@@ -14,9 +14,12 @@
 
 static KV *kv_find(const KVSet *s, const char *name)
 {
-    for (int i = 0; i < s->n; i++)
-        if (strcmp(s->items[i].name, name) == 0)
+    for (int i = 0; i < s->n; i++) {
+        if (strcmp(s->items[i].name, name) == 0) {
             return (KV *)&s->items[i];
+        }
+    }
+
     return NULL;
 }
 
@@ -35,19 +38,23 @@ bool kv_set(KVSet *s, const char *name, double val)
 {
     KV *kv = kv_find(s, name);
     if (!kv) {
-        if (s->n >= KV_MAX)
+        if (s->n >= KV_MAX) {
             return false;
+        }
+
         kv = &s->items[s->n++];
         str_copy(kv->name, sizeof kv->name, name);
     }
+
     kv->val = val;
     return true;
 }
 
 void kv_merge(KVSet *dst, const KVSet *src)
 {
-    for (int i = 0; i < src->n; i++)
+    for (int i = 0; i < src->n; i++) {
         kv_set(dst, src->items[i].name, src->items[i].val);
+    }
 }
 
 /* ------------------------------------------------------------------------ */
@@ -60,12 +67,18 @@ static bool parse_literal(const char *tok, double *out)
     char *end;
     errno = 0;
     double v = strtod(tok, &end);
-    if (end == tok)
+    if (end == tok) {
         return false;
-    while (*end == 'f' || *end == 'F' || *end == 'u' || *end == 'U' || *end == 'l' || *end == 'L')
+    }
+
+    while (*end == 'f' || *end == 'F' || *end == 'u' || *end == 'U' || *end == 'l' || *end == 'L') {
         end++;
-    if (*end != '\0')
+    }
+
+    if (*end != '\0') {
         return false;
+    }
+
     *out = v;
     return true;
 }
@@ -73,39 +86,53 @@ static bool parse_literal(const char *tok, double *out)
 int defines_load(const char *path, KVSet *out)
 {
     FILE *f = fopen(path, "r");
-    if (!f)
+    if (!f) {
         return -1;
+    }
 
     char line[512];
     while (fgets(line, sizeof line, f)) {
         const char *p = line;
-        while (isspace((unsigned char)*p))
+        while (isspace((unsigned char)*p)) {
             p++;
-        if (strncmp(p, "#define", 7) != 0 || !isspace((unsigned char)p[7]))
+        }
+
+        if (strncmp(p, "#define", 7) != 0 || !isspace((unsigned char)p[7])) {
             continue;
+        }
+
         p += 7;
-        while (isspace((unsigned char)*p))
+        while (isspace((unsigned char)*p)) {
             p++;
+        }
 
         char name[KV_NAME_MAX];
         size_t n = 0;
-        while ((isalnum((unsigned char)*p) || *p == '_') && n + 1 < sizeof name)
+        while ((isalnum((unsigned char)*p) || *p == '_') && n + 1 < sizeof name) {
             name[n++] = *p++;
+        }
+
         name[n] = '\0';
-        if (n == 0 || *p == '(') /* function-like macro */
+        if (n == 0 || *p == '(') { /* function-like macro */
             continue;
-        while (isspace((unsigned char)*p))
+        }
+
+        while (isspace((unsigned char)*p)) {
             p++;
+        }
 
         /* Value token: up to whitespace or the start of a comment. */
         char tok[64];
         size_t t = 0;
-        while (*p && !isspace((unsigned char)*p) && !(p[0] == '/' && (p[1] == '/' || p[1] == '*')) &&
-               t + 1 < sizeof tok)
+        while (*p && !isspace((unsigned char)*p) &&
+               !(p[0] == '/' && (p[1] == '/' || p[1] == '*')) && t + 1 < sizeof tok) {
             tok[t++] = *p++;
+        }
+
         tok[t] = '\0';
-        if (t == 0)
+        if (t == 0) {
             continue;
+        }
 
         double v;
         if (parse_literal(tok, &v)) {
@@ -114,10 +141,12 @@ int defines_load(const char *path, KVSet *out)
             /* Reference to an earlier macro, optionally negated. */
             bool neg = tok[0] == '-';
             const char *ref = neg ? tok + 1 : tok;
-            if (kv_has(out, ref))
+            if (kv_has(out, ref)) {
                 kv_set(out, name, neg ? -kv_get(out, ref, 0.0) : kv_get(out, ref, 0.0));
+            }
         }
     }
+
     fclose(f);
     return 0;
 }
@@ -133,8 +162,9 @@ typedef struct {
 
 static void skip_ws(Cursor *c)
 {
-    while (c->p < c->end && isspace((unsigned char)*c->p))
+    while (c->p < c->end && isspace((unsigned char)*c->p)) {
         c->p++;
+    }
 }
 
 static bool expect(Cursor *c, char ch)
@@ -144,6 +174,7 @@ static bool expect(Cursor *c, char ch)
         c->p++;
         return true;
     }
+
     return false;
 }
 
@@ -155,18 +186,26 @@ static bool peek_is(Cursor *c, char ch)
 
 static bool parse_string(Cursor *c, char *out, size_t cap)
 {
-    if (!expect(c, '"'))
+    if (!expect(c, '"')) {
         return false;
+    }
+
     size_t n = 0;
     while (c->p < c->end && *c->p != '"') {
         char ch = *c->p++;
-        if (ch == '\\' && c->p < c->end)
+        if (ch == '\\' && c->p < c->end) {
             ch = *c->p++; /* keys never contain anything fancier than \" or \\ */
-        if (n + 1 < cap)
+        }
+
+        if (n + 1 < cap) {
             out[n++] = ch;
+        }
     }
-    if (c->p >= c->end)
+
+    if (c->p >= c->end) {
         return false;
+    }
+
     c->p++; /* closing quote */
     out[n] = '\0';
     return true;
@@ -178,11 +217,15 @@ static bool parse_number(Cursor *c, double *out)
     char tmp[64];
     size_t n = 0;
     while (c->p < c->end && (isdigit((unsigned char)*c->p) || strchr("+-.eE", *c->p)) &&
-           n + 1 < sizeof tmp)
+           n + 1 < sizeof tmp) {
         tmp[n++] = *c->p++;
+    }
+
     tmp[n] = '\0';
-    if (n == 0)
+    if (n == 0) {
         return false;
+    }
+
     char *end;
     *out = strtod(tmp, &end);
     return *end == '\0';
@@ -190,11 +233,16 @@ static bool parse_number(Cursor *c, double *out)
 
 KVSet *overrides_section(Overrides *o, const char *name, bool create)
 {
-    for (int i = 0; i < o->n; i++)
-        if (strcmp(o->sec[i].name, name) == 0)
+    for (int i = 0; i < o->n; i++) {
+        if (strcmp(o->sec[i].name, name) == 0) {
             return &o->sec[i].kv;
-    if (!create || o->n >= OVERRIDE_SECTIONS_MAX)
+        }
+    }
+
+    if (!create || o->n >= OVERRIDE_SECTIONS_MAX) {
         return NULL;
+    }
+
     OverrideSection *s = &o->sec[o->n++];
     memset(s, 0, sizeof *s);
     str_copy(s->name, sizeof s->name, name);
@@ -207,8 +255,10 @@ int overrides_load(Overrides *o, const char *path, char *err, size_t errlen)
 
     FILE *f = fopen(path, "rb");
     if (!f) {
-        if (errno == ENOENT)
+        if (errno == ENOENT) {
             return 0;
+        }
+
         snprintf(err, errlen, "%s: %s", path, strerror(errno));
         return -1;
     }
@@ -222,6 +272,7 @@ int overrides_load(Overrides *o, const char *path, char *err, size_t errlen)
         snprintf(err, errlen, "out of memory");
         return -1;
     }
+
     size_t got = fread(text, 1, (size_t)size, f);
     fclose(f);
 
@@ -231,8 +282,9 @@ int overrides_load(Overrides *o, const char *path, char *err, size_t errlen)
     while (ok && !peek_is(&c, '}')) {
         char section[sizeof o->sec[0].name];
         ok = parse_string(&c, section, sizeof section) && expect(&c, ':') && expect(&c, '{');
-        if (!ok)
+        if (!ok) {
             break;
+        }
 
         KVSet *kv = overrides_section(o, section, true);
         ok = kv != NULL;
@@ -240,16 +292,22 @@ int overrides_load(Overrides *o, const char *path, char *err, size_t errlen)
             char key[KV_NAME_MAX];
             double val;
             ok = parse_string(&c, key, sizeof key) && expect(&c, ':') && parse_number(&c, &val);
-            if (!ok)
+            if (!ok) {
                 break;
+            }
+
             kv_set(kv, key, val);
-            if (!peek_is(&c, '}'))
+            if (!peek_is(&c, '}')) {
                 ok = expect(&c, ',');
+            }
         }
+
         ok = ok && expect(&c, '}');
-        if (ok && !peek_is(&c, '}'))
+        if (ok && !peek_is(&c, '}')) {
             ok = expect(&c, ',');
+        }
     }
+
     ok = ok && expect(&c, '}');
 
     free(text);
@@ -258,6 +316,7 @@ int overrides_load(Overrides *o, const char *path, char *err, size_t errlen)
         memset(o, 0, sizeof *o);
         return -1;
     }
+
     return 0;
 }
 
@@ -280,6 +339,7 @@ int overrides_save(const Overrides *o, const char *path, char *err, size_t errle
         snprintf(err, errlen, "out of memory");
         return -1;
     }
+
     *sorted = *o;
     qsort(sorted->sec, (size_t)sorted->n, sizeof sorted->sec[0], cmp_sec);
 
@@ -297,11 +357,14 @@ int overrides_save(const Overrides *o, const char *path, char *err, size_t errle
         OverrideSection *s = &sorted->sec[i];
         qsort(s->kv.items, (size_t)s->kv.n, sizeof s->kv.items[0], cmp_kv);
         fprintf(f, "  \"%s\": {\n", s->name);
-        for (int k = 0; k < s->kv.n; k++)
+        for (int k = 0; k < s->kv.n; k++) {
             fprintf(f, "    \"%s\": %.10g%s\n", s->kv.items[k].name, s->kv.items[k].val,
                     k + 1 < s->kv.n ? "," : "");
+        }
+
         fprintf(f, "  }%s\n", i + 1 < sorted->n ? "," : "");
     }
+
     fprintf(f, "}\n");
     free(sorted);
 
@@ -310,5 +373,6 @@ int overrides_save(const Overrides *o, const char *path, char *err, size_t errle
         remove(tmp_path);
         return -1;
     }
+
     return 0;
 }

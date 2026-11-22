@@ -15,6 +15,7 @@
 
 /* ---- Palette ---- */
 
+/* clang-format off */
 #define UI_BG      (Color){15, 17, 22, 255}   /* page */
 #define UI_SIDEBAR (Color){20, 23, 30, 255}
 #define UI_CARD    (Color){27, 31, 40, 255}
@@ -36,6 +37,7 @@
 #define UI_SERIES_PURPLE (Color){187, 128, 255, 255}
 #define UI_SERIES_ORANGE (Color){255, 171, 76, 255}
 #define UI_SERIES_CYAN   (Color){64, 212, 232, 255}
+/* clang-format on */
 
 /* ---- Metrics ---- */
 
@@ -106,13 +108,15 @@ float ui_segmented_width(const char *labels);
 bool ui_checkbox(Rectangle r, const char *label, bool *value);
 
 /* Numeric entry: click to type (Enter / click-away commits, Esc cancels); the
- * chevrons or mouse wheel step by `step`. */
+ * chevrons or mouse wheel step by `step`. While typing, click or use Left / Right /
+ * Home / End to move the caret, and Backspace / Delete to edit at it. */
 typedef struct {
     double value;
     double step, min, max;
     int decimals;
     bool editing;
     char buf[32];
+    int cursor; /* caret position in buf, 0..strlen(buf) */
 } NumField;
 
 void numfield_init(NumField *f, double value, double step, double min, double max, int decimals);
@@ -131,7 +135,8 @@ typedef void (*FilePickCb)(void *ctx, const char *path); /* path == NULL on canc
  * action. `cb` may be NULL and is called with the pressed button's index after
  * the dialog has closed, so it may open another dialog. */
 void ui_modal_open(const char *title, const char *msg, const char *buttons, ModalCb cb, void *ctx);
-void ui_file_picker_open(const char *title, const char *dir, const char *ext, FilePickCb cb, void *ctx);
+void ui_file_picker_open(const char *title, const char *dir, const char *ext, FilePickCb cb,
+                         void *ctx);
 bool ui_modal_active(void);
 void ui_modal_draw(void);
 

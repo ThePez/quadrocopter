@@ -17,21 +17,25 @@ static const Color AXIS_COLORS[3] = {UI_SERIES_RED, UI_SERIES_GREEN, UI_SERIES_B
 /* "Group|Leaf": the legend prints Front / Back once, then Left / Right. */
 static const char *const MOTOR_NAMES[4] = {"Front|Left", "Front|Right", "Back|Left", "Back|Right"};
 /* FL, FR, BL, BR. The 3D view uses the same colours per motor. */
-static const Color MOTOR_COLORS[4] = {UI_SERIES_RED, UI_SERIES_PURPLE, UI_SERIES_CYAN, UI_SERIES_ORANGE};
+static const Color MOTOR_COLORS[4] = {UI_SERIES_RED, UI_SERIES_PURPLE, UI_SERIES_CYAN,
+                                      UI_SERIES_ORANGE};
 
 /* The pilot's five control signals on one axis, as a percentage of stick travel:
  * throttle 0..100, pitch/roll/yaw -100..100, and the flight mode as 0 (ACRO) or 100 (STABILISE). */
 static const char *const CONTROL_NAMES[5] = {"Throttle", "Pitch", "Roll", "Yaw", "Mode"};
-static const Color CONTROL_COLORS[5] = {UI_SERIES_ORANGE, UI_SERIES_RED, UI_SERIES_GREEN, UI_SERIES_BLUE,
-                                        UI_SERIES_PURPLE};
+static const Color CONTROL_COLORS[5] = {UI_SERIES_ORANGE, UI_SERIES_RED, UI_SERIES_GREEN,
+                                        UI_SERIES_BLUE, UI_SERIES_PURPLE};
 
 void telemetry_tab_init(TelemetryTab *t)
 {
     memset(t, 0, sizeof *t);
-    plot_init_live(&t->angles, "Attitude Angles", "\xC2\xB0", 3, AXIS_NAMES, AXIS_COLORS, LIVE_POINTS);
-    plot_init_live(&t->rates, "Angular Rates", "\xC2\xB0/s", 3, AXIS_NAMES, AXIS_COLORS, LIVE_POINTS);
+    plot_init_live(&t->angles, "Attitude Angles", "\xC2\xB0", 3, AXIS_NAMES, AXIS_COLORS,
+                   LIVE_POINTS);
+    plot_init_live(&t->rates, "Angular Rates", "\xC2\xB0/s", 3, AXIS_NAMES, AXIS_COLORS,
+                   LIVE_POINTS);
     plot_init_live(&t->pid, "PID Outputs", "\xC2\xB5s", 3, AXIS_NAMES, AXIS_COLORS, LIVE_POINTS);
-    plot_init_live(&t->motors, "Motors", "pulse \xC2\xB5s", 4, MOTOR_NAMES, MOTOR_COLORS, LIVE_POINTS);
+    plot_init_live(&t->motors, "Motors", "pulse \xC2\xB5s", 4, MOTOR_NAMES, MOTOR_COLORS,
+                   LIVE_POINTS);
     plot_init_live(&t->controls, "Controls", "% of stick (mode: 100 = STABILISE)", 5, CONTROL_NAMES,
                    CONTROL_COLORS, LIVE_POINTS);
     att_init(&t->att);
@@ -75,8 +79,9 @@ void telemetry_tab_push(TelemetryTab *t, const Sample *s, StickScale scale)
 
 static void on_session_picked(void *ctx, const char *path)
 {
-    if (path)
+    if (path) {
         session_tab_open(ctx, path);
+    }
 }
 
 /* ------------------------------------------------------------------------ */
@@ -90,14 +95,20 @@ typedef struct {
 } ValueRow;
 
 static const ValueRow VALUES[] = {
-    {"Pitch", F_PITCH_ANGLE, "\xC2\xB0"},    {"Roll", F_ROLL_ANGLE, "\xC2\xB0"},
-    {"Yaw", F_YAW_ANGLE, "\xC2\xB0"},        {"Pitch rate", F_PITCH_RATE, " \xC2\xB0/s"},
-    {"Roll rate", F_ROLL_RATE, " \xC2\xB0/s"}, {"Yaw rate", F_YAW_RATE, " \xC2\xB0/s"},
-    {"Mode", F_MODE, ""},                    {"Battery", F_BATTERY, " V"},
+    {"Pitch", F_PITCH_ANGLE, "\xC2\xB0"},
+    {"Roll", F_ROLL_ANGLE, "\xC2\xB0"},
+    {"Yaw", F_YAW_ANGLE, "\xC2\xB0"},
+    {"Pitch rate", F_PITCH_RATE, " \xC2\xB0/s"},
+    {"Roll rate", F_ROLL_RATE, " \xC2\xB0/s"},
+    {"Yaw rate", F_YAW_RATE, " \xC2\xB0/s"},
+    {"Mode", F_MODE, ""},
+    {"Battery", F_BATTERY, " V"},
     {"Loop dt max", F_LOOP_DT_MAX_US, " \xC2\xB5s"},
     /* What the pilot is commanding, as the drone received it */
-    {"Cmd pitch", F_CMD_PITCH, " \xC2\xB0/s"}, {"Cmd roll", F_CMD_ROLL, " \xC2\xB0/s"},
-    {"Cmd yaw", F_CMD_YAW, " \xC2\xB0/s"},     {"Throttle cmd", F_CMD_THROTTLE, " \xC2\xB5s"},
+    {"Cmd pitch", F_CMD_PITCH, " \xC2\xB0/s"},
+    {"Cmd roll", F_CMD_ROLL, " \xC2\xB0/s"},
+    {"Cmd yaw", F_CMD_YAW, " \xC2\xB0/s"},
+    {"Throttle cmd", F_CMD_THROTTLE, " \xC2\xB5s"},
 };
 #define N_VALUES ((int)(sizeof VALUES / sizeof VALUES[0]))
 
@@ -107,6 +118,7 @@ static Color format_value(const App *app, const ValueRow *row, char *out, size_t
         snprintf(out, cap, "--");
         return UI_MUTED;
     }
+
     float v = app->last.v[row->field];
     switch (row->field) {
     case F_MODE:
@@ -139,6 +151,7 @@ static void draw_values_card(App *app, Rectangle r)
         status = "Timeout";
         color = UI_RED;
     }
+
     float right = r.x + r.width - UI_PAD;
     ui_text_right(status, right, r.y + 14, UI_SMALL + 1, color);
     ui_dot(right - ui_text_width(status, UI_SMALL + 1) - 10, r.y + 22, 4, color);
@@ -146,8 +159,10 @@ static void draw_values_card(App *app, Rectangle r)
     float row_h = (r.height - UI_CARD_HEAD - 10) / (float)N_VALUES;
     for (int i = 0; i < N_VALUES; i++) {
         float y = r.y + UI_CARD_HEAD + (float)i * row_h;
-        if (i > 0)
+        if (i > 0) {
             DrawLine((int)(r.x + UI_PAD), (int)y, (int)(r.x + r.width - UI_PAD), (int)y, UI_GRID);
+        }
+
         char text[48];
         Color c = format_value(app, &VALUES[i], text, sizeof text);
         float ty = y + (row_h - UI_TEXT_SIZE) / 2 - 1;
@@ -171,23 +186,28 @@ void telemetry_tab_draw(App *app, Rectangle area)
     const float toolbar_h = 40;
 
     /* ---- toolbar ---- */
-    ui_segmented((Rectangle){area.x, area.y, 0, toolbar_h}, "Overview;Angles;Rates;PID;Motors;Controls", &t->sub);
+    ui_segmented((Rectangle){area.x, area.y, 0, toolbar_h},
+                 "Overview;Angles;Rates;PID;Motors;Controls", &t->sub);
 
     float right = area.x + area.width;
     bool recording = recorder_active(&app->rec);
     const char *rec_text = recording ? "Stop recording" : "Record";
     Rectangle rec_r = {right - btn_w(rec_text) - 8, area.y, btn_w(rec_text) + 8, toolbar_h};
     if (recording) {
-        if (ui_button(rec_r, rec_text, UI_RED))
+        if (ui_button(rec_r, rec_text, UI_RED)) {
             app_toggle_recording(app);
+        }
     } else if (ui_btn(rec_r, rec_text)) {
         app_toggle_recording(app);
     }
+
     right = rec_r.x - 10;
 
     Rectangle open_r = {right - btn_w("Open session"), area.y, btn_w("Open session"), toolbar_h};
-    if (ui_btn(open_r, "Open session"))
+    if (ui_btn(open_r, "Open session")) {
         ui_file_picker_open("Open Session", SESSIONS_DIR, ".csv", on_session_picked, app);
+    }
+
     right = open_r.x - 10;
 
     Rectangle clear_r = {right - btn_w("Clear"), area.y, btn_w("Clear"), toolbar_h};
@@ -198,18 +218,24 @@ void telemetry_tab_draw(App *app, Rectangle area)
         plot_clear(&t->motors);
         plot_clear(&t->controls);
     }
+
     right = clear_r.x - 16;
 
     Rectangle live_r = {right - 112, area.y, 112, toolbar_h};
     ui_checkbox(live_r, "Live plots", &app->live_plots);
 
     /* ---- body ---- */
-    Rectangle body = {area.x, area.y + toolbar_h + UI_GAP, area.width, area.height - toolbar_h - UI_GAP};
+    Rectangle body = {area.x, area.y + toolbar_h + UI_GAP, area.width,
+                      area.height - toolbar_h - UI_GAP};
     float side_w = body.width * 0.27f;
-    if (side_w < 270)
+    if (side_w < 270) {
         side_w = 270;
-    if (side_w > 340)
+    }
+
+    if (side_w > 340) {
         side_w = 340;
+    }
+
     Rectangle plots = {body.x, body.y, body.width - side_w - UI_GAP, body.height};
     Rectangle side = {plots.x + plots.width + UI_GAP, body.y, side_w, body.height};
 

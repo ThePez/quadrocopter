@@ -40,8 +40,10 @@ int recorder_start(Recorder *r, const char *dir, char *err, size_t errlen)
     strftime(stamp, sizeof stamp, "%Y-%m-%dT%H:%M:%S", &tmv);
     fprintf(r->file, "# started,%s\n", stamp);
     fprintf(r->file, "time_s");
-    for (int i = 0; i < F_COUNT; i++)
+    for (int i = 0; i < F_COUNT; i++) {
         fprintf(r->file, ",%s", FIELD_NAMES[i]);
+    }
+
     fputc('\n', r->file);
 
     r->start = now_s();
@@ -52,12 +54,15 @@ int recorder_start(Recorder *r, const char *dir, char *err, size_t errlen)
 
 void recorder_add(Recorder *r, const Sample *s)
 {
-    if (!r->file)
+    if (!r->file) {
         return;
+    }
 
     fprintf(r->file, "%.4f", s->t - r->start);
-    for (int i = 0; i < F_COUNT; i++)
+    for (int i = 0; i < F_COUNT; i++) {
         fprintf(r->file, ",%.7g", (double)s->v[i]);
+    }
+
     fputc('\n', r->file);
     r->rows++;
 
@@ -69,14 +74,17 @@ void recorder_add(Recorder *r, const Sample *s)
 
 void recorder_event(Recorder *r, const char *text)
 {
-    if (!r->file)
+    if (!r->file) {
         return;
+    }
 
     char clean[256];
     str_copy(clean, sizeof clean, text);
-    for (char *p = clean; *p; p++)
-        if (*p == '\n' || *p == '\r')
+    for (char *p = clean; *p; p++) {
+        if (*p == '\n' || *p == '\r') {
             *p = ' ';
+        }
+    }
 
     fprintf(r->file, "# event,%.4f,%s\n", now_s() - r->start, clean);
     fflush(r->file);
@@ -84,8 +92,10 @@ void recorder_event(Recorder *r, const char *text)
 
 bool recorder_stop(Recorder *r)
 {
-    if (!r->file)
+    if (!r->file) {
         return false;
+    }
+
     fclose(r->file);
     r->file = NULL;
     return true;
@@ -99,17 +109,24 @@ static bool grow(Session *s, int *cap)
 {
     int ncap = *cap ? *cap * 2 : 1024;
     double *t = realloc(s->t, (size_t)ncap * sizeof *t);
-    if (!t)
+    if (!t) {
         return false;
+    }
+
     s->t = t;
     for (int i = 0; i < F_COUNT; i++) {
-        if (!s->col[i])
+        if (!s->col[i]) {
             continue;
+        }
+
         float *c = realloc(s->col[i], (size_t)ncap * sizeof *c);
-        if (!c)
+        if (!c) {
             return false;
+        }
+
         s->col[i] = c;
     }
+
     *cap = ncap;
     return true;
 }
@@ -117,8 +134,10 @@ static bool grow(Session *s, int *cap)
 void session_free(Session *s)
 {
     free(s->t);
-    for (int i = 0; i < F_COUNT; i++)
+    for (int i = 0; i < F_COUNT; i++) {
         free(s->col[i]);
+    }
+
     free(s->events);
     memset(s, 0, sizeof *s);
 }
@@ -131,11 +150,14 @@ static int split_csv(char *line, char **cells, int max)
     while (n < max) {
         cells[n++] = p;
         char *comma = strchr(p, ',');
-        if (!comma)
+        if (!comma) {
             break;
+        }
+
         *comma = '\0';
         p = comma + 1;
     }
+
     return n;
 }
 
@@ -150,7 +172,9 @@ int session_load(Session *s, const char *path, char *err, size_t errlen)
         return -1;
     }
 
-    enum { MAX_CELLS = 64 };
+    enum {
+        MAX_CELLS = 64
+    };
     char line[4096];
     char *cells[MAX_CELLS];
     int col_map[MAX_CELLS]; /* CSV column -> enum Field, -1 for time_s, -2 unknown */
@@ -161,16 +185,21 @@ int session_load(Session *s, const char *path, char *err, size_t errlen)
     while (fgets(line, sizeof line, f)) {
         line[strcspn(line, "\r\n")] = '\0';
         char *p = line;
-        while (*p == ' ' || *p == '\t')
+        while (*p == ' ' || *p == '\t') {
             p++;
-        if (*p == '\0')
+        }
+
+        if (*p == '\0') {
             continue;
+        }
 
         if (*p == '#') {
             /* "# event,<time>,<text>" */
             p++;
-            while (*p == ' ')
+            while (*p == ' ') {
                 p++;
+            }
+
             if (strncmp(p, "event,", 6) == 0) {
                 char *comma = strchr(p + 6, ',');
                 if (comma) {
@@ -181,16 +210,20 @@ int session_load(Session *s, const char *path, char *err, size_t errlen)
                         if (s->nevents == ev_cap) {
                             ev_cap = ev_cap ? ev_cap * 2 : 16;
                             SessionEvent *ne = realloc(s->events, (size_t)ev_cap * sizeof *ne);
-                            if (!ne)
+                            if (!ne) {
                                 break;
+                            }
+
                             s->events = ne;
                         }
+
                         s->events[s->nevents].t = when;
                         str_copy(s->events[s->nevents].text, sizeof s->events[0].text, comma + 1);
                         s->nevents++;
                     }
                 }
             }
+
             continue;
         }
 
@@ -207,24 +240,30 @@ int session_load(Session *s, const char *path, char *err, size_t errlen)
                     saw_time = true;
                     continue;
                 }
-                for (int fld = 0; fld < F_COUNT; fld++)
+
+                for (int fld = 0; fld < F_COUNT; fld++) {
                     if (strcmp(cells[i], FIELD_NAMES[fld]) == 0) {
                         col_map[i] = fld;
-                        if (!s->col[fld])
+                        if (!s->col[fld]) {
                             s->col[fld] = malloc(sizeof(float)); /* mark present; grown below */
+                        }
                     }
+                }
             }
+
             if (!saw_time) {
                 snprintf(err, errlen, "not a telemetry session file (no time_s column)");
                 fclose(f);
                 session_free(s);
                 return -1;
             }
+
             continue;
         }
 
-        if (n != ncols)
+        if (n != ncols) {
             continue; /* row cut short by a crash */
+        }
 
         double vals[MAX_CELLS];
         bool ok = true;
@@ -233,8 +272,10 @@ int session_load(Session *s, const char *path, char *err, size_t errlen)
             vals[i] = strtod(cells[i], &end);
             ok = end != cells[i] && *end == '\0';
         }
-        if (!ok)
+
+        if (!ok) {
             continue;
+        }
 
         if (s->count == cap && !grow(s, &cap)) {
             snprintf(err, errlen, "out of memory");
@@ -242,14 +283,18 @@ int session_load(Session *s, const char *path, char *err, size_t errlen)
             session_free(s);
             return -1;
         }
+
         for (int i = 0; i < n; i++) {
-            if (col_map[i] == -1)
+            if (col_map[i] == -1) {
                 s->t[s->count] = vals[i];
-            else if (col_map[i] >= 0)
+            } else if (col_map[i] >= 0) {
                 s->col[col_map[i]][s->count] = (float)vals[i];
+            }
         }
+
         s->count++;
     }
+
     fclose(f);
 
     if (!have_header) {

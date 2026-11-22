@@ -29,10 +29,22 @@
 #define BAUD_LIST_TEXT "9600;115200;230400;460800"
 extern const int BAUD_RATES[4];
 
-typedef enum { TS_NONE, TS_RECEIVING, TS_TIMEOUT } TelemetryStatus;
+typedef enum {
+    TS_NONE,
+    TS_RECEIVING,
+    TS_TIMEOUT
+} TelemetryStatus;
 
 /* TAB_SESSION is only offered while a session file is loaded. */
-enum MainTab { TAB_TELEMETRY, TAB_PID, TAB_DRONE, TAB_REMOTE, TAB_CONSOLE, TAB_SESSION, TAB_COUNT };
+enum MainTab {
+    TAB_TELEMETRY,
+    TAB_PID,
+    TAB_DRONE,
+    TAB_REMOTE,
+    TAB_CONSOLE,
+    TAB_SESSION,
+    TAB_COUNT
+};
 #define TAB_COUNT_VISIBLE(app) ((app)->stab.open ? TAB_COUNT : TAB_SESSION)
 
 /* ---- Config acknowledgements ----
@@ -65,7 +77,8 @@ typedef struct {
     bool in_flight;
     AckRequest cur;
     double sent_at;
-    double quiet_until; /* ignore acks until then: a late duplicate must not count for the next request */
+    double quiet_until; /* ignore acks until then: a late duplicate must not count for the next
+                           request */
     AckRequest queue[ACK_QUEUE_CAP];
     int qhead, qcount;
 } AckChannel;

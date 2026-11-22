@@ -21,9 +21,11 @@ uint16_t uart_crc16(const uint8_t *data, size_t len)
     uint16_t crc = 0xFFFF;
     for (size_t i = 0; i < len; i++) {
         crc ^= data[i];
-        for (int b = 0; b < 8; b++)
+        for (int b = 0; b < 8; b++) {
             crc = (crc & 1) ? (uint16_t)((crc >> 1) ^ 0x8408) : (uint16_t)(crc >> 1);
+        }
     }
+
     return (uint16_t)(crc ^ 0xFFFF);
 }
 
@@ -36,15 +38,19 @@ int uart_list_ports(PortInfo *out, int max)
 {
     int n = 0;
     DIR *d = opendir("/dev");
-    if (!d)
+    if (!d) {
         return 0;
+    }
 
     struct dirent *e;
     while ((e = readdir(d)) != NULL && n < max) {
-        if (strncmp(e->d_name, "ttyUSB", 6) != 0 && strncmp(e->d_name, "ttyACM", 6) != 0)
+        if (strncmp(e->d_name, "ttyUSB", 6) != 0 && strncmp(e->d_name, "ttyACM", 6) != 0) {
             continue;
-        if (strlen(e->d_name) > 32) /* real tty names are short */
+        }
+
+        if (strlen(e->d_name) > 32) { /* real tty names are short */
             continue;
+        }
 
         char name[40];
         str_copy(name, sizeof name, e->d_name);
@@ -57,12 +63,16 @@ int uart_list_ports(PortInfo *out, int max)
         snprintf(path, sizeof path, "/sys/class/tty/%s/device/../product", name);
         FILE *f = fopen(path, "r");
         if (f) {
-            if (fgets(out[n].description, sizeof out[n].description, f))
+            if (fgets(out[n].description, sizeof out[n].description, f)) {
                 out[n].description[strcspn(out[n].description, "\r\n")] = '\0';
+            }
+
             fclose(f);
         }
+
         n++;
     }
+
     closedir(d);
 
     qsort(out, (size_t)n, sizeof out[0], cmp_ports);
@@ -72,13 +82,26 @@ int uart_list_ports(PortInfo *out, int max)
 static int baud_to_speed(int baud, speed_t *speed)
 {
     switch (baud) {
-    case 9600: *speed = B9600; return 0;
-    case 57600: *speed = B57600; return 0;
-    case 115200: *speed = B115200; return 0;
-    case 230400: *speed = B230400; return 0;
-    case 460800: *speed = B460800; return 0;
-    case 921600: *speed = B921600; return 0;
-    default: return -1;
+    case 9600:
+        *speed = B9600;
+        return 0;
+    case 57600:
+        *speed = B57600;
+        return 0;
+    case 115200:
+        *speed = B115200;
+        return 0;
+    case 230400:
+        *speed = B230400;
+        return 0;
+    case 460800:
+        *speed = B460800;
+        return 0;
+    case 921600:
+        *speed = B921600;
+        return 0;
+    default:
+        return -1;
     }
 }
 
@@ -116,14 +139,16 @@ int uart_open(const char *device, int baud, char *err, size_t errlen)
         close(fd);
         return -1;
     }
+
     tcflush(fd, TCIOFLUSH);
     return fd;
 }
 
 void uart_close(int fd)
 {
-    if (fd >= 0)
+    if (fd >= 0) {
         close(fd);
+    }
 }
 
 int uart_write_all(int fd, const uint8_t *data, size_t len)
@@ -132,12 +157,16 @@ int uart_write_all(int fd, const uint8_t *data, size_t len)
     while (off < len) {
         ssize_t n = write(fd, data + off, len - off);
         if (n < 0) {
-            if (errno == EINTR || errno == EAGAIN)
+            if (errno == EINTR || errno == EAGAIN) {
                 continue;
+            }
+
             return -1;
         }
+
         off += (size_t)n;
     }
+
     tcdrain(fd);
     return 0;
 }
@@ -145,16 +174,19 @@ int uart_write_all(int fd, const uint8_t *data, size_t len)
 size_t uart_encode_config_packet(uint8_t packet_id, const void *payload, size_t payload_len,
                                  uint8_t *out, size_t out_cap)
 {
-    if (payload_len > sizeof(union packet_data) || out_cap < UART_CONFIG_FRAME_SIZE)
+    if (payload_len > sizeof(union packet_data) || out_cap < UART_CONFIG_FRAME_SIZE) {
         return 0;
+    }
 
     /* Zeroed so struct padding (and the unused tail of the union) is
      * deterministic on the wire. */
     struct wifi_packet_t pkt;
     memset(&pkt, 0, sizeof pkt);
     pkt.packet_id = packet_id;
-    if (payload && payload_len)
+    if (payload && payload_len) {
         memcpy(&pkt.data, payload, payload_len);
+    }
+
     pkt.crc16 = uart_crc16((const uint8_t *)&pkt.data, sizeof pkt.data);
 
     out[0] = UART_MAGIC0;
@@ -179,8 +211,10 @@ static int decoder_process(FrameDecoder *d, TelemetryFrameCb cb, AckFrameCb ack_
 
     for (;;) {
         size_t idx = 0;
-        while (idx + 1 < d->len && !(d->buf[idx] == UART_MAGIC0 && d->buf[idx + 1] == UART_MAGIC1))
+        while (idx + 1 < d->len &&
+               !(d->buf[idx] == UART_MAGIC0 && d->buf[idx + 1] == UART_MAGIC1)) {
             idx++;
+        }
 
         if (idx + 1 >= d->len) {
             /* No complete magic pair. Keep the last byte - it may be the
@@ -189,6 +223,7 @@ static int decoder_process(FrameDecoder *d, TelemetryFrameCb cb, AckFrameCb ack_
                 d->buf[0] = d->buf[d->len - 1];
                 d->len = 1;
             }
+
             break;
         }
 
@@ -197,8 +232,9 @@ static int decoder_process(FrameDecoder *d, TelemetryFrameCb cb, AckFrameCb ack_
             d->len -= idx;
         }
 
-        if (d->len < UART_FRAME_SIZE)
+        if (d->len < UART_FRAME_SIZE) {
             break;
+        }
 
         struct wifi_packet_t pkt;
         memcpy(&pkt, d->buf + 2, sizeof pkt);
@@ -210,15 +246,18 @@ static int decoder_process(FrameDecoder *d, TelemetryFrameCb cb, AckFrameCb ack_
             continue;
         }
 
-        if (pkt.packet_id == SENSOR)
+        if (pkt.packet_id == SENSOR) {
             cb(&pkt.data.sensor, ctx);
-        else if (is_ack_id(pkt.packet_id) && ack_cb)
+        } else if (is_ack_id(pkt.packet_id) && ack_cb) {
             ack_cb(&pkt, ctx);
+        }
+
         frames++;
 
         memmove(d->buf, d->buf + UART_FRAME_SIZE, d->len - UART_FRAME_SIZE);
         d->len -= UART_FRAME_SIZE;
     }
+
     return frames;
 }
 
@@ -235,5 +274,6 @@ int decoder_feed(FrameDecoder *d, const uint8_t *data, size_t n, TelemetryFrameC
         n -= take;
         frames += decoder_process(d, cb, ack_cb, ctx);
     }
+
     return frames;
 }

@@ -31,16 +31,17 @@ static void apply_raygui_theme(void)
         int prop;
         Color c;
     } theme[] = {
-        {BORDER_COLOR_NORMAL, UI_BORDER},   {BASE_COLOR_NORMAL, UI_FIELD},
-        {TEXT_COLOR_NORMAL, UI_TEXT},       {BORDER_COLOR_FOCUSED, UI_ACCENT},
-        {BASE_COLOR_FOCUSED, UI_CARD_HI},   {TEXT_COLOR_FOCUSED, UI_TEXT},
-        {BORDER_COLOR_PRESSED, UI_ACCENT},  {BASE_COLOR_PRESSED, UI_CARD_HI},
-        {TEXT_COLOR_PRESSED, UI_ACCENT},    {BORDER_COLOR_DISABLED, UI_BORDER},
-        {BASE_COLOR_DISABLED, UI_FIELD},    {TEXT_COLOR_DISABLED, UI_MUTED},
-        {BACKGROUND_COLOR, UI_BG},          {LINE_COLOR, UI_BORDER},
+        {BORDER_COLOR_NORMAL, UI_BORDER},  {BASE_COLOR_NORMAL, UI_FIELD},
+        {TEXT_COLOR_NORMAL, UI_TEXT},      {BORDER_COLOR_FOCUSED, UI_ACCENT},
+        {BASE_COLOR_FOCUSED, UI_CARD_HI},  {TEXT_COLOR_FOCUSED, UI_TEXT},
+        {BORDER_COLOR_PRESSED, UI_ACCENT}, {BASE_COLOR_PRESSED, UI_CARD_HI},
+        {TEXT_COLOR_PRESSED, UI_ACCENT},   {BORDER_COLOR_DISABLED, UI_BORDER},
+        {BASE_COLOR_DISABLED, UI_FIELD},   {TEXT_COLOR_DISABLED, UI_MUTED},
+        {BACKGROUND_COLOR, UI_BG},         {LINE_COLOR, UI_BORDER},
     };
-    for (size_t i = 0; i < sizeof theme / sizeof theme[0]; i++)
+    for (size_t i = 0; i < sizeof theme / sizeof theme[0]; i++) {
         GuiSetStyle(DEFAULT, theme[i].prop, ColorToInt(theme[i].c));
+    }
 }
 
 void ui_init(void)
@@ -50,16 +51,20 @@ void ui_init(void)
     /* ASCII plus the few symbols the UI prints. */
     int codepoints[95 + 4];
     int n = 0;
-    for (int c = 32; c <= 126; c++)
+    for (int c = 32; c <= 126; c++) {
         codepoints[n++] = c;
+    }
+
     codepoints[n++] = 0x00B0; /* degree */
     codepoints[n++] = 0x00B5; /* micro */
     codepoints[n++] = 0x03B1; /* alpha */
     codepoints[n++] = 0x00B7; /* middle dot */
 
     for (size_t i = 0; i < sizeof FONT_PATHS / sizeof FONT_PATHS[0]; i++) {
-        if (!FileExists(FONT_PATHS[i]))
+        if (!FileExists(FONT_PATHS[i])) {
             continue;
+        }
+
         Font f = LoadFontEx(FONT_PATHS[i], 32, codepoints, n);
         if (f.texture.id != 0) {
             GenTextureMipmaps(&f.texture);
@@ -77,8 +82,9 @@ void ui_init(void)
 
 void ui_shutdown(void)
 {
-    if (g_font_loaded)
+    if (g_font_loaded) {
         UnloadFont(g_font);
+    }
 }
 
 Font ui_font(void)
@@ -137,8 +143,9 @@ void ui_rrect_bordered(Rectangle r, float radius, Color fill, Color border)
 void ui_card(Rectangle r, const char *title)
 {
     ui_rrect_bordered(r, UI_RADIUS, UI_CARD, UI_BORDER);
-    if (title)
+    if (title) {
         ui_text_bold(title, r.x + UI_PAD, r.y + 13, UI_TEXT_SIZE, UI_TEXT);
+    }
 }
 
 Rectangle ui_card_body(Rectangle r, bool titled)
@@ -175,9 +182,13 @@ static bool clicked(Rectangle r, bool hover)
         g_armed = r;
         g_armed_valid = true;
     }
-    bool hit = hover && IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && g_armed_valid && same_rect(g_armed, r);
-    if (hit)
+
+    bool hit =
+        hover && IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && g_armed_valid && same_rect(g_armed, r);
+    if (hit) {
         g_armed_valid = false;
+    }
+
     return hit;
 }
 
@@ -188,8 +199,9 @@ static bool held(Rectangle r, bool hover)
 
 void ui_end_frame(void)
 {
-    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT))
+    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
         g_armed_valid = false;
+    }
 }
 
 /* ------------------------------------------------------------------------ */
@@ -223,20 +235,26 @@ bool ui_link(Rectangle r, const char *text)
     if (hover) {
         float w = ui_text_width(text, UI_SMALL + 1);
         float y = r.y + (r.height + UI_SMALL) / 2 + 1;
-        DrawLine((int)(r.x + (r.width - w) / 2), (int)y, (int)(r.x + (r.width + w) / 2), (int)y, UI_ACCENT);
+        DrawLine((int)(r.x + (r.width - w) / 2), (int)y, (int)(r.x + (r.width + w) / 2), (int)y,
+                 UI_ACCENT);
     }
+
     return clicked(r, hover);
 }
 
 bool ui_nav_item(Rectangle r, const char *label, bool active)
 {
     bool hover = is_hover(r);
-    if (active)
+    if (active) {
         ui_rrect(r, 8, UI_CARD_HI);
-    else if (hover)
+    } else if (hover) {
         ui_rrect(r, 8, (Color){30, 34, 45, 255});
-    if (active)
+    }
+
+    if (active) {
         ui_rrect((Rectangle){r.x, r.y + 9, 3, r.height - 18}, 1.5f, UI_ACCENT);
+    }
+
     ui_text(label, r.x + 18, r.y + (r.height - UI_TEXT_SIZE) / 2 - 1, UI_TEXT_SIZE,
             active ? UI_TEXT : UI_MUTED);
     return clicked(r, hover);
@@ -251,15 +269,20 @@ static int split_labels(const char *labels, char out[][32])
     while (*p && n < SEG_MAX) {
         const char *semi = strchr(p, ';');
         size_t len = semi ? (size_t)(semi - p) : strlen(p);
-        if (len > 31)
+        if (len > 31) {
             len = 31;
+        }
+
         memcpy(out[n], p, len);
         out[n][len] = '\0';
         n++;
-        if (!semi)
+        if (!semi) {
             break;
+        }
+
         p = semi + 1;
     }
+
     return n;
 }
 
@@ -268,8 +291,10 @@ float ui_segmented_width(const char *labels)
     char items[SEG_MAX][32];
     int n = split_labels(labels, items);
     float w = 8;
-    for (int i = 0; i < n; i++)
+    for (int i = 0; i < n; i++) {
         w += ui_text_width(items[i], UI_TEXT_SIZE) + 28;
+    }
+
     return w;
 }
 
@@ -287,17 +312,21 @@ bool ui_segmented(Rectangle r, const char *labels, int *active)
         float w = ui_text_width(items[i], UI_TEXT_SIZE) + 28;
         Rectangle item = {x, r.y + 4, w, r.height - 8};
         bool hover = is_hover(item);
-        if (i == *active)
+        if (i == *active) {
             ui_rrect(item, 6, UI_ACCENT);
-        else if (hover)
+        } else if (hover) {
             ui_rrect(item, 6, UI_CARD_HI);
+        }
+
         ui_text_centered(items[i], item, UI_TEXT_SIZE, i == *active ? WHITE : UI_MUTED);
         if (clicked(item, hover) && i != *active) {
             *active = i;
             changed = true;
         }
+
         x += w;
     }
+
     return changed;
 }
 
@@ -305,17 +334,21 @@ bool ui_checkbox(Rectangle r, const char *label, bool *value)
 {
     bool hover = is_hover(r);
     bool toggled = clicked(r, hover);
-    if (toggled)
+    if (toggled) {
         *value = !*value;
+    }
 
     Rectangle box = {r.x, r.y + (r.height - 20) / 2, 20, 20};
     if (*value) {
         ui_rrect(box, 5, UI_ACCENT);
-        DrawLineEx((Vector2){box.x + 5, box.y + 10.5f}, (Vector2){box.x + 8.5f, box.y + 14}, 2.2f, WHITE);
-        DrawLineEx((Vector2){box.x + 8.5f, box.y + 14}, (Vector2){box.x + 15, box.y + 6}, 2.2f, WHITE);
+        DrawLineEx((Vector2){box.x + 5, box.y + 10.5f}, (Vector2){box.x + 8.5f, box.y + 14}, 2.2f,
+                   WHITE);
+        DrawLineEx((Vector2){box.x + 8.5f, box.y + 14}, (Vector2){box.x + 15, box.y + 6}, 2.2f,
+                   WHITE);
     } else {
         ui_rrect_bordered(box, 5, UI_FIELD, hover ? UI_MUTED : UI_BORDER);
     }
+
     ui_text(label, box.x + 28, r.y + (r.height - UI_TEXT_SIZE) / 2 - 1, UI_TEXT_SIZE, UI_TEXT);
     return toggled;
 }
@@ -338,40 +371,71 @@ void numfield_init(NumField *f, double value, double step, double min, double ma
 
 static void field_clamp(NumField *f)
 {
-    if (f->value < f->min)
+    if (f->value < f->min) {
         f->value = f->min;
-    if (f->value > f->max)
+    }
+
+    if (f->value > f->max) {
         f->value = f->max;
+    }
 }
 
 static void field_commit(NumField *f)
 {
-    if (!f->editing)
+    if (!f->editing) {
         return;
+    }
+
     char *end;
     double v = strtod(f->buf, &end);
     if (end != f->buf && *end == '\0') {
         f->value = v;
         field_clamp(f);
     }
+
     f->editing = false;
-    if (g_editing == f)
+    if (g_editing == f) {
         g_editing = NULL;
+    }
 }
 
 static void field_begin(NumField *f)
 {
-    if (g_editing && g_editing != f)
+    if (g_editing && g_editing != f) {
         field_commit(g_editing);
+    }
+
     snprintf(f->buf, sizeof f->buf, "%.*f", f->decimals, f->value);
+    f->cursor = (int)strlen(f->buf);
     f->editing = true;
     g_editing = f;
 }
 
+/* Which gap between characters a click at `x` (relative to the start of the text) is closest to. */
+static int caret_from_x(const char *buf, float x)
+{
+    int len = (int)strlen(buf);
+    char prefix[32];
+    float prev = 0;
+    for (int i = 1; i <= len && i < (int)sizeof prefix; i++) {
+        memcpy(prefix, buf, (size_t)i);
+        prefix[i] = '\0';
+        float w = ui_text_width(prefix, UI_TEXT_SIZE);
+        if (x < (prev + w) / 2) {
+            return i - 1;
+        }
+
+        prev = w;
+    }
+
+    return len;
+}
+
 void ui_commit_edit(void)
 {
-    if (g_editing)
+    if (g_editing) {
         field_commit(g_editing);
+    }
 }
 
 static void draw_chevron(Rectangle r, bool up, Color c)
@@ -396,11 +460,17 @@ void numfield_draw(NumField *f, Rectangle b)
 
     if (!locked && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         if (CheckCollisionPointRec(m, text)) {
-            if (!f->editing)
+            if (!f->editing) {
                 field_begin(f);
+            }
+
+            /* put the caret where the click landed (the text starts 10 px in) */
+            f->cursor = caret_from_x(f->buf, m.x - (b.x + 10));
         } else {
-            if (f->editing)
+            if (f->editing) {
                 field_commit(f);
+            }
+
             if (CheckCollisionPointRec(m, up)) {
                 f->value += f->step;
                 field_clamp(f);
@@ -422,20 +492,41 @@ void numfield_draw(NumField *f, Rectangle b)
     if (f->editing && !locked) {
         int ch;
         while ((ch = GetCharPressed()) != 0) {
-            size_t len = strlen(f->buf);
-            if (ch < 128 && strchr("0123456789.-+eE", ch) && len + 1 < sizeof f->buf) {
-                f->buf[len] = (char)ch;
-                f->buf[len + 1] = '\0';
+            int len = (int)strlen(f->buf);
+            if (ch < 128 && strchr("0123456789.-+eE", ch) && len + 1 < (int)sizeof f->buf) {
+                /* insert at the caret */
+                memmove(f->buf + f->cursor + 1, f->buf + f->cursor, (size_t)(len - f->cursor + 1));
+                f->buf[f->cursor++] = (char)ch;
             }
         }
-        if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) {
-            size_t len = strlen(f->buf);
-            if (len)
-                f->buf[len - 1] = '\0';
+
+        int len = (int)strlen(f->buf);
+        if ((IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) && f->cursor > 0) {
+            memmove(f->buf + f->cursor - 1, f->buf + f->cursor, (size_t)(len - f->cursor + 1));
+            f->cursor--;
+        } else if ((IsKeyPressed(KEY_DELETE) || IsKeyPressedRepeat(KEY_DELETE)) &&
+                   f->cursor < len) {
+            memmove(f->buf + f->cursor, f->buf + f->cursor + 1, (size_t)(len - f->cursor));
         }
-        if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER))
+        if ((IsKeyPressed(KEY_LEFT) || IsKeyPressedRepeat(KEY_LEFT)) && f->cursor > 0) {
+            f->cursor--;
+        }
+
+        if ((IsKeyPressed(KEY_RIGHT) || IsKeyPressedRepeat(KEY_RIGHT)) && f->cursor < len) {
+            f->cursor++;
+        }
+
+        if (IsKeyPressed(KEY_HOME)) {
+            f->cursor = 0;
+        }
+
+        if (IsKeyPressed(KEY_END)) {
+            f->cursor = (int)strlen(f->buf);
+        }
+
+        if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER)) {
             field_commit(f);
-        else if (IsKeyPressed(KEY_ESCAPE)) {
+        } else if (IsKeyPressed(KEY_ESCAPE)) {
             f->editing = false;
             g_editing = NULL;
         }
@@ -446,14 +537,28 @@ void numfield_draw(NumField *f, Rectangle b)
     ui_rrect_bordered(b, 6, UI_FIELD, border);
 
     char shown[40];
-    if (f->editing)
+    if (f->editing) {
         snprintf(shown, sizeof shown, "%s", f->buf);
-    else
+    } else {
         snprintf(shown, sizeof shown, "%.*f", f->decimals, f->value);
+    }
+
     float ty = b.y + (b.height - UI_TEXT_SIZE) / 2 - 1;
     ui_text(shown, b.x + 10, ty, UI_TEXT_SIZE, UI_TEXT);
-    if (f->editing && ((int)(GetTime() * 2) % 2 == 0)) {
-        float cx = b.x + 11 + ui_text_width(shown, UI_TEXT_SIZE);
+    /* The caret stays solid while it is being moved or typed, then blinks */
+    static double caret_moved_at;
+    static int caret_last = -1;
+    if (f->editing && f->cursor != caret_last) {
+        caret_last = f->cursor;
+        caret_moved_at = GetTime();
+    }
+
+    if (f->editing && (GetTime() - caret_moved_at < 0.5 || (int)(GetTime() * 2) % 2 == 0)) {
+        char before[32];
+        int n = f->cursor < (int)sizeof before - 1 ? f->cursor : (int)sizeof before - 1;
+        memcpy(before, shown, (size_t)n);
+        before[n] = '\0';
+        float cx = b.x + 11 + ui_text_width(before, UI_TEXT_SIZE);
         DrawLine((int)cx, (int)(ty + 1), (int)cx, (int)(ty + UI_TEXT_SIZE), UI_ACCENT);
     }
 
@@ -477,7 +582,11 @@ void ui_field_row(Rectangle row, const char *label, NumField *f)
 /* Modals                                                                    */
 /* ------------------------------------------------------------------------ */
 
-enum { MODAL_NONE, MODAL_MESSAGE, MODAL_FILES };
+enum {
+    MODAL_NONE,
+    MODAL_MESSAGE,
+    MODAL_FILES
+};
 
 #define MAX_FILES 256
 
@@ -523,7 +632,8 @@ static int cmp_desc(const void *a, const void *b)
     return strcmp((const char *)b, (const char *)a);
 }
 
-void ui_file_picker_open(const char *title, const char *dir, const char *ext, FilePickCb cb, void *ctx)
+void ui_file_picker_open(const char *title, const char *dir, const char *ext, FilePickCb cb,
+                         void *ctx)
 {
     ui_commit_edit();
     free(M.paths);
@@ -531,8 +641,10 @@ void ui_file_picker_open(const char *title, const char *dir, const char *ext, Fi
     M.nfiles = 0;
 
     FilePathList list = LoadDirectoryFilesEx(dir, ext, false);
-    for (unsigned i = 0; i < list.count && M.nfiles < MAX_FILES; i++)
+    for (unsigned i = 0; i < list.count && M.nfiles < MAX_FILES; i++) {
         str_copy(M.paths[M.nfiles++], sizeof M.paths[0], list.paths[i]);
+    }
+
     UnloadDirectoryFiles(list);
     /* Session names embed a timestamp, so reverse order = newest first. */
     qsort(M.paths, (size_t)M.nfiles, sizeof M.paths[0], cmp_desc);
@@ -561,13 +673,17 @@ static int wrap_text(const char *msg, float max_w, float size, char out[][200], 
             p++;
             continue;
         }
+
         char word[160];
         int w = 0;
-        while (*p && *p != ' ' && *p != '\n' && w < 159)
+        while (*p && *p != ' ' && *p != '\n' && w < 159) {
             word[w++] = *p++;
+        }
+
         word[w] = '\0';
-        if (*p == ' ')
+        if (*p == ' ') {
             p++;
+        }
 
         char trial[400];
         snprintf(trial, sizeof trial, "%s%s%s", line, line[0] ? " " : "", word);
@@ -578,8 +694,11 @@ static int wrap_text(const char *msg, float max_w, float size, char out[][200], 
             str_copy(line, sizeof line, trial);
         }
     }
-    if (n < max_lines && line[0])
+
+    if (n < max_lines && line[0]) {
         str_copy(out[n++], 200, line);
+    }
+
     return n;
 }
 
@@ -592,7 +711,10 @@ static void draw_panel(Rectangle r, const char *title)
 
 static void draw_message_modal(void)
 {
-    enum { MAX_BTN = 4, MAX_LINES = 14 };
+    enum {
+        MAX_BTN = 4,
+        MAX_LINES = 14
+    };
     char lines[MAX_LINES][200];
     const float w = 540;
     int nlines = wrap_text(M.msg, w - 48, UI_TEXT_SIZE, lines, MAX_LINES);
@@ -601,18 +723,21 @@ static void draw_message_modal(void)
     Rectangle r = {(GetScreenWidth() - w) / 2, (GetScreenHeight() - h) / 2, w, h};
     draw_panel(r, M.title);
 
-    for (int i = 0; i < nlines; i++)
+    for (int i = 0; i < nlines; i++) {
         ui_text(lines[i], r.x + 24, r.y + 62 + (float)i * 24, UI_TEXT_SIZE, UI_MUTED);
+    }
 
     char labels[MAX_BTN][32];
     int nb = 0;
     char tmp[128];
     str_copy(tmp, sizeof tmp, M.buttons);
     for (char *save = NULL, *tok = strtok_r(tmp, ";", &save); tok && nb < MAX_BTN;
-         tok = strtok_r(NULL, ";", &save))
+         tok = strtok_r(NULL, ";", &save)) {
         str_copy(labels[nb++], sizeof labels[0], tok);
-    if (nb == 0)
+    }
+    if (nb == 0) {
         str_copy(labels[nb++], sizeof labels[0], "OK");
+    }
 
     /* Buttons right-aligned, primary (first) rightmost. */
     const float bw = 104, gap = 10;
@@ -623,20 +748,24 @@ static void draw_message_modal(void)
     for (int i = 0; i < nb; i++) {
         Rectangle br = {bx - (float)i * (bw + gap), by, bw, UI_BTN_H};
         bool hit = i == 0 ? ui_button(br, labels[i], UI_ACCENT) : ui_btn(br, labels[i]);
-        if (hit)
+        if (hit) {
             pressed = i;
+        }
     }
-    if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER))
+
+    if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER)) {
         pressed = 0;
-    else if (IsKeyPressed(KEY_ESCAPE))
+    } else if (IsKeyPressed(KEY_ESCAPE)) {
         pressed = nb - 1;
+    }
 
     if (pressed >= 0) {
         ModalCb cb = M.cb;
         void *ctx = M.ctx;
         M.kind = MODAL_NONE; /* close first so cb may open another dialog */
-        if (cb)
+        if (cb) {
             cb(ctx, pressed);
+        }
     }
 }
 
@@ -645,11 +774,14 @@ static void close_picker(const char *chosen)
     FilePickCb cb = M.pick_cb;
     void *ctx = M.ctx;
     char path[512] = "";
-    if (chosen)
+    if (chosen) {
         str_copy(path, sizeof path, chosen);
+    }
+
     M.kind = MODAL_NONE;
-    if (cb)
+    if (cb) {
         cb(ctx, chosen ? path : NULL);
+    }
 }
 
 static void draw_file_modal(void)
@@ -671,55 +803,72 @@ static void draw_file_modal(void)
 
     if (CheckCollisionPointRec(m, list)) {
         M.scroll -= (int)GetMouseWheelMove();
-        if (M.scroll > M.nfiles - visible)
+        if (M.scroll > M.nfiles - visible) {
             M.scroll = M.nfiles - visible;
-        if (M.scroll < 0)
+        }
+
+        if (M.scroll < 0) {
             M.scroll = 0;
+        }
     }
 
-    if (M.nfiles == 0)
+    if (M.nfiles == 0) {
         ui_text("No session files found.", list.x + 16, list.y + 14, UI_TEXT_SIZE, UI_MUTED);
+    }
 
     int open_idx = -1;
     BeginScissorMode((int)list.x, (int)list.y, (int)list.width, (int)list.height);
     for (int i = 0; i < visible && M.scroll + i < M.nfiles; i++) {
         int idx = M.scroll + i;
         Rectangle row = {list.x + 4, list.y + 4 + (float)i * row_h, list.width - 8, row_h};
-        if (idx == M.selected)
+        if (idx == M.selected) {
             ui_rrect(row, 6, Fade(UI_ACCENT, 0.28f));
-        else if (CheckCollisionPointRec(m, row))
+        } else if (CheckCollisionPointRec(m, row)) {
             ui_rrect(row, 6, UI_CARD_HI);
+        }
+
         ui_text(GetFileName(M.paths[idx]), row.x + 12, row.y + 6, UI_TEXT_SIZE, UI_TEXT);
 
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, row)) {
             double now = GetTime();
-            if (M.last_click_idx == idx && now - M.last_click < 0.4)
+            if (M.last_click_idx == idx && now - M.last_click < 0.4) {
                 open_idx = idx; /* double click */
+            }
+
             M.selected = idx;
             M.last_click_idx = idx;
             M.last_click = now;
         }
     }
+
     EndScissorMode();
 
     float by = r.y + r.height - 24 - UI_BTN_H;
     Rectangle open_r = {r.x + r.width - 24 - 104, by, 104, UI_BTN_H};
     Rectangle cancel_r = {open_r.x - 10 - 104, by, 104, UI_BTN_H};
-    if (ui_button(open_r, "Open", UI_ACCENT) && M.selected >= 0)
+    if (ui_button(open_r, "Open", UI_ACCENT) && M.selected >= 0) {
         open_idx = M.selected;
+    }
+
     bool cancel = ui_btn(cancel_r, "Cancel") || IsKeyPressed(KEY_ESCAPE);
 
-    if (open_idx >= 0)
+    if (open_idx >= 0) {
         close_picker(M.paths[open_idx]);
-    else if (cancel)
+    } else if (cancel) {
         close_picker(NULL);
+    }
 }
 
 void ui_modal_draw(void)
 {
     switch (M.kind) {
-    case MODAL_MESSAGE: draw_message_modal(); break;
-    case MODAL_FILES: draw_file_modal(); break;
-    default: break;
+    case MODAL_MESSAGE:
+        draw_message_modal();
+        break;
+    case MODAL_FILES:
+        draw_file_modal();
+        break;
+    default:
+        break;
     }
 }

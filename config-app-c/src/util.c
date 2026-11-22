@@ -10,15 +10,19 @@ double now_s(void)
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     double t = (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
-    if (origin < 0.0)
+    if (origin < 0.0) {
         origin = t;
+    }
+
     return t - origin;
 }
 
 void str_copy(char *dst, size_t cap, const char *src)
 {
-    if (cap == 0)
+    if (cap == 0) {
         return;
+    }
+
     strncpy(dst, src, cap - 1);
     dst[cap - 1] = '\0';
 }

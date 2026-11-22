@@ -17,7 +17,8 @@ struct App;
 /* ---- Telemetry ---- */
 
 typedef struct {
-    int sub; /* 0 = overview (angles, rates, PID, motors), 1..5 = one plot (those four, then controls) */
+    int sub; /* 0 = overview (angles, rates, PID, motors), 1..5 = one plot (those four, then
+                controls) */
     Plot angles, rates, pid, motors, controls;
     Attitude3D att;
 } TelemetryTab;
@@ -26,7 +27,7 @@ void telemetry_tab_init(TelemetryTab *t);
 void telemetry_tab_free(TelemetryTab *t);
 /* Limits needed to show the pilot's commands as a percentage of stick travel. */
 typedef struct {
-    float max_rate;                  /* deg/s at full stick */
+    float max_rate;                   /* deg/s at full stick */
     float min_throttle, max_throttle; /* us at the bottom / top of the throttle stick */
 } StickScale;
 
@@ -36,7 +37,11 @@ void telemetry_tab_draw(struct App *app, Rectangle area);
 /* ---- PID tuning ---- */
 
 /* State of a group's last Send: waiting for the drone's ack, or not confirmed. */
-enum { PID_SENT_IDLE, PID_SENT_PENDING, PID_SENT_FAILED };
+enum {
+    PID_SENT_IDLE,
+    PID_SENT_PENDING,
+    PID_SENT_FAILED
+};
 
 typedef struct {
     struct App *app;
@@ -61,7 +66,7 @@ void pid_tab_draw(struct App *app, Rectangle area);
 
 /* ---- Drone config ---- */
 
-#define DRONE_FIELDS 8
+#define DRONE_FIELDS 9
 
 typedef struct {
     struct App *app;

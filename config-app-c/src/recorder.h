@@ -44,8 +44,8 @@ typedef struct {
 typedef struct {
     char path[512];
     int count;
-    double *t;               /* time_s column */
-    float *col[F_COUNT];     /* NULL if the file has no such column */
+    double *t;           /* time_s column */
+    float *col[F_COUNT]; /* NULL if the file has no such column */
     SessionEvent *events;
     int nevents;
     double duration;

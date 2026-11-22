@@ -16,18 +16,21 @@ static const char *const MODE_NAMES[2] = {"Rate", "Angle"};
  * the filter is off (alpha = 1). */
 static double d_alpha_to_hz(double alpha)
 {
-    if (alpha >= 1.0)
+    if (alpha >= 1.0) {
         return -1.0;
+    }
+
     return alpha / (1.0 - alpha) * LOOP_RATE_HZ / (2.0 * M_PI);
 }
 
 static void d_filter_text(double alpha, char *out, size_t cap)
 {
     double hz = d_alpha_to_hz(alpha);
-    if (hz < 0)
+    if (hz < 0) {
         snprintf(out, cap, "unfiltered");
-    else
+    } else {
         snprintf(out, cap, "~ %.0f Hz cutoff", hz);
+    }
 }
 
 /* ------------------------------------------------------------------------ */
@@ -102,17 +105,20 @@ static void on_store_done(App *app, const void *user, bool ok)
     snprintf(key, sizeof key, "%s_KD_ALPHA", g->defaults_prefix);
     kv_set(&updates, key, s->alpha);
 
-    if (app_save_defaults(app, "pid", &updates, &app->pid_defaults))
+    if (app_save_defaults(app, "pid", &updates, &app->pid_defaults)) {
         app_log(app, "Saved %s %s as default: Kp=%.4f, Ki=%.4f, Kd=%.4f", AXIS_NAMES[g->axis],
                 g->title, s->kp, s->ki, s->kd);
-    else
+    } else {
         app_log(app, "Failed to save %s %s defaults", AXIS_NAMES[g->axis], g->title);
+    }
 }
 
 static bool send_store(App *app, const PidSnap *s)
 {
-    if (!app_send_then(app, DRONE_CFG_STORE, NULL, 0, on_store_done, s, sizeof *s))
+    if (!app_send_then(app, DRONE_CFG_STORE, NULL, 0, on_store_done, s, sizeof *s)) {
         return false;
+    }
+
     app_log(app, "-> Sent DRONE_CFG_STORE (persist to flash)");
     return true;
 }
@@ -124,9 +130,11 @@ static void on_pid_done(App *app, const void *user, bool ok)
 
     if (!ok) {
         g->state = PID_SENT_FAILED;
-        if (s.then_save)
+        if (s.then_save) {
             app_log(app, "%s %s: save cancelled, the gains were not applied", AXIS_NAMES[g->axis],
                     g->title);
+        }
+
         return;
     }
 
@@ -146,8 +154,9 @@ static void on_pid_done(App *app, const void *user, bool ok)
              MODE_NAMES[g->mode], s.kp, s.ki, s.kd, s.alpha);
     app_record_event(app, event);
 
-    if (s.then_save)
+    if (s.then_save) {
         send_store(app, &s);
+    }
 }
 
 /* Sends the group's gains live (RAM only). They only count as sent, and only show as the
@@ -155,8 +164,10 @@ static void on_pid_done(App *app, const void *user, bool ok)
 static bool send_pid(PidGroup *g, bool then_save)
 {
     App *app = g->app;
-    if (!app_require_connection(app))
+    if (!app_require_connection(app)) {
         return false;
+    }
+
     if (g->axis == 1 && g->mode != 0) {
         app_error("Invalid Mode", "Yaw only supports Rate mode.");
         return false;
@@ -176,15 +187,18 @@ static bool send_pid(PidGroup *g, bool then_save)
                  .kd = g->kd.value,
                  .alpha = g->alpha.value,
                  .then_save = then_save};
-    if (!app_send_then(app, PID_CONFIG, &p, sizeof p, on_pid_done, &s, sizeof s))
+    if (!app_send_then(app, PID_CONFIG, &p, sizeof p, on_pid_done, &s, sizeof s)) {
         return false;
+    }
 
     g->state = PID_SENT_PENDING;
     snap_text(&s, g->attempt, sizeof g->attempt);
 
     char hint[48];
     d_filter_text(g->alpha.value, hint, sizeof hint);
-    app_log(app, "-> Sent %s %s: Kp=%.4f, Ki=%.4f, Kd=%.4f, D filter alpha=%.2f (%s), waiting for confirmation",
+    app_log(app,
+            "-> Sent %s %s: Kp=%.4f, Ki=%.4f, Kd=%.4f, D filter alpha=%.2f (%s), waiting for "
+            "confirmation",
             AXIS_NAMES[g->axis], MODE_NAMES[g->mode], g->kp.value, g->ki.value, g->kd.value,
             g->alpha.value, hint);
     return true;
@@ -218,14 +232,16 @@ static void do_save(PidGroup *g)
 
 static void on_save_confirmed(void *ctx, int button)
 {
-    if (button == 0)
+    if (button == 0) {
         do_save(ctx);
+    }
 }
 
 static void request_save(PidGroup *g)
 {
-    if (!app_require_connection(g->app))
+    if (!app_require_connection(g->app)) {
         return;
+    }
 
     char msg[512];
     snprintf(msg, sizeof msg,
@@ -235,6 +251,45 @@ static void request_save(PidGroup *g)
     ui_modal_open("Save to Flash & Default", msg, "Yes;No", on_save_confirmed, g);
 }
 
+/* ---- Offline editing: keep every group's gains in the defaults file, push them later ---- */
+
+/* Writes all three groups' on-screen gains to the defaults file. No drone needed: they are
+ * loaded back into the fields on the next start, ready for "Send all to drone". */
+static void save_all_to_file(App *app)
+{
+    KVSet updates = {0};
+    char key[64];
+    for (int i = 0; i < 3; i++) {
+        const PidGroup *g = &app->ptab.group[i];
+        const struct {
+            const char *suffix;
+            double value;
+        } items[4] = {{"KP", g->kp.value},
+                      {"KI", g->ki.value},
+                      {"KD", g->kd.value},
+                      {"KD_ALPHA", g->alpha.value}};
+        for (int k = 0; k < 4; k++) {
+            snprintf(key, sizeof key, "%s_%s", g->defaults_prefix, items[k].suffix);
+            kv_set(&updates, key, items[k].value);
+        }
+    }
+
+    if (app_save_defaults(app, "pid", &updates, &app->pid_defaults)) {
+        app_log(app, "Saved all PID gains to the defaults file (not sent to the drone)");
+    }
+}
+
+/* Sends every group's gains live (RAM only). Each is confirmed by its own ack. */
+static void send_all(App *app)
+{
+    if (!app_require_connection(app)) {
+        return;
+    }
+
+    for (int i = 0; i < 3; i++) {
+        send_pid(&app->ptab.group[i], false);
+    }
+}
 
 /* ------------------------------------------------------------------------ */
 /* Drawing                                                                   */
@@ -268,6 +323,7 @@ static void draw_group(PidGroup *g, const char *title, Rectangle r)
     } else {
         ui_text("Not sent yet - showing defaults", chip.x + 12, chip.y + 7, UI_SMALL, UI_MUTED);
     }
+
     y += 40;
 
     ui_field_row((Rectangle){b.x, y, b.width, UI_ROW_H}, "Kp", &g->kp);
@@ -282,24 +338,48 @@ static void draw_group(PidGroup *g, const char *title, Rectangle r)
     char hint[48];
     d_filter_text(g->alpha.value, hint, sizeof hint);
     ui_text_right(hint, b.x + b.width, y, UI_SMALL, UI_MUTED);
-    if (g->axis == 1)
+    if (g->axis == 1) {
         ui_text("Rate mode only", b.x, y, UI_SMALL, UI_MUTED);
+    }
 
     float by = b.y + b.height - UI_BTN_H;
-    if (ui_button((Rectangle){b.x, by, b.width, UI_BTN_H}, "Save to flash & default", UI_ORANGE))
+    if (ui_button((Rectangle){b.x, by, b.width, UI_BTN_H}, "Save to flash & default", UI_ORANGE)) {
         request_save(g);
-    if (ui_button((Rectangle){b.x, by - UI_BTN_H - 8, b.width, UI_BTN_H}, "Send to drone", UI_ACCENT))
+    }
+
+    if (ui_button((Rectangle){b.x, by - UI_BTN_H - 8, b.width, UI_BTN_H}, "Send to drone",
+                  UI_ACCENT)) {
         send_pid(g, false);
+    }
 }
 
 void pid_tab_draw(App *app, Rectangle area)
 {
     PidTab *t = &app->ptab;
 
+    /* Whole-tab actions: edit with the drone off, save to the file, push when it is on */
+    Rectangle bar = {area.x, area.y, area.width, UI_BTN_H};
+    ui_text("Edit offline, save to the file, then send all once connected", bar.x, bar.y + 9,
+            UI_SMALL, UI_MUTED);
+    float bw = 190;
+    if (ui_button((Rectangle){bar.x + bar.width - bw, bar.y, bw, UI_BTN_H}, "Send all to drone",
+                  UI_ACCENT)) {
+        send_all(app);
+    }
+
+    if (ui_button((Rectangle){bar.x + bar.width - 2 * bw - 8, bar.y, bw, UI_BTN_H},
+                  "Save all to file", UI_ORANGE)) {
+        save_all_to_file(app);
+    }
+
+    area.y += UI_BTN_H + UI_GAP;
+    area.height -= UI_BTN_H + UI_GAP;
+
     float cards_h = fminf(PID_CARD_H, area.height);
     Rectangle row = {area.x, area.y, area.width, cards_h};
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < 3; i++) {
         draw_group(&t->group[i], CARD_TITLES[i], ui_col(row, 3, i, UI_GAP));
+    }
 
     /* The live response, so gains can be judged without leaving the page. */
     float py = area.y + cards_h + UI_GAP;

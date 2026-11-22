@@ -23,21 +23,49 @@ typedef struct {
 
 /* Names and colours match the live plots on the Telemetry tab. */
 static const Group GROUPS[SESSION_PLOTS] = {
-    {"Angles", "Angle (\xC2\xB0)", 3, {"Pitch", "Roll", "Yaw"}, {RED_C, GREEN_C, BLUE_C},
+    {"Angles",
+     "Angle (\xC2\xB0)",
+     3,
+     {"Pitch", "Roll", "Yaw"},
+     {RED_C, GREEN_C, BLUE_C},
      {F_PITCH_ANGLE, F_ROLL_ANGLE, F_YAW_ANGLE}},
-    {"Rates", "Rate (\xC2\xB0/s)", 3, {"Pitch", "Roll", "Yaw"}, {RED_C, GREEN_C, BLUE_C},
+    {"Rates",
+     "Rate (\xC2\xB0/s)",
+     3,
+     {"Pitch", "Roll", "Yaw"},
+     {RED_C, GREEN_C, BLUE_C},
      {F_PITCH_RATE, F_ROLL_RATE, F_YAW_RATE}},
-    {"PID Outputs", "Output (\xC2\xB5s)", 3, {"Pitch", "Roll", "Yaw"}, {RED_C, GREEN_C, BLUE_C},
+    {"PID Outputs",
+     "Output (\xC2\xB5s)",
+     3,
+     {"Pitch", "Roll", "Yaw"},
+     {RED_C, GREEN_C, BLUE_C},
      {F_PITCH_PID, F_ROLL_PID, F_YAW_PID}},
-    {"Motors", "Pulse width (\xC2\xB5s)", 4, {"Front|Left", "Front|Right", "Back|Left", "Back|Right"},
-     {RED_C, PURPLE_C, CYAN_C, ORANGE_C}, {F_MOTOR_FL, F_MOTOR_FR, F_MOTOR_BL, F_MOTOR_BR}},
+    {"Motors",
+     "Pulse width (\xC2\xB5s)",
+     4,
+     {"Front|Left", "Front|Right", "Back|Left", "Back|Right"},
+     {RED_C, PURPLE_C, CYAN_C, ORANGE_C},
+     {F_MOTOR_FL, F_MOTOR_FR, F_MOTOR_BL, F_MOTOR_BR}},
     {"Battery", "Voltage (mV)", 1, {"Battery"}, {{228, 232, 240, 255}}, {F_BATTERY}},
-    {"Stick Commands", "Commanded rate (\xC2\xB0/s)", 3, {"Pitch", "Roll", "Yaw"},
-     {RED_C, GREEN_C, BLUE_C}, {F_CMD_PITCH, F_CMD_ROLL, F_CMD_YAW}},
-    {"Throttle Command", "Throttle (\xC2\xB5s)", 1, {"Throttle"}, {{228, 232, 240, 255}},
+    {"Stick Commands",
+     "Commanded rate (\xC2\xB0/s)",
+     3,
+     {"Pitch", "Roll", "Yaw"},
+     {RED_C, GREEN_C, BLUE_C},
+     {F_CMD_PITCH, F_CMD_ROLL, F_CMD_YAW}},
+    {"Throttle Command",
+     "Throttle (\xC2\xB5s)",
+     1,
+     {"Throttle"},
+     {{228, 232, 240, 255}},
      {F_CMD_THROTTLE}},
-    {"Loop Timing", "Worst gap between control cycles (\xC2\xB5s)", 1, {"Loop dt max"},
-     {{228, 232, 240, 255}}, {F_LOOP_DT_MAX_US}},
+    {"Loop Timing",
+     "Worst gap between control cycles (\xC2\xB5s)",
+     1,
+     {"Loop dt max"},
+     {{228, 232, 240, 255}},
+     {F_LOOP_DT_MAX_US}},
 };
 
 void session_tab_init(SessionTab *t)
@@ -47,10 +75,14 @@ void session_tab_init(SessionTab *t)
 
 void session_tab_close(SessionTab *t)
 {
-    if (!t->open)
+    if (!t->open) {
         return;
-    for (int i = 0; i < SESSION_PLOTS; i++)
+    }
+
+    for (int i = 0; i < SESSION_PLOTS; i++) {
         plot_free(&t->plot[i]);
+    }
+
     session_free(&t->session);
     t->open = false;
 }
@@ -79,8 +111,10 @@ void session_tab_open(App *app, const char *path)
     Session *s = &t->session;
     t->view.full0 = s->count ? s->t[0] : 0.0;
     t->view.full1 = s->count ? s->t[s->count - 1] : 1.0;
-    if (t->view.full1 - t->view.full0 < 1e-3)
+    if (t->view.full1 - t->view.full0 < 1e-3) {
         t->view.full1 = t->view.full0 + 1.0;
+    }
+
     t->view.x0 = t->view.full0;
     t->view.x1 = t->view.full1;
 
@@ -88,8 +122,10 @@ void session_tab_open(App *app, const char *path)
         const Group *g = &GROUPS[i];
         Plot *p = &t->plot[i];
         plot_init_static(p, g->title, g->ylabel, g->n, g->names, g->colors, &t->view);
-        for (int k = 0; k < g->n; k++)
+        for (int k = 0; k < g->n; k++) {
             plot_bind(p, k, s->t, s->col[g->fields[k]], s->count);
+        }
+
         p->events = s->events;
         p->nevents = s->nevents;
     }
@@ -104,8 +140,8 @@ void session_tab_draw(App *app, Rectangle area)
     const float toolbar_h = 40;
 
     /* Toolbar: signal groups on the left, view actions on the right. */
-    ui_segmented((Rectangle){area.x, area.y, 0, toolbar_h}, "Angles;Rates;PID;Motors;Battery;Loop timing",
-                 &t->sub);
+    ui_segmented((Rectangle){area.x, area.y, 0, toolbar_h},
+                 "Angles;Rates;PID;Motors;Battery;Loop timing", &t->sub);
 
     float right = area.x + area.width;
     Rectangle close_r = {right - 100, area.y, 100, toolbar_h};
@@ -114,6 +150,7 @@ void session_tab_draw(App *app, Rectangle area)
         app->main_tab = TAB_TELEMETRY;
         return;
     }
+
     Rectangle reset_r = {close_r.x - 10 - 120, area.y, 120, toolbar_h};
     if (ui_btn(reset_r, "Reset zoom")) {
         t->view.x0 = t->view.full0;
@@ -122,7 +159,8 @@ void session_tab_draw(App *app, Rectangle area)
 
     char summary[700];
     snprintf(summary, sizeof summary, "%s   |   %d samples   |   %.1f s   |   %d events",
-             GetFileName(t->session.path), t->session.count, t->session.duration, t->session.nevents);
+             GetFileName(t->session.path), t->session.count, t->session.duration,
+             t->session.nevents);
     ui_text(summary, area.x + 2, area.y + toolbar_h + 12, UI_TEXT_SIZE - 1, UI_MUTED);
     ui_text_right("scroll = zoom   drag = pan   double-click = reset", area.x + area.width,
                   area.y + toolbar_h + 12, UI_SMALL, UI_MUTED);

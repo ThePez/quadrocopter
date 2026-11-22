@@ -17,8 +17,8 @@
 #define PLOT_MAX_SERIES 8
 
 typedef struct {
-    double x0, x1;           /* visible time range */
-    double full0, full1;     /* range to return to on reset */
+    double x0, x1;       /* visible time range */
+    double full0, full1; /* range to return to on reset */
 } PlotView;
 
 typedef struct {

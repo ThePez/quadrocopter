@@ -34,8 +34,10 @@ void plot_init_live(Plot *p, const char *title, const char *ylabel, int nseries,
     p->live = true;
     p->cap = capacity;
     p->t = malloc((size_t)capacity * sizeof *p->t);
-    for (int i = 0; i < p->nseries; i++)
+    for (int i = 0; i < p->nseries; i++) {
         p->y[i] = malloc((size_t)capacity * sizeof *p->y[i]);
+    }
+
     p->t0 = now_s();
 }
 
@@ -50,26 +52,34 @@ void plot_free(Plot *p)
 {
     if (p->live) {
         free(p->t);
-        for (int i = 0; i < p->nseries; i++)
+        for (int i = 0; i < p->nseries; i++) {
             free(p->y[i]);
+        }
     }
+
     memset(p, 0, sizeof *p);
 }
 
 void plot_push(Plot *p, double t, const float *values)
 {
-    if (p->paused || !p->live)
+    if (p->paused || !p->live) {
         return;
+    }
 
     if (p->count == p->cap) { /* slide the window by one sample */
         memmove(p->t, p->t + 1, (size_t)(p->cap - 1) * sizeof *p->t);
-        for (int i = 0; i < p->nseries; i++)
+        for (int i = 0; i < p->nseries; i++) {
             memmove(p->y[i], p->y[i] + 1, (size_t)(p->cap - 1) * sizeof *p->y[i]);
+        }
+
         p->count--;
     }
+
     p->t[p->count] = t - p->t0;
-    for (int i = 0; i < p->nseries; i++)
+    for (int i = 0; i < p->nseries; i++) {
         p->y[i][p->count] = values[i];
+    }
+
     p->count++;
 }
 
@@ -118,10 +128,11 @@ void plot_pick_y_range(double data_lo, double data_hi, double *out_lo, double *o
     /* If zero is close to the data, include it: a baseline reads better than
      * a range that starts at an arbitrary offset. */
     double span = hi - lo;
-    if (lo > 0 && lo < span * 0.5)
+    if (lo > 0 && lo < span * 0.5) {
         lo = 0;
-    else if (hi < 0 && -hi < span * 0.5)
+    } else if (hi < 0 && -hi < span * 0.5) {
         hi = 0;
+    }
 
     /* Pad, then round outward to the tick grid. */
     span = hi - lo;
@@ -135,8 +146,10 @@ void plot_pick_y_range(double data_lo, double data_hi, double *out_lo, double *o
 /* Rounds a raw tick spacing to 1, 2, 5 x 10^n. */
 static double nice_step(double raw)
 {
-    if (raw <= 0 || !isfinite(raw))
+    if (raw <= 0 || !isfinite(raw)) {
         return 1.0;
+    }
+
     double e = floor(log10(raw));
     double f = raw / pow(10.0, e);
     double nf = f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10;
@@ -146,10 +159,14 @@ static double nice_step(double raw)
 static void format_tick(char *buf, size_t cap, double v, double step)
 {
     int dec = step >= 1.0 ? 0 : (int)ceil(-log10(step));
-    if (dec > 6)
+    if (dec > 6) {
         dec = 6;
-    if (fabs(v) < step * 1e-6)
+    }
+
+    if (fabs(v) < step * 1e-6) {
         v = 0.0; /* avoid "-0" */
+    }
+
     snprintf(buf, cap, "%.*f", dec, v);
 }
 
@@ -159,11 +176,13 @@ static int lower_bound(const double *t, int n, double x)
     int lo = 0, hi = n;
     while (lo < hi) {
         int mid = (lo + hi) / 2;
-        if (t[mid] < x)
+        if (t[mid] < x) {
             lo = mid + 1;
-        else
+        } else {
             hi = mid;
+        }
     }
+
     return lo;
 }
 
@@ -174,8 +193,9 @@ static int lower_bound(const double *t, int n, double x)
 static void handle_view_input(Plot *p, Rectangle area)
 {
     PlotView *v = p->view;
-    if (GuiIsLocked())
+    if (GuiIsLocked()) {
         return;
+    }
 
     Vector2 m = GetMousePosition();
     bool inside = CheckCollisionPointRec(m, area);
@@ -188,10 +208,14 @@ static void handle_view_input(Plot *p, Rectangle area)
             double anchor = v->x0 + (double)(m.x - area.x) / area.width * width;
             double scale = pow(0.85, (double)wheel);
             double nw = width * scale;
-            if (nw > full * 1.0)
+            if (nw > full * 1.0) {
                 nw = full;
-            if (nw < 1e-3)
+            }
+
+            if (nw < 1e-3) {
                 nw = 1e-3;
+            }
+
             double frac = (anchor - v->x0) / width;
             v->x0 = anchor - frac * nw;
             v->x1 = v->x0 + nw;
@@ -205,6 +229,7 @@ static void handle_view_input(Plot *p, Rectangle area)
             } else {
                 p->dragging = true;
             }
+
             p->last_press = now;
         }
     }
@@ -225,11 +250,13 @@ static void handle_view_input(Plot *p, Rectangle area)
         v->x0 = v->full0;
         v->x1 = v->x0 + width;
     }
+
     if (v->x1 > v->full1) {
         v->x1 = v->full1;
         v->x0 = v->x1 - width;
-        if (v->x0 < v->full0)
+        if (v->x0 < v->full0) {
             v->x0 = v->full0;
+        }
     }
 }
 
@@ -253,9 +280,12 @@ static const char *split_name(const char *name, char *group, size_t cap)
         group[0] = '\0';
         return name;
     }
+
     size_t n = (size_t)(bar - name);
-    if (n >= cap)
+    if (n >= cap) {
         n = cap - 1;
+    }
+
     memcpy(group, name, n);
     group[n] = '\0';
     return bar + 1;
@@ -281,20 +311,27 @@ static float legend_layout(const Plot *p, float x, float y, bool draw)
         const char *leaf = split_name(p->names[s], group, sizeof group);
 
         if (group[0] && strcmp(group, prev) != 0) {
-            if (s > 0)
+            if (s > 0) {
                 x += 8; /* breathing room between groups */
-            if (draw)
+            }
+
+            if (draw) {
                 ui_text(group, x, y, UI_SMALL + 1, UI_TEXT);
+            }
+
             x += ui_text_width(group, UI_SMALL + 1) + 12;
         }
+
         str_copy(prev, sizeof prev, group);
 
         if (draw) {
             ui_dot(x + 4, y + 8, 4.5f, p->colors[s]);
             ui_text(leaf, x + 14, y, UI_SMALL + 1, UI_MUTED);
         }
+
         x += 14 + ui_text_width(leaf, UI_SMALL + 1) + 16;
     }
+
     return x - x_start;
 }
 
@@ -314,11 +351,14 @@ static int legend_stacked(const Plot *p, float x, float y, bool draw)
             rows++;
             rx = x;
             if (group[0]) {
-                if (draw)
+                if (draw) {
                     ui_text(group, rx, y + (float)(rows - 1) * LEGEND_ROW_H, UI_SMALL + 1, UI_TEXT);
+                }
+
                 rx += ui_text_width(group, UI_SMALL + 1) + 12;
             }
         }
+
         str_copy(prev, sizeof prev, group);
 
         if (draw) {
@@ -326,16 +366,21 @@ static int legend_stacked(const Plot *p, float x, float y, bool draw)
             ui_dot(rx + 4, ry + 8, 4.5f, p->colors[s]);
             ui_text(leaf, rx + 14, ry, UI_SMALL + 1, UI_MUTED);
         }
+
         rx += 14 + ui_text_width(leaf, UI_SMALL + 1) + 16;
     }
+
     return rows;
 }
 
 static bool has_groups(const Plot *p)
 {
-    for (int s = 0; s < p->nseries; s++)
-        if (strchr(p->names[s], '|'))
+    for (int s = 0; s < p->nseries; s++) {
+        if (strchr(p->names[s], '|')) {
             return true;
+        }
+    }
+
     return false;
 }
 
@@ -358,8 +403,10 @@ static float draw_header(const Plot *p, Rectangle b)
     if (has_groups(p) && full_w > b.width - 2 * UI_PAD + 16) {
         /* Too wide even on its own row: one row per group. */
         ui_text_bold(p->title, x, b.y + 13, UI_TEXT_SIZE, UI_TEXT);
-        if (p->ylabel)
+        if (p->ylabel) {
             ui_text(p->ylabel, x + title_w + 10, b.y + 15, UI_SMALL, UI_MUTED);
+        }
+
         int rows = legend_stacked(p, x, b.y + 14 + LEGEND_ROW_H, true);
         return (float)rows * LEGEND_ROW_H;
     }
@@ -367,8 +414,10 @@ static float draw_header(const Plot *p, Rectangle b)
     if (legend_wraps(p, b.width)) {
         /* Title (with its unit) on the first row, full legend on a second. */
         ui_text_bold(p->title, x, b.y + 13, UI_TEXT_SIZE, UI_TEXT);
-        if (p->ylabel)
+        if (p->ylabel) {
             ui_text(p->ylabel, x + title_w + 10, b.y + 15, UI_SMALL, UI_MUTED);
+        }
+
         legend_layout(p, x, b.y + 14 + LEGEND_ROW_H, true);
         return LEGEND_ROW_H;
     }
@@ -383,16 +432,19 @@ static float draw_header(const Plot *p, Rectangle b)
     bool show_names = title_w + 16 + legend_full <= avail;
 
     ui_text_bold(p->title, x, b.y + 13, UI_TEXT_SIZE, UI_TEXT);
-    if (show_unit && p->ylabel)
+    if (show_unit && p->ylabel) {
         ui_text(p->ylabel, x + title_w + 10, b.y + 15, UI_SMALL, UI_MUTED);
+    }
 
     if (show_names) {
         legend_layout(p, b.x + b.width - UI_PAD - legend_full + 16, b.y + 14, true);
     } else {
         float lx = b.x + b.width - UI_PAD - legend_dots + 14;
-        for (int s = 0; s < p->nseries; s++, lx += 22)
+        for (int s = 0; s < p->nseries; s++, lx += 22) {
             ui_dot(lx + 4, b.y + 22, 4.5f, p->colors[s]);
+        }
     }
+
     return 0;
 }
 
@@ -403,8 +455,10 @@ void plot_draw(Plot *p, Rectangle b)
 
     Rectangle a = {b.x + 14 + 44, b.y + 46 + extra, b.width - 14 - 44 - 16,
                    b.height - 46 - extra - 14 - 22};
-    if (a.width < 60 || a.height < 40)
+    if (a.width < 60 || a.height < 40) {
         return;
+    }
+
     ui_rrect(ui_inset(a, -2), 6, UI_FIELD);
 
     /* ---- x range ---- */
@@ -422,35 +476,48 @@ void plot_draw(Plot *p, Rectangle b)
         x0 = p->view->x0;
         x1 = p->view->x1;
     }
-    if (x1 - x0 < 1e-6)
+
+    if (x1 - x0 < 1e-6) {
         x1 = x0 + 1.0;
+    }
 
     /* ---- visible sample range ---- */
     int i0 = 0, i1 = p->count - 1;
     if (!p->live && p->count > 0) {
         i0 = lower_bound(p->t, p->count, x0) - 1;
         i1 = lower_bound(p->t, p->count, x1);
-        if (i0 < 0)
+        if (i0 < 0) {
             i0 = 0;
-        if (i1 > p->count - 1)
+        }
+
+        if (i1 > p->count - 1) {
             i1 = p->count - 1;
+        }
     }
 
     /* ---- y range ---- */
     double lo = DBL_MAX, hi = -DBL_MAX;
     for (int s = 0; s < p->nseries; s++) {
-        if (!p->y[s])
+        if (!p->y[s]) {
             continue;
+        }
+
         for (int i = i0; i <= i1; i++) {
             double v = p->y[s][i];
-            if (isnan(v))
+            if (isnan(v)) {
                 continue;
-            if (v < lo)
+            }
+
+            if (v < lo) {
                 lo = v;
-            if (v > hi)
+            }
+
+            if (v > hi) {
                 hi = v;
+            }
         }
     }
+
     double ylo, yhi;
     if (lo > hi) {
         ylo = -1;
@@ -458,11 +525,13 @@ void plot_draw(Plot *p, Rectangle b)
     } else {
         plot_pick_y_range(lo, hi, &ylo, &yhi);
     }
-    if (yhi - ylo < 1e-12)
-        yhi = ylo + 1.0;
 
-    #define PX(xv) (a.x + (float)(((xv) - x0) / (x1 - x0)) * a.width)
-    #define PY(yv) (a.y + a.height - (float)(((yv) - ylo) / (yhi - ylo)) * a.height)
+    if (yhi - ylo < 1e-12) {
+        yhi = ylo + 1.0;
+    }
+
+#define PX(xv) (a.x + (float)(((xv) - x0) / (x1 - x0)) * a.width)
+#define PY(yv) (a.y + a.height - (float)(((yv) - ylo) / (yhi - ylo)) * a.height)
 
     /* ---- grid + tick labels ---- */
     char label[32];
@@ -482,8 +551,10 @@ void plot_draw(Plot *p, Rectangle b)
         float px = PX(v);
         DrawLine((int)px, (int)a.y, (int)px, (int)(a.y + a.height), UI_GRID);
         format_tick(label, sizeof label, v, xstep);
-        ui_text(label, px - ui_text_width(label, UI_SMALL) / 2, a.y + a.height + 6, UI_SMALL, UI_MUTED);
+        ui_text(label, px - ui_text_width(label, UI_SMALL) / 2, a.y + a.height + 6, UI_SMALL,
+                UI_MUTED);
     }
+
     ui_text_right("time (s)", b.x + b.width - 16, b.y + b.height - 20, UI_SMALL - 1, UI_MUTED);
 
     /* ---- series ---- */
@@ -492,11 +563,15 @@ void plot_draw(Plot *p, Rectangle b)
     if (!p->live) {
         for (int e = 0; e < p->nevents; e++) {
             double when = p->events[e].t;
-            if (when < x0 || when > x1)
+            if (when < x0 || when > x1) {
                 continue;
+            }
+
             float px = PX(when);
-            for (float yy = a.y; yy < a.y + a.height; yy += 8)
+            for (float yy = a.y; yy < a.y + a.height; yy += 8) {
                 DrawLine((int)px, (int)yy, (int)px, (int)(yy + 4), UI_MUTED);
+            }
+
             ui_text(p->events[e].text, px + 4, a.y + 4 + (float)(e % 3) * 14, 12, UI_MUTED);
         }
     }
@@ -504,8 +579,10 @@ void plot_draw(Plot *p, Rectangle b)
     int visible = i1 - i0 + 1;
     int stride = visible > (int)(a.width * 2) ? visible / (int)(a.width * 2) : 1;
     for (int s = 0; s < p->nseries; s++) {
-        if (!p->y[s] || visible < 2)
+        if (!p->y[s] || visible < 2) {
             continue;
+        }
+
         Vector2 prev = {PX(p->t[i0]), PY(p->y[s][i0])};
         bool prev_ok = !isnan(p->y[s][i0]);
         for (int i = i0 + stride; i <= i1 + stride - 1; i += stride) {
@@ -514,12 +591,15 @@ void plot_draw(Plot *p, Rectangle b)
             bool cur_ok = !isnan(yv);
             Vector2 cur = {PX(p->t[idx]), cur_ok ? PY(yv) : 0.0f};
             /* A NaN sample is a gap: nothing is drawn to or from it. */
-            if (prev_ok && cur_ok)
+            if (prev_ok && cur_ok) {
                 DrawLineEx(prev, cur, 2.2f, p->colors[s]);
+            }
+
             prev = cur;
             prev_ok = cur_ok;
         }
     }
+
     EndScissorMode();
 
     /* ---- hover read-out: nearest sample under the cursor ---- */
@@ -527,12 +607,17 @@ void plot_draw(Plot *p, Rectangle b)
     if (!GuiIsLocked() && !p->dragging && CheckCollisionPointRec(m, a) && visible >= 2) {
         double tx = x0 + (double)(m.x - a.x) / a.width * (x1 - x0);
         int near = lower_bound(p->t, p->count, tx);
-        if (near > i1)
+        if (near > i1) {
             near = i1;
-        if (near > i0 && fabs(p->t[near - 1] - tx) < fabs(p->t[near] - tx))
+        }
+
+        if (near > i0 && fabs(p->t[near - 1] - tx) < fabs(p->t[near] - tx)) {
             near--;
-        if (near < i0)
+        }
+
+        if (near < i0) {
             near = i0;
+        }
 
         float px = PX(p->t[near]);
         DrawLine((int)px, (int)a.y, (int)px, (int)(a.y + a.height), Fade(UI_TEXT, 0.35f));
@@ -543,23 +628,30 @@ void plot_draw(Plot *p, Rectangle b)
         for (int s = 0; s < p->nseries; s++) {
             char shown[48];
             display_name(p->names[s], shown, sizeof shown);
-            if (p->y[s] && isnan(p->y[s][near]))
+            if (p->y[s] && isnan(p->y[s][near])) {
                 snprintf(rows[s + 1], sizeof rows[0], "%s  --", shown);
-            else
+            } else {
                 snprintf(rows[s + 1], sizeof rows[0], "%s  %.3f", shown,
                          p->y[s] ? (double)p->y[s][near] : 0.0);
+            }
+
             bw = fmaxf(bw, ui_text_width(rows[s + 1], UI_SMALL));
         }
+
         float bh = (float)(p->nseries + 1) * 18 + 12;
         float bx = px + 12;
-        if (bx + bw + 24 > a.x + a.width)
+        if (bx + bw + 24 > a.x + a.width) {
             bx = px - 12 - bw - 24;
+        }
+
         float by = a.y + 8;
         ui_rrect_bordered((Rectangle){bx, by, bw + 24, bh}, 6, Fade(UI_CARD_HI, 0.96f), UI_BORDER);
-        for (int s = 0; s <= p->nseries; s++)
-            ui_text(rows[s], bx + 12, by + 7 + (float)s * 18, UI_SMALL, s == 0 ? UI_MUTED : p->colors[s - 1]);
+        for (int s = 0; s <= p->nseries; s++) {
+            ui_text(rows[s], bx + 12, by + 7 + (float)s * 18, UI_SMALL,
+                    s == 0 ? UI_MUTED : p->colors[s - 1]);
+        }
     }
 
-    #undef PX
-    #undef PY
+#undef PX
+#undef PY
 }

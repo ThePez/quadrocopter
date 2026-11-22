@@ -30,18 +30,23 @@ static void load_defaults(App *app)
     Overrides *ov = malloc(sizeof *ov);
     char err[256] = "";
     bool have_overrides = ov && overrides_load(ov, USER_DEFAULTS_PATH, err, sizeof err) == 0;
-    if (!have_overrides)
+    if (!have_overrides) {
         app_log(app, "Could not read saved defaults: %s", err[0] ? err : "out of memory");
+    }
 
     for (size_t i = 0; i < sizeof sources / sizeof sources[0]; i++) {
-        if (defines_load(sources[i].header, sources[i].set) != 0)
+        if (defines_load(sources[i].header, sources[i].set) != 0) {
             app_log(app, "Warning: could not read defaults from %s", sources[i].header);
+        }
+
         if (have_overrides) {
             const KVSet *saved = overrides_section(ov, sources[i].section, false);
-            if (saved)
+            if (saved) {
                 kv_merge(sources[i].set, saved);
+            }
         }
     }
+
     free(ov);
 }
 
@@ -102,8 +107,10 @@ void app_error(const char *title, const char *fmt, ...)
 
 bool app_require_connection(App *app)
 {
-    if (app->connected)
+    if (app->connected) {
         return true;
+    }
+
     app_error("Not Connected", "Please connect to serial port first.");
     return false;
 }
@@ -115,10 +122,13 @@ bool app_require_connection(App *app)
 void app_refresh_ports(App *app)
 {
     app->nports = uart_list_ports(app->ports, UART_MAX_PORTS);
-    if (app->port_active >= app->nports)
+    if (app->port_active >= app->nports) {
         app->port_active = 0;
-    if (app->nports == 0)
+    }
+
+    if (app->nports == 0) {
         app_log(app, "No valid serial ports detected.");
+    }
 }
 
 void app_connect(App *app)
@@ -156,8 +166,9 @@ static void ack_fail_all(App *app);
 
 void app_disconnect(App *app)
 {
-    if (!app->connected && !app->tel)
+    if (!app->connected && !app->tel) {
         return;
+    }
 
     app_stop_recording(app);
 
@@ -165,6 +176,7 @@ void app_disconnect(App *app)
         telemetry_stop(app->tel); /* joins the reader thread before the fd closes */
         app->tel = NULL;
     }
+
     if (app->fd >= 0) {
         uart_close(app->fd);
         app->fd = -1;
@@ -185,8 +197,9 @@ static void handle_sample(App *app, const Sample *s)
     /* Recording takes every packet, whatever the plots are doing. */
     recorder_add(&app->rec, s);
 
-    if (!app->live_plots)
+    if (!app->live_plots) {
         return;
+    }
 
     app->last_rx = s->t;
     app->status = TS_RECEIVING;
@@ -197,11 +210,15 @@ static void handle_sample(App *app, const Sample *s)
 
 static void open_dropped_session(App *app)
 {
-    if (!IsFileDropped())
+    if (!IsFileDropped()) {
         return;
+    }
+
     FilePathList files = LoadDroppedFiles();
-    if (files.count > 0 && IsFileExtension(files.paths[0], ".csv"))
+    if (files.count > 0 && IsFileExtension(files.paths[0], ".csv")) {
         session_tab_open(app, files.paths[0]);
+    }
+
     UnloadDroppedFiles(files);
 }
 
@@ -209,7 +226,11 @@ static void open_dropped_session(App *app)
 /* Config acks                                                               */
 /* ------------------------------------------------------------------------ */
 
-enum { CH_PID, CH_DRONE, CH_REMOTE };
+enum {
+    CH_PID,
+    CH_DRONE,
+    CH_REMOTE
+};
 
 static const uint8_t CHANNEL_ACK_ID[ACK_CHANNELS] = {PID_ACK, DRONE_CFG_ACK, REMOTE_CFG_ACK};
 
@@ -264,16 +285,20 @@ static void set_cfg_status(App *app, bool ok, const char *what, const char *fmt,
 
 static const char *status_text(uint16_t status, char *buf, size_t cap)
 {
-    if (status == 0x102) /* ESP_ERR_INVALID_ARG: the drone range-checks config values */
+    if (status == 0x102) { /* ESP_ERR_INVALID_ARG: the drone range-checks config values */
         return "invalid value";
+    }
+
     snprintf(buf, cap, "error 0x%X", status);
     return buf;
 }
 
 static bool ack_transmit(App *app, AckChannel *c)
 {
-    if (uart_write_all(app->fd, c->cur.frame, c->cur.len) != 0)
+    if (uart_write_all(app->fd, c->cur.frame, c->cur.len) != 0) {
         return false;
+    }
+
     c->cur.attempts++;
     c->sent_at = now_s();
     return true;
@@ -282,8 +307,9 @@ static bool ack_transmit(App *app, AckChannel *c)
 /* Reports a request's outcome to whoever asked for it. */
 static void ack_finish(App *app, const AckRequest *r, bool ok)
 {
-    if (r->done)
+    if (r->done) {
         r->done(app, r->user, ok);
+    }
 }
 
 static bool ack_start(App *app, AckChannel *c, const AckRequest *r)
@@ -295,6 +321,7 @@ static bool ack_start(App *app, AckChannel *c, const AckRequest *r)
         set_cfg_status(app, false, r->what, "send failed (%s)", strerror(errno));
         return false;
     }
+
     c->in_flight = true;
     return true;
 }
@@ -302,32 +329,38 @@ static bool ack_start(App *app, AckChannel *c, const AckRequest *r)
 /* Starts the next waiting request once the channel is free and quiet. */
 static void ack_pump(App *app, AckChannel *c)
 {
-    if (c->in_flight || now_s() < c->quiet_until || c->qcount == 0)
+    if (c->in_flight || now_s() < c->quiet_until || c->qcount == 0) {
         return;
+    }
+
     AckRequest next = c->queue[c->qhead];
     c->qhead = (c->qhead + 1) % ACK_QUEUE_CAP;
     c->qcount--;
-    if (!ack_start(app, c, &next))
+    if (!ack_start(app, c, &next)) {
         ack_finish(app, &next, false);
+    }
 }
 
 static void handle_ack(App *app, const AckEvent *ev)
 {
     for (int ch = 0; ch < ACK_CHANNELS; ch++) {
-        if (CHANNEL_ACK_ID[ch] != ev->id)
+        if (CHANNEL_ACK_ID[ch] != ev->id) {
             continue;
+        }
 
         AckChannel *c = &app->ack[ch];
-        if (!c->in_flight || now_s() < c->quiet_until)
+        if (!c->in_flight || now_s() < c->quiet_until) {
             return; /* a late duplicate of an answer already used */
+        }
 
         bool ok = ev->status == 0;
         char buf[24];
-        if (ok)
+        if (ok) {
             set_cfg_status(app, true, c->cur.what, "confirmed");
-        else
+        } else {
             set_cfg_status(app, false, c->cur.what, "rejected (%s)",
                            status_text(ev->status, buf, sizeof buf));
+        }
 
         /* After a retry the first attempt's ack may still be on its way: let it pass
          * before the next request for this device starts. */
@@ -382,6 +415,7 @@ static void ack_fail_all(App *app)
             c->in_flight = false;
             ack_finish(app, &r, false);
         }
+
         while (c->qcount > 0) {
             AckRequest r = c->queue[c->qhead];
             c->qhead = (c->qhead + 1) % ACK_QUEUE_CAP;
@@ -389,6 +423,7 @@ static void ack_fail_all(App *app)
             ack_finish(app, &r, false);
         }
     }
+
     memset(app->ack, 0, sizeof app->ack);
 }
 
@@ -397,14 +432,19 @@ void app_update(App *app)
     if (app->tel) {
         Sample batch[128];
         int n;
-        while ((n = telemetry_poll(app->tel, batch, 128)) > 0)
-            for (int i = 0; i < n; i++)
+        while ((n = telemetry_poll(app->tel, batch, 128)) > 0) {
+            for (int i = 0; i < n; i++) {
                 handle_sample(app, &batch[i]);
+            }
+        }
 
         AckEvent acks[16];
-        while ((n = telemetry_poll_acks(app->tel, acks, 16)) > 0)
-            for (int i = 0; i < n; i++)
+        while ((n = telemetry_poll_acks(app->tel, acks, 16)) > 0) {
+            for (int i = 0; i < n; i++) {
                 handle_ack(app, &acks[i]);
+            }
+        }
+
         ack_tick(app);
 
         char err[160];
@@ -415,8 +455,9 @@ void app_update(App *app)
         }
     }
 
-    if (app->connected && app->status == TS_RECEIVING && now_s() - app->last_rx > 2.0)
+    if (app->connected && app->status == TS_RECEIVING && now_s() - app->last_rx > 2.0) {
         app->status = TS_TIMEOUT;
+    }
 
     open_dropped_session(app);
 }
@@ -428,8 +469,10 @@ void app_update(App *app)
 bool app_send_then(App *app, uint8_t id, const void *payload, size_t len, AckDone done,
                    const void *user, size_t user_len)
 {
-    if (!app_require_connection(app))
+    if (!app_require_connection(app)) {
         return false;
+    }
+
     if (user_len > ACK_USER_MAX) {
         app_log(app, "Internal error: ack context too large (%zu bytes)", user_len);
         return false;
@@ -453,14 +496,16 @@ bool app_send_then(App *app, uint8_t id, const void *payload, size_t len, AckDon
                           .timeout = rule.timeout,
                           .max_attempts = rule.attempts};
         memcpy(req.frame, frame, n);
-        if (user_len)
+        if (user_len) {
             memcpy(req.user, user, user_len);
+        }
 
         if (c->in_flight || now_s() < c->quiet_until || c->qcount > 0) {
             if (c->qcount == ACK_QUEUE_CAP) {
                 app_log(app, "%s: too many requests waiting, dropped", rule.what);
                 return false;
             }
+
             c->queue[(c->qhead + c->qcount) % ACK_QUEUE_CAP] = req;
             c->qcount++;
             return true;
@@ -470,6 +515,7 @@ bool app_send_then(App *app, uint8_t id, const void *payload, size_t len, AckDon
             app_error("Send Error", "Failed to send: %s", strerror(errno));
             return false;
         }
+
         return true;
     }
 
@@ -479,8 +525,11 @@ bool app_send_then(App *app, uint8_t id, const void *payload, size_t len, AckDon
         app_error("Send Error", "Failed to send: %s", why);
         return false;
     }
-    if (done)
+
+    if (done) {
         done(app, user, true); /* nothing to wait for */
+    }
+
     return true;
 }
 
@@ -492,8 +541,9 @@ bool app_send(App *app, uint8_t id, const void *payload, size_t len)
 bool app_save_defaults(App *app, const char *section, const KVSet *updates, KVSet *live)
 {
     Overrides *ov = malloc(sizeof *ov);
-    if (!ov)
+    if (!ov) {
         return false;
+    }
 
     char err[256] = "";
     bool ok = false;
@@ -506,12 +556,15 @@ bool app_save_defaults(App *app, const char *section, const KVSet *updates, KVSe
             snprintf(err, sizeof err, "too many sections");
         }
     }
+
     free(ov);
 
-    if (ok)
+    if (ok) {
         kv_merge(live, updates);
-    else
+    } else {
         app_log(app, "Could not save defaults: %s", err);
+    }
+
     return ok;
 }
 
@@ -531,6 +584,7 @@ void app_toggle_recording(App *app)
         app_error("Recording Error", "Could not start: %s", err);
         return;
     }
+
     app_log(app, "Recording session to %s", app->rec.path);
 }
 
@@ -539,8 +593,9 @@ void app_stop_recording(App *app)
     int rows = app->rec.rows;
     char path[sizeof app->rec.path];
     str_copy(path, sizeof path, app->rec.path);
-    if (recorder_stop(&app->rec))
+    if (recorder_stop(&app->rec)) {
         app_log(app, "Session saved (%d samples): %s", rows, path);
+    }
 }
 
 void app_record_event(App *app, const char *text)

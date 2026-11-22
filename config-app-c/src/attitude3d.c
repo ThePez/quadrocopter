@@ -42,8 +42,10 @@ void att_init(Attitude3D *a)
 
 void att_free(Attitude3D *a)
 {
-    if (a->target.id != 0)
+    if (a->target.id != 0) {
         UnloadRenderTexture(a->target);
+    }
+
     a->target.id = 0;
 }
 
@@ -79,8 +81,9 @@ static void draw_scene(const Attitude3D *a)
     const float s = 0.7071f; /* arms at 45 degrees */
     V3 fl = {-s, s, 0}, fr = {s, s, 0}, bl = {-s, -s, 0}, br = {s, -s, 0};
     V3 *tips[4] = {&fl, &bl, &br, &fr};
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < 4; i++) {
         *tips[i] = rotate(*tips[i], a->pitch, a->roll, a->yaw);
+    }
 
     Vector3 origin = to_rl(rotate((V3){0, 0, 0}, a->pitch, a->roll, a->yaw));
     Color rear = {150, 157, 172, 255};
@@ -90,9 +93,11 @@ static void draw_scene(const Attitude3D *a)
     DrawCylinderEx(origin, to_rl(br), 0.055f, 0.055f, 10, rear);
 
     /* Motor markers use the same colours as the Motors plot (tips are FL, BL, BR, FR). */
-    const Color motor_colors[4] = {UI_SERIES_RED, UI_SERIES_CYAN, UI_SERIES_ORANGE, UI_SERIES_PURPLE};
-    for (int i = 0; i < 4; i++)
+    const Color motor_colors[4] = {UI_SERIES_RED, UI_SERIES_CYAN, UI_SERIES_ORANGE,
+                                   UI_SERIES_PURPLE};
+    for (int i = 0; i < 4; i++) {
         DrawSphere(to_rl(*tips[i]), 0.14f, motor_colors[i]);
+    }
 
     /* Nose marker so heading reads clearly while yawing */
     V3 nose = rotate((V3){0, 0.95f, 0}, a->pitch, a->roll, a->yaw);
@@ -108,12 +113,15 @@ void att_draw(Attitude3D *a, Rectangle card, const char *title)
     Rectangle b = ui_card_body(card, true);
     b.height += UI_PAD - 4; /* let the view run closer to the bottom edge */
     int w = (int)b.width, h = (int)b.height;
-    if (w < 16 || h < 16)
+    if (w < 16 || h < 16) {
         return;
+    }
 
     if (a->target.id == 0 || a->w != w || a->h != h) {
-        if (a->target.id != 0)
+        if (a->target.id != 0) {
             UnloadRenderTexture(a->target);
+        }
+
         a->target = LoadRenderTexture(w, h);
         SetTextureFilter(a->target.texture, TEXTURE_FILTER_BILINEAR);
         a->w = w;
@@ -127,16 +135,23 @@ void att_draw(Attitude3D *a, Rectangle card, const char *title)
             Vector2 d = GetMouseDelta();
             a->azimuth -= d.x * 0.4f;
             a->elevation += d.y * 0.4f;
-            if (a->elevation > 89)
+            if (a->elevation > 89) {
                 a->elevation = 89;
-            if (a->elevation < -89)
+            }
+
+            if (a->elevation < -89) {
                 a->elevation = -89;
+            }
         }
+
         a->distance -= GetMouseWheelMove() * 0.4f;
-        if (a->distance < 2)
+        if (a->distance < 2) {
             a->distance = 2;
-        if (a->distance > 20)
+        }
+
+        if (a->distance > 20) {
             a->distance = 20;
+        }
     }
 
     BeginTextureMode(a->target);
@@ -145,11 +160,13 @@ void att_draw(Attitude3D *a, Rectangle card, const char *title)
     EndTextureMode();
 
     /* Render textures are stored upside down. */
-    DrawTextureRec(a->target.texture, (Rectangle){0, 0, (float)w, -(float)h}, (Vector2){b.x, b.y}, WHITE);
+    DrawTextureRec(a->target.texture, (Rectangle){0, 0, (float)w, -(float)h}, (Vector2){b.x, b.y},
+                   WHITE);
     DrawRectangleLinesEx(b, 1, UI_BORDER);
 
     char info[96];
-    snprintf(info, sizeof info, "P %.1f   R %.1f   Y %.1f", (double)a->pitch, (double)a->roll, (double)a->yaw);
+    snprintf(info, sizeof info, "P %.1f   R %.1f   Y %.1f", (double)a->pitch, (double)a->roll,
+             (double)a->yaw);
     ui_text(info, b.x + 10, b.y + 8, UI_SMALL + 1, UI_TEXT);
     ui_text("drag to orbit", b.x + 10, b.y + b.height - 22, UI_SMALL - 1, UI_MUTED);
 }
