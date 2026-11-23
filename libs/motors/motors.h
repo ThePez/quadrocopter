@@ -3,8 +3,7 @@
  * File: motors.h
  * Author: Jack Cairns
  * Date: 13-07-2025
- * Brief:
- * REFERENCE: None
+ * Brief: Motor pin map, speed limits and ESC PWM interface.
  *****************************************************************************
  */
 

@@ -3,6 +3,7 @@
  * File: imu.h
  * Author: Jack Cairns
  * Date: 20-07-2025
+ * Brief: Interface for the BNO08x IMU task.
  *****************************************************************************
  */
 

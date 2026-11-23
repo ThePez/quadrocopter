@@ -3,6 +3,7 @@
  * File: drone.c
  * Author: Jack Cairns
  * Date: 27-06-2025
+ * Brief: Drone setup and state: failsafes, battery sensing, telemetry, config updates.
  *****************************************************************************
  */
 

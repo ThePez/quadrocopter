@@ -3,7 +3,7 @@
  * File: mcp3208.h
  * Author: Jack Cairns
  * Date: 01-07-2025
- * Brief: Driver for the
+ * Brief: Interface for the MCP3208 12-bit SPI ADC driver.
  * REFERENCE: None
  ******************************************************************************
  */

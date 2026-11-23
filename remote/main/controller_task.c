@@ -3,6 +3,7 @@
  * File: controller_task.c
  * Author: Jack Cairns
  * Date: 16-07-2026
+ * Brief: Reads joysticks and buttons, applies calibration, sends control packets.
  *****************************************************************************
  */
 

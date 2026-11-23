@@ -3,6 +3,7 @@
  * File: pid_defaults.h
  * Author: Jack Cairns
  * Date: 11-07-2026
+ * Brief: Default rate and angle PID gains (also read by the GUI).
  *****************************************************************************
  */
 

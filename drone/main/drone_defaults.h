@@ -3,6 +3,7 @@
  * File: drone_defaults.h
  * Author: Jack Cairns
  * Date: 15-07-2026
+ * Brief: Compile-time default flight limits and failsafes (also read by the GUI).
  *****************************************************************************
  */
 

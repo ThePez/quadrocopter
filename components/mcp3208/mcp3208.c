@@ -3,7 +3,7 @@
  * File: mcp3208.c
  * Author: Jack Cairns
  * Date: 03-07-2025
- * Brief: Driver for the
+ * Brief: Driver for the MCP3208 12-bit SPI ADC (joysticks and analog inputs).
  * REFERENCE: None
  ******************************************************************************
  */

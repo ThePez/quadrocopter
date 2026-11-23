@@ -3,6 +3,7 @@
  * File: pid_task.h
  * Author: Jack Cairns
  * Date: 05-07-2026
+ * Brief: Interface for the flight control task and live PID/config updates.
  *****************************************************************************
  */
 

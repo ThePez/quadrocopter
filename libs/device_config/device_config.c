@@ -3,6 +3,7 @@
  * File: device_config.c
  * Author: Jack Cairns
  * Date: 15-07-2026
+ * Brief: Versioned load/save of device configuration blobs in NVS flash.
  ******************************************************************************
  */
 

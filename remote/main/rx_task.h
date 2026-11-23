@@ -3,6 +3,7 @@
  * File: rx_task.h
  * Author: Jack Cairns
  * Date: 16-07-2026
+ * Brief: Interface for the remote's receive task.
  *****************************************************************************
  */
 

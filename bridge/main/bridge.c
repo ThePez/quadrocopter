@@ -3,6 +3,7 @@
  * File: bridge.c
  * Author: Jack Cairns
  * Date: 08-07-2026
+ * Brief: USB serial <-> ESP-NOW bridge between the config GUI, drone and remote.
  *****************************************************************************
  */
 

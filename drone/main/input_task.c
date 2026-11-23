@@ -3,6 +3,7 @@
  * File: input_task.c
  * Author: Jack Cairns
  * Date: 05-07-2026
+ * Brief: Receives remote packets, maps stick input to commands, sends config acks.
  *****************************************************************************
  */
 

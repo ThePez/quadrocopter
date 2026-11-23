@@ -3,6 +3,7 @@
  * File: espnow_comm.h
  * Author: Jack Cairns
  * Date: 17-01-2026
+ * Brief: Interface for ESP-NOW setup and packet send/receive.
  ******************************************************************************
  */
 

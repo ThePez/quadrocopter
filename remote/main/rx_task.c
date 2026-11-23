@@ -3,6 +3,7 @@
  * File: rx_task.c
  * Author: Jack Cairns
  * Date: 16-07-2026
+ * Brief: Receives ESP-NOW packets sent to the remote and returns config acks.
  *****************************************************************************
  */
 

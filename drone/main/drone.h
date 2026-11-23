@@ -3,6 +3,7 @@
  * File: drone.h
  * Author: Jack Cairns
  * Date: 27-06-2025
+ * Brief: Drone state, constants and interface (config, failsafes, battery).
  *****************************************************************************
  */
 

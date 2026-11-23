@@ -3,6 +3,7 @@
  * File: imu.cpp
  * Author: Jack Cairns
  * Date: 20-11-2025
+ * Brief: BNO08x IMU task: configures the sensor and queues orientation/rate samples.
  *****************************************************************************
  */
 

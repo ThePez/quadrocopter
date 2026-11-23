@@ -3,6 +3,7 @@
  * File: pid.c
  * Author: Jack Cairns
  * Date: 05-07-2026
+ * Brief: PID controller maths: proportional, clamped integral, filtered derivative.
  *****************************************************************************
  */
 

@@ -3,6 +3,7 @@
  * File: motor.c
  * Author: Jack Cairns
  * Date: 13-07-2025
+ * Brief: ESC PWM output for the four motors.
  *****************************************************************************
  */
 

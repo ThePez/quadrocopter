@@ -3,6 +3,7 @@
  * File: main.c
  * Author: Jack Cairns
  * Date: 03-07-2026
+ * Brief: Remote entry point (app_main): starts every subsystem.
  ******************************************************************************
  */
 

@@ -3,6 +3,7 @@
  * File: remote.c
  * Author: Jack Cairns
  * Date: 27-06-2025
+ * Brief: Remote state: buttons, send timer and config handling.
  ******************************************************************************
  */
 

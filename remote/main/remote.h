@@ -3,6 +3,7 @@
  * File: remote.h
  * Author: Jack Cairns
  * Date: 23-07-2025
+ * Brief: Remote state and interface (buttons, config handling).
  *****************************************************************************
  */
 

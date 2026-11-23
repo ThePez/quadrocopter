@@ -3,6 +3,7 @@
  * File: device_config.h
  * Author: Jack Cairns
  * Date: 15-07-2026
+ * Brief: Interface and layout of the NVS-stored drone and remote configuration.
  ******************************************************************************
  */
 

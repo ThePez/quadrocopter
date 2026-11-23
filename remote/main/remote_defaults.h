@@ -3,6 +3,7 @@
  * File: remote_defaults.h
  * Author: Jack Cairns
  * Date: 15-07-2026
+ * Brief: Compile-time default battery and joystick calibration (also read by the GUI).
  *****************************************************************************
  */
 

@@ -3,6 +3,7 @@
  * File: input_task.h
  * Author: Jack Cairns
  * Date: 05-07-2026
+ * Brief: Interface for the remote-input and config-ack task.
  *****************************************************************************
  */
 

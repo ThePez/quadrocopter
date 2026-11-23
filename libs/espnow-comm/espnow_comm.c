@@ -3,6 +3,7 @@
  * File: espnow_comm.c
  * Author: Jack Cairns
  * Date: 17-01-2026
+ * Brief: ESP-NOW setup and packet send/receive with CRC checking.
  ******************************************************************************
  */
 

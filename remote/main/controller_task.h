@@ -3,6 +3,7 @@
  * File: controller_task.h
  * Author: Jack Cairns
  * Date: 16-07-2026
+ * Brief: Interface and notification bits for the remote's controller task.
  *****************************************************************************
  */
 

@@ -3,6 +3,7 @@
  * File: main.c
  * Author: Jack Cairns
  * Date: 05-07-2026
+ * Brief: Drone entry point (app_main): starts every subsystem.
  *****************************************************************************
  */
 

@@ -3,6 +3,7 @@
  * File: pid_task.c
  * Author: Jack Cairns
  * Date: 05-07-2026
+ * Brief: Flight control task: IMU in, rate/angle PID loops, motor mixing out.
  *****************************************************************************
  */
 
