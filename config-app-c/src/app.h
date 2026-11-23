@@ -1,4 +1,13 @@
 /*
+ *****************************************************************************
+ * File: app.h
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Shared application state and the connection / send / save interface.
+ *****************************************************************************
+ */
+
+/*
  * Application state shared by main.c and every tab, plus the connection,
  * logging, sending and defaults-saving operations they all use.
  */

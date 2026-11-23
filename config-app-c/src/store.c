@@ -1,3 +1,25 @@
+/*
+ *****************************************************************************
+ * File: store.c
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Firmware default scraping and the saved user_defaults.json overrides.
+ *****************************************************************************
+ */
+
+/*
+ * Small key/value tables and the two places values come from:
+ *
+ *   1. #define scraping: reads `#define NAME number` lines out of the firmware's *_defaults.h,
+ *      so the GUI starts from the same numbers the firmware was compiled with.
+ *   2. user_defaults.json: a hand-rolled reader/writer for { "section": { "KEY": number } }.
+ *      Only that exact shape is supported; anything else is reported as an error and never
+ *      overwritten.
+ *
+ * KVSet is a fixed-size linear table (KV_MAX entries). That is plenty for a few dozen defaults
+ * and avoids any allocation.
+ */
+
 #include "store.h"
 
 #include <ctype.h>

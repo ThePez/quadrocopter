@@ -1,4 +1,13 @@
 /*
+ *****************************************************************************
+ * File: telemetry.h
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Decoded telemetry samples and the reader thread interface.
+ *****************************************************************************
+ */
+
+/*
  * Decoded telemetry samples and the background thread that produces them.
  */
 #ifndef TELEMETRY_H

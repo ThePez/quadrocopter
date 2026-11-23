@@ -1,3 +1,21 @@
+/*
+ *****************************************************************************
+ * File: uart.c
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Serial port access, CRC-16 and the frame protocol to the bridge.
+ *****************************************************************************
+ */
+
+/*
+ * Serial port access and the wire protocol.
+ *
+ * Wire format (both directions): [0xAA][0x55][struct wifi_packet_t]. The packet holds its own
+ * CRC-16 over its data union, so the decoder needs no length field: every frame is the same
+ * size. The decoder is a streaming parser: bytes are appended to a buffer and complete, CRC-valid
+ * frames are peeled off the front; garbage is skipped one candidate at a time.
+ */
+
 #include "uart.h"
 
 #include <dirent.h>
@@ -16,6 +34,8 @@
 _Static_assert(sizeof(struct sensor_telemetry_t) == 68, "sensor_telemetry_t size changed");
 _Static_assert(sizeof(struct wifi_packet_t) == 72, "wifi_packet_t size changed");
 
+/* CRC-16/X-25 (reflected 0x1021, init 0xFFFF, final XOR 0xFFFF). Must equal the firmware's
+ * esp_rom_crc16_le(0, ...) or every frame is rejected. */
 uint16_t uart_crc16(const uint8_t *data, size_t len)
 {
     uint16_t crc = 0xFFFF;
@@ -205,6 +225,11 @@ static bool is_ack_id(uint8_t id)
     return id == PID_ACK || id == DRONE_CFG_ACK || id == REMOTE_CFG_ACK;
 }
 
+/* Extracts every complete frame currently in the buffer.
+ * 1. Skip to the next AA 55 (keeping a trailing byte that might be half a magic pair).
+ * 2. Wait until a whole frame is buffered.
+ * 3. Check the CRC. Bad: drop only the two magic bytes and rescan, because the true frame
+ *    start may lie inside the bytes just examined. Good: dispatch it and drop the frame. */
 static int decoder_process(FrameDecoder *d, TelemetryFrameCb cb, AckFrameCb ack_cb, void *ctx)
 {
     int frames = 0;

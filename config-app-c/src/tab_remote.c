@@ -1,4 +1,20 @@
-/* Remote config tab: battery/voltage calibration and joystick calibration. */
+/*
+ *****************************************************************************
+ * File: tab_remote.c
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Remote config tab: voltage and joystick calibration.
+ *****************************************************************************
+ */
+
+/*
+ * Remote config tab: battery voltage calibration and per-channel joystick calibration
+ * (min / centre / max raw ADC readings for throttle, pitch, roll and yaw).
+ *
+ * Follows the same pattern as tab_drone.c: build a wire struct from the fields, send it with an
+ * ack callback, and only treat it as applied (and optionally save to flash / defaults) once the
+ * remote has confirmed.
+ */
 
 #include <math.h>
 #include <stdio.h>

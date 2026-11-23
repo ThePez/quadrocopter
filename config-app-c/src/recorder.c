@@ -1,3 +1,18 @@
+/*
+ *****************************************************************************
+ * File: recorder.c
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Session recording to CSV, and loading a recording back.
+ *****************************************************************************
+ */
+
+/*
+ * Session files. Writing: one CSV row per telemetry sample (time since recording started, then one
+ * column per `enum Field`), plus "# event" comment lines that mark moments such as a PID send.
+ * Loading: the inverse, into column arrays that the session plots point at directly.
+ */
+
 #include "recorder.h"
 
 #include <errno.h>

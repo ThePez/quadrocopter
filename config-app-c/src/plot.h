@@ -1,4 +1,13 @@
 /*
+ *****************************************************************************
+ * File: plot.h
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Interface and data structures for the line plots.
+ *****************************************************************************
+ */
+
+/*
  * Line plot used for both live telemetry and recorded sessions.
  *
  *  - Live plots own a fixed-size sliding buffer and always show all of it.

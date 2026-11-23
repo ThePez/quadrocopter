@@ -1,4 +1,28 @@
-/* PID tuning tab: three gain groups (Rate P/R, Rate Yaw, Angle P/R). */
+/*
+ *****************************************************************************
+ * File: tab_pid.c
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: PID tuning tab: three gain groups, send, save and offline editing.
+ *****************************************************************************
+ */
+
+/*
+ * PID tuning tab: three gain groups (Rate pitch/roll, Rate yaw, Angle pitch/roll), each with
+ * Kp, Ki, Kd and the D-term filter alpha.
+ *
+ * Per group:
+ *   Send to drone         live update (drone RAM); confirmed by the drone's ack
+ *   Save to flash & ...   makes sure the on-screen gains are confirmed, tells the drone to store
+ *                         its config in flash, then remembers the gains in user_defaults.json
+ * Whole tab:
+ *   Save all to file      writes every group to user_defaults.json (no drone needed)
+ *   Send all to drone     live-sends every group (use after powering the drone)
+ *
+ * A group's `state` tracks the last Send: IDLE (confirmed), PENDING (waiting for the ack) or
+ * FAILED (gave up). `current` is the text of the gains the drone last confirmed; `attempt` is the
+ * text of an unconfirmed Send, shown with a warning flag until it is confirmed.
+ */
 
 #include <math.h>
 #include <stdio.h>

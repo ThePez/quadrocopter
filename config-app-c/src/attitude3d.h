@@ -1,4 +1,13 @@
 /*
+ *****************************************************************************
+ * File: attitude3d.h
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Interface for the 3D drone view.
+ *****************************************************************************
+ */
+
+/*
  * 3D drone model driven by pitch/roll/yaw, rendered into an offscreen texture
  * so it can sit inside any rectangle of the window.
  */

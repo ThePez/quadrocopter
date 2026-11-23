@@ -1,4 +1,17 @@
-/* Console tab: scrolling log of everything sent and received. */
+/*
+ *****************************************************************************
+ * File: tab_console.c
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Console tab: scrolling log of messages.
+ *****************************************************************************
+ */
+
+/*
+ * Console tab: scrolling log. Lines are kept in a ring buffer of LOG_LINES entries (oldest are
+ * overwritten); app_log() is the producer. `scroll_up` is how many lines the view is scrolled away
+ * from the newest; 0 means it follows new output.
+ */
 
 #include <stdlib.h>
 #include <string.h>

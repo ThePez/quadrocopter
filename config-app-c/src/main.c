@@ -1,4 +1,13 @@
 /*
+ *****************************************************************************
+ * File: main.c
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Window loop, sidebar and page dispatch.
+ *****************************************************************************
+ */
+
+/*
  * Drone config / PID tuning GUI (raylib + raygui port of config-app/).
  *
  * main.c owns the window and the sidebar (connection + navigation); each page
@@ -14,6 +23,18 @@
 
 #define SIDEBAR_W 204
 
+/* Layout of the window:
+ *
+ *   +---------+----------------------------------------------+
+ *   | sidebar |  page header (title + subtitle)              |
+ *   |  card   |  tab content (one tab_*_draw() fills this)   |
+ *   |  nav    |                                              |
+ *   |  status |                                              |
+ *   +---------+----------------------------------------------+
+ *
+ * Draw order each frame: sidebar, page, then the two port/baud dropdown lists and any modal
+ * dialog, so open lists and dialogs end up on top. */
+
 static const char *const NAV_LABELS[] = {"Telemetry", "PID Tuning", "Drone Config", "Remote Config",
                                          "Console"};
 
@@ -21,6 +42,8 @@ typedef struct {
     Rectangle port, baud;
 } DropdownRects;
 
+/* Connection card, tab navigation, the config-ack status line and the recording badge. The two
+ * dropdowns are only *positioned* here (returned in `dd`); they are drawn later, on top. */
 static void draw_sidebar(App *app, float height, DropdownRects *dd)
 {
     DrawRectangle(0, 0, SIDEBAR_W, (int)height, UI_SIDEBAR);
@@ -190,6 +213,7 @@ static void draw_dropdowns(App *app, const DropdownRects *dd)
     GuiUnlock();
 }
 
+/* Draws a page title and shrinks `content` to the area below it. */
 static void page_header(const char *title, const char *subtitle, Rectangle *content)
 {
     ui_text_bold(title, content->x + 2, content->y + 2, 24, UI_TEXT);
@@ -198,6 +222,8 @@ static void page_header(const char *title, const char *subtitle, Rectangle *cont
     content->height -= 64;
 }
 
+/* One frame of UI. GuiLock() makes raygui ignore input; it is held while a modal or an open
+ * dropdown list owns the mouse, and released before the dropdowns themselves are drawn. */
 static void draw_frame(App *app)
 {
     float w = (float)GetScreenWidth(), h = (float)GetScreenHeight();

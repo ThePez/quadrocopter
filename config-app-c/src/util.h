@@ -1,3 +1,12 @@
+/*
+ *****************************************************************************
+ * File: util.h
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Interface for the clock and string helpers.
+ *****************************************************************************
+ */
+
 #ifndef UTIL_H
 #define UTIL_H
 

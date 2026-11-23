@@ -1,4 +1,13 @@
 /*
+ *****************************************************************************
+ * File: recorder.h
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Interface for session recording and loading.
+ *****************************************************************************
+ */
+
+/*
  * Session recording (CSV out) and loading (CSV in).
  *
  * Same file format as config-app/session_recorder.py, so sessions recorded by

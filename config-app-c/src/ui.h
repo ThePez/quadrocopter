@@ -1,4 +1,13 @@
 /*
+ *****************************************************************************
+ * File: ui.h
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Interface for the shared UI toolkit.
+ *****************************************************************************
+ */
+
+/*
  * Shared UI toolkit on top of raylib + raygui: dark theme, cards, buttons,
  * segmented control, sidebar items, numeric fields and modal dialogs.
  *

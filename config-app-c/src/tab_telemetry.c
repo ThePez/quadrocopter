@@ -1,6 +1,21 @@
 /*
+ *****************************************************************************
+ * File: tab_telemetry.c
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Telemetry tab: live plots, 3D view and live values.
+ *****************************************************************************
+ */
+
+/*
  * Telemetry page: all four live plots at once (or one big one), with the 3D
  * attitude view and the current values in a column on the right.
+ *
+ * telemetry_tab_push() is the entry point for data: app.c calls it for every sample, and it fans
+ * the values out to the five live plots (angles, rates, PID outputs, motors, controls) and the 3D
+ * view. The Controls plot converts raw commands to a percentage of stick travel using the limits
+ * from the Drone Config tab (StickScale), so changing those limits changes how it is scaled.
+ * The PID and Drone tabs also draw some of these plots (plot_draw on app->ttab.*).
  */
 
 #include <math.h>

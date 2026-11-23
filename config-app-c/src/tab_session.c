@@ -1,4 +1,20 @@
-/* Session viewer: zoomable plots of a recorded CSV, one tab per signal group. */
+/*
+ *****************************************************************************
+ * File: tab_session.c
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Session viewer tab: plots of a loaded recording.
+ *****************************************************************************
+ */
+
+/*
+ * Session viewer: zoomable plots of a recorded CSV, one sub-tab per signal group.
+ *
+ * session_tab_open() loads the CSV (recorder.c) and creates one static Plot per group in GROUPS[]
+ * whose series point straight into the loaded column arrays (no copying). All of the plots share
+ * one PlotView, so zooming or panning on one keeps the others aligned. The tab only appears in the
+ * sidebar while a session is open.
+ */
 
 #include <stdio.h>
 #include <string.h>

@@ -1,3 +1,14 @@
+/*
+ *****************************************************************************
+ * File: util.c
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Clock, safe string copy and time-string helpers.
+ *****************************************************************************
+ */
+
+/* Small helpers with no dependencies: a monotonic clock, a safe string copy, a clock string. */
+
 #include "util.h"
 
 #include <stdio.h>

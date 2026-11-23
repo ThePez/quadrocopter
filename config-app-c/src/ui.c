@@ -1,3 +1,12 @@
+/*
+ *****************************************************************************
+ * File: ui.c
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Theme, text, widgets, number fields and modal dialogs.
+ *****************************************************************************
+ */
+
 #define RAYGUI_IMPLEMENTATION
 #include "ui.h"
 
@@ -177,6 +186,7 @@ static bool same_rect(Rectangle a, Rectangle b)
     return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height;
 }
 
+/* True on the frame a click completes (release) on a widget that also received the press. */
 static bool clicked(Rectangle r, bool hover)
 {
     if (hover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
@@ -358,7 +368,9 @@ bool ui_checkbox(Rectangle r, const char *label, bool *value)
 /* NumField                                                                  */
 /* ------------------------------------------------------------------------ */
 
-static NumField *g_editing; /* at most one field is mid-edit */
+/* The one field currently being typed into, or NULL. Starting an edit commits the previous one,
+ * so a half-typed value is never silently discarded. */
+static NumField *g_editing;
 
 void numfield_init(NumField *f, double value, double step, double min, double max, int decimals)
 {
@@ -448,6 +460,15 @@ static void draw_chevron(Rectangle r, bool up, Color c)
     DrawLineEx(b, d, 1.6f, c);
 }
 
+/* Handles input and draws one number box, in this order each frame:
+ *   1. mouse: click in the text area starts editing / places the caret; click on a chevron
+ *      steps the value; click anywhere else commits an edit in progress
+ *   2. wheel (not while typing): steps the value
+ *   3. keyboard (only while editing): typed characters, Backspace/Delete, arrows, Home/End,
+ *      Enter = commit, Esc = cancel
+ *   4. draw: border (accent while editing), text, caret, chevrons
+ * While editing, the text shown is `buf` (the raw string); otherwise it is `value` formatted
+ * to `decimals`. The value is only parsed and clamped when the edit is committed. */
 void numfield_draw(NumField *f, Rectangle b)
 {
     const float step_w = 24;

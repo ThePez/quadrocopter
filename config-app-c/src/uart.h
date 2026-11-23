@@ -1,4 +1,13 @@
 /*
+ *****************************************************************************
+ * File: uart.h
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Interface for the serial port and frame protocol.
+ *****************************************************************************
+ */
+
+/*
  * Serial link to the bridge ESP32.
  *
  * One frame shape in both directions (mirrors bridge/main/bridge.c):

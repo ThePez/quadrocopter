@@ -1,4 +1,24 @@
-/* Drone config tab: failsafe / throttle / battery constants. */
+/*
+ *****************************************************************************
+ * File: tab_drone.c
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Drone config tab: limits, throttle range, gyro filter, failsafes.
+ *****************************************************************************
+ */
+
+/*
+ * Drone config tab: flight limits, throttle range, gyro filter and failsafe thresholds.
+ *
+ * The rows are table driven (FIELDS[]): each has a label, the #define name it takes its default
+ * from (and is saved under), a unit scale (the GUI shows seconds where the firmware stores
+ * microseconds), and its step / min / max / decimals. The whole table is sent as one
+ * `drone_config_telemetry_t` packet.
+ *
+ * Send applies live; Save also persists to flash on the drone and keeps the values as defaults,
+ * but only after the drone has confirmed each step (see on_config_done / on_store_done).
+ * Changing the wire struct means rebuilding and flashing the drone as well as this app.
+ */
 
 #include <math.h>
 #include <stdio.h>

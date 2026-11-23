@@ -1,3 +1,21 @@
+/*
+ *****************************************************************************
+ * File: plot.c
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Live and zoomable line plots.
+ *****************************************************************************
+ */
+
+/*
+ * Line plots. See plot.h for the live / static distinction.
+ *
+ * plot_draw() is one long immediate-mode function: it works out the visible x range, then the
+ * y range from the visible data, then draws grid, ticks, series and the hover read-out in that
+ * order. The PX()/PY() macros inside it convert data coordinates to screen pixels for the
+ * current frame's ranges.
+ */
+
 #include "plot.h"
 
 #include <float.h>
@@ -448,6 +466,7 @@ static float draw_header(const Plot *p, Rectangle b)
     return 0;
 }
 
+/* Draws the whole plot card into `b` and (for static plots) handles zoom / pan input. */
 void plot_draw(Plot *p, Rectangle b)
 {
     ui_card(b, NULL);

@@ -1,4 +1,13 @@
 /*
+ *****************************************************************************
+ * File: tabs.h
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: State structs and entry points for every tab.
+ *****************************************************************************
+ */
+
+/*
  * Per-tab state and entry points. Each tab lives in its own tab_*.c file.
  */
 #ifndef TABS_H

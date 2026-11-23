@@ -1,3 +1,18 @@
+/*
+ *****************************************************************************
+ * File: attitude3d.c
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: 3D drone model driven by pitch, roll and yaw.
+ *****************************************************************************
+ */
+
+/*
+ * The 3D drone view. The model is drawn into an offscreen RenderTexture each frame and that
+ * texture is then drawn inside the card, so the 3D scene is clipped to the card and can sit
+ * anywhere in the 2D layout. Orientation comes from the drone's pitch / roll / yaw.
+ */
+
 #include "attitude3d.h"
 
 #include <math.h>

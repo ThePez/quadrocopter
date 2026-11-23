@@ -1,4 +1,13 @@
 /*
+ *****************************************************************************
+ * File: store.h
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Interface for the key/value tables and the defaults files.
+ *****************************************************************************
+ */
+
+/*
  * Firmware defaults (#define constants read from the firmware's *_defaults.h)
  * and the GUI's own saved overrides (config-app/user_defaults.json - the same
  * file the Python app uses, so saved values are shared between the two).

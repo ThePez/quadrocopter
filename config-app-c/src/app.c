@@ -1,3 +1,27 @@
+/*
+ *****************************************************************************
+ * File: app.c
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Application core: connection, config acks and retries, sending, saving defaults.
+ *****************************************************************************
+ */
+
+/*
+ * Application core: everything that is not drawing.
+ *
+ *  - init / shutdown and loading the default values (firmware headers + saved overrides)
+ *  - the serial connection (connect, disconnect, port list)
+ *  - app_update(): called once per frame BEFORE drawing. It drains the telemetry thread's
+ *    queues, advances the config-ack state machine and notices a lost connection.
+ *  - the ack tracker: every config packet is expected to be answered by the device; requests
+ *    are queued per device, re-sent if unanswered, and reported through a callback.
+ *  - sending, saving defaults to user_defaults.json, and session recording control.
+ *
+ * Everything here runs on the main (UI) thread. The only other thread is the serial reader in
+ * telemetry.c; the two communicate through its mutex-protected queues.
+ */
+
 #include "app.h"
 
 #include <errno.h>
@@ -15,6 +39,9 @@ const int BAUD_RATES[4] = {9600, 115200, 230400, 460800};
 /* Init / shutdown                                                           */
 /* ------------------------------------------------------------------------ */
 
+/* Fills the three default tables the tabs read their starting values from. For each of the
+ * pid / drone / remote groups: scrape the firmware's *_defaults.h (#define NAME number), then
+ * overlay whatever the user saved earlier in user_defaults.json. */
 static void load_defaults(App *app)
 {
     struct {
@@ -50,6 +77,8 @@ static void load_defaults(App *app)
     free(ov);
 }
 
+/* Zeroes the App and initialises every tab. Call once, after the window exists (some tabs
+ * create GPU resources). `app` must be heap-allocated: it is large. */
 void app_init(App *app)
 {
     memset(app, 0, sizeof(*app));
@@ -81,6 +110,7 @@ void app_shutdown(App *app)
 /* Messages                                                                  */
 /* ------------------------------------------------------------------------ */
 
+/* printf-style line into the Console tab, prefixed with a wall-clock time. */
 void app_log(App *app, const char *fmt, ...)
 {
     char msg[LOG_LEN - 24]; /* room for the "[HH:MM:SS.mmm] " prefix */
@@ -95,6 +125,7 @@ void app_log(App *app, const char *fmt, ...)
     console_tab_add(&app->ctab, line);
 }
 
+/* printf-style error shown as a modal dialog (does not touch the Console). */
 void app_error(const char *title, const char *fmt, ...)
 {
     char msg[768];
@@ -131,6 +162,8 @@ void app_refresh_ports(App *app)
     }
 }
 
+/* Opens the selected port and starts the reader thread. On any failure nothing is left open and
+ * the user is told why. */
 void app_connect(App *app)
 {
     if (app->nports == 0) {
@@ -164,6 +197,9 @@ void app_connect(App *app)
 
 static void ack_fail_all(App *app);
 
+/* Safe to call when already disconnected. Order matters: the reader thread is joined BEFORE the
+ * fd is closed, otherwise it could read from a closed (or reused) descriptor. Also stops any
+ * recording and fails every pending config request. */
 void app_disconnect(App *app)
 {
     if (!app->connected && !app->tel) {
@@ -192,6 +228,7 @@ void app_disconnect(App *app)
 /* Per-frame update                                                          */
 /* ------------------------------------------------------------------------ */
 
+/* One decoded telemetry sample, on the main thread. */
 static void handle_sample(App *app, const Sample *s)
 {
     /* Recording takes every packet, whatever the plots are doing. */
@@ -226,6 +263,14 @@ static void open_dropped_session(App *app)
 /* Config acks                                                               */
 /* ------------------------------------------------------------------------ */
 
+/* ---- Ack tracking -----------------------------------------------------------------------
+ * A request goes: queued -> in flight (written to the port, timer running) -> finished.
+ * It finishes when the matching ack arrives (ok / rejected), when the retries run out, when the
+ * write fails, or when the connection drops. Finishing calls the request's AckDone callback.
+ *
+ * One request per device may be in flight. The ack carries no request id, only its type, so
+ * allowing two at once would make it impossible to tell which one an ack answered.
+ */
 enum {
     CH_PID,
     CH_DRONE,
@@ -241,7 +286,9 @@ typedef struct {
     int attempts;
 } AckRule;
 
-/* Saving writes flash on the device, so it gets a longer wait and fewer repeats. */
+/* Which channel a packet id belongs to and how patient to be. Returns false for packets that are
+ * not tracked (sent fire-and-forget). Saving writes flash on the device, so it gets a longer
+ * wait and fewer repeats. */
 static bool ack_rule(uint8_t id, AckRule *r)
 {
     switch (id) {
@@ -341,6 +388,8 @@ static void ack_pump(App *app, AckChannel *c)
     }
 }
 
+/* An ack arrived from the bridge: complete the request in flight on its channel, then start the
+ * next queued one. Acks with nothing in flight (late duplicates) are ignored. */
 static void handle_ack(App *app, const AckEvent *ev)
 {
     for (int ch = 0; ch < ACK_CHANNELS; ch++) {
@@ -373,6 +422,8 @@ static void handle_ack(App *app, const AckEvent *ev)
     }
 }
 
+/* Per-frame timer work for every channel: re-send a request whose ack is overdue, give up when it
+ * is out of tries, and start queued requests. */
 static void ack_tick(App *app)
 {
     for (int ch = 0; ch < ACK_CHANNELS; ch++) {
@@ -427,6 +478,7 @@ static void ack_fail_all(App *app)
     memset(app->ack, 0, sizeof(app->ack));
 }
 
+/* The per-frame "model" step; the drawing code runs after it. Safe to call when disconnected. */
 void app_update(App *app)
 {
     if (app->tel) {
@@ -466,6 +518,9 @@ void app_update(App *app)
 /* Sending / saving                                                          */
 /* ------------------------------------------------------------------------ */
 
+/* See app.h for the contract. Internally: untracked packet ids are written straight away;
+ * tracked ones become an AckRequest that is started now if the device's channel is idle and
+ * otherwise appended to that channel's queue. */
 bool app_send_then(App *app, uint8_t id, const void *payload, size_t len, AckDone done,
                    const void *user, size_t user_len)
 {
@@ -538,6 +593,9 @@ bool app_send(App *app, uint8_t id, const void *payload, size_t len)
     return app_send_then(app, id, payload, len, NULL, NULL, 0);
 }
 
+/* Read-modify-write of user_defaults.json: the file is re-read first so edits made by anything
+ * else are kept. If the file exists but cannot be parsed nothing is written (so it is never
+ * clobbered). The live table is only updated once the file write succeeded. */
 bool app_save_defaults(App *app, const char *section, const KVSet *updates, KVSet *live)
 {
     Overrides *ov = malloc(sizeof(*ov));

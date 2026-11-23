@@ -1,3 +1,22 @@
+/*
+ *****************************************************************************
+ * File: telemetry.c
+ * Author: Claude (Anthropic)
+ * Date: 20-11-2026
+ * Brief: Serial reader thread and hand-off of decoded samples and acks to the UI.
+ *****************************************************************************
+ */
+
+/*
+ * The serial reader thread and its hand-off to the UI.
+ *
+ *   reader thread:  read() -> decoder_feed() -> on_frame()/on_ack() -> push into ring buffers
+ *   main thread:    telemetry_poll() / telemetry_poll_acks() -> pop from the ring buffers
+ *
+ * One mutex guards both ring buffers and the "lost" flag. The buffers are fixed-size; if the UI
+ * stalls the oldest entries are dropped rather than blocking the reader or growing memory.
+ */
+
 #include "telemetry.h"
 
 #include <errno.h>
@@ -95,6 +114,8 @@ static void on_ack(const struct wifi_packet_t *pkt, void *ctx)
     pthread_mutex_unlock(&t->mutex);
 }
 
+/* Thread body. read() has a 100 ms timeout (set in uart_open) so the loop notices `running`
+ * going false promptly; a real read error marks the link lost and ends the thread. */
 static void *reader_main(void *arg)
 {
     Telemetry *t = arg;
