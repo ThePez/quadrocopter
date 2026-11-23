@@ -10,8 +10,7 @@
 /*
  * Session recording (CSV out) and loading (CSV in).
  *
- * Same file format as config-app/session_recorder.py, so sessions recorded by
- * either app open in either viewer:
+ * File format (one line per sample, plus event marks):
  *
  *   # started,2026-11-10T14:03:22
  *   time_s,pitch_angle,roll_angle,...

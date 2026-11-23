@@ -73,7 +73,6 @@ monitor-esc-program port=default_port: _idf-check
         monitor
 
 # Desktop config app: live telemetry, PID tuning and session recording.
-# gui-c is the C app (raylib), gui-py is the Python (PyQt) one.
 gui-c:
     make -C config-app-c run
 
@@ -82,6 +81,3 @@ gui-c-build:
 
 gui-c-clean:
     make -C config-app-c clean
-
-gui-py:
-    cd config-app && python3 main.py

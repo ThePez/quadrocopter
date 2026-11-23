@@ -194,9 +194,8 @@ Where a field's initial value comes from, in order:
    `libs/pid/pid_defaults.h`, `drone/main/drone_defaults.h` and `remote/main/remote_defaults.h`
    into a `KVSet` (a small name -> double table). Numeric literals and references to earlier
    numeric macros work; anything else is skipped.
-2. **Saved overrides.** `config-app/user_defaults.json` (`{ "section": { "KEY": number } }`), merged
-   on top with `kv_merge`. The `config-app/` folder is the old Python app's; only this JSON file is
-   still used.
+2. **Saved overrides.** `config-app-c/user_defaults.json` (`{ "section": { "KEY": number } }`, git-ignored),
+   merged on top with `kv_merge`. It is created the first time you save something.
 
 This means: **adding a `#define` to a firmware defaults header makes it available to the GUI with
 no parsing code**. Tabs read it with `kv_get(&app->drone_defaults, "NAME", fallback)`.
@@ -286,7 +285,7 @@ Tabs are registered in three places: `enum MainTab` (app.h), `NAV_LABELS` and th
 
 ## 10. Recording and sessions (`recorder.c`, `tab_session.c`)
 
-CSV format (also readable by the old Python viewer):
+CSV format:
 
 ```
 # started,2026-11-22T11:19:34

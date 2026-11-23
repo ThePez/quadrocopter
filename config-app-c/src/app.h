@@ -33,7 +33,7 @@
 #endif
 
 #define SESSIONS_DIR       APP_DIR "/sessions"
-#define USER_DEFAULTS_PATH REPO_DIR "/config-app/user_defaults.json"
+#define USER_DEFAULTS_PATH APP_DIR "/user_defaults.json"
 
 #define BAUD_LIST_TEXT "9600;115200;230400;460800"
 extern const int BAUD_RATES[4];
@@ -163,7 +163,7 @@ bool app_send_then(App *app, uint8_t id, const void *payload, size_t len, AckDon
                    const void *user, size_t user_len);
 
 /* Merges `updates` into the given section of user_defaults.json (re-reading
- * the file first so edits by the Python app aren't lost) and into `live`. */
+ * the file first so edits made outside the app aren't lost) and into `live`. */
 bool app_save_defaults(App *app, const char *section, const KVSet *updates, KVSet *live);
 
 /* ---- Session recording ---- */

@@ -18,7 +18,7 @@
 
 #include "protocol.h"
 
-/* Column order matches the session CSV files (and the Python recorder). */
+/* Column order matches the session CSV files. */
 enum Field {
     F_PITCH_ANGLE,
     F_ROLL_ANGLE,

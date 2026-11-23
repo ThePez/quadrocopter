@@ -1,8 +1,8 @@
 # config-app-c
 
 Desktop GUI for tuning and monitoring the quadcopter over the bridge's USB serial link, built with
-raylib + raygui. It replaces the old PyQt `config-app/`, which is retired; the only thing still
-shared with it is the saved-values file `config-app/user_defaults.json` (and the session CSV format).
+raylib + raygui. Values you save from the app are kept in `config-app-c/user_defaults.json`
+(git-ignored, created on first save); everything else starts from the firmware's `*_defaults.h`.
 
 **Working on the code? Read [DEVELOPING.md](DEVELOPING.md)**: how the immediate-mode UI works, the
 frame loop, the ack/retry system, and step-by-step recipes for common changes.
@@ -40,7 +40,7 @@ folders, so it doesn't affect this one.
 
 | File | Role |
 |---|---|
-| `libs/espnow-comm/protocol.h` | Packet structs + enum shared with the firmware (replaces `parser.py`/`layout.py`/`constants.py`) |
+| `libs/espnow-comm/protocol.h` | Packet structs + enum shared with the firmware |
 | `src/uart.c` | Serial port, CRC16, frame decoder, config-packet encoder |
 | `src/telemetry.c` | Reader thread + sample queue |
 | `src/store.c` | `#define` scraper for firmware defaults, `user_defaults.json` read/write |
@@ -78,7 +78,7 @@ Each config packet is expected to be answered by the device it was sent to:
 - No ack within 0.6 s (1.5 s for a save) re-sends the packet: 3 tries for an update, 2 for a save.
 - The result shows at the bottom of the sidebar for a few seconds and is written to the Console.
 
-## Differences from the Python app
+## Using the app
 
 - The session viewer is a mode inside the main window (Telemetry tab, "Open
   Session..."), not a separate window. You can also drop a `.csv` on the window.

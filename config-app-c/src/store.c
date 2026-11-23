@@ -354,8 +354,7 @@ static int cmp_sec(const void *a, const void *b)
 
 int overrides_save(const Overrides *o, const char *path, char *err, size_t errlen)
 {
-    /* Sorted like json.dump(sort_keys=True) so the Python app and this one
-     * produce near-identical files. */
+    /* Sections and keys are written sorted, so the file is stable and diffs stay small. */
     Overrides *sorted = malloc(sizeof(*sorted));
     if (!sorted) {
         snprintf(err, errlen, "out of memory");

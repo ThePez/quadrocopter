@@ -8,7 +8,7 @@
  */
 
 /*
- * Drone config / PID tuning GUI (raylib + raygui port of config-app/).
+ * Drone config / PID tuning GUI (raylib + raygui).
  *
  * main.c owns the window and the sidebar (connection + navigation); each page
  * lives in its tab_*.c file and fills the content area to the right.

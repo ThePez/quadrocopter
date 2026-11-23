@@ -9,8 +9,7 @@
 
 /*
  * Firmware defaults (#define constants read from the firmware's *_defaults.h)
- * and the GUI's own saved overrides (config-app/user_defaults.json - the same
- * file the Python app uses, so saved values are shared between the two).
+ * and the GUI's own saved overrides (config-app-c/user_defaults.json, git-ignored).
  */
 #ifndef STORE_H
 #define STORE_H

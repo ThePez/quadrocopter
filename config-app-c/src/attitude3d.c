@@ -22,7 +22,7 @@
 #include "ui.h"
 
 /*
- * Scene axes (same as the Python app): X = right, Y = forward (nose), Z = up.
+ * Scene axes: X = right, Y = forward (nose), Z = up.
  * raylib is Y-up with -Z forward, so scene (x, y, z) is drawn at (x, z, -y).
  */
 typedef struct {

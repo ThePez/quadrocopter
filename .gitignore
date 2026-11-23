@@ -11,8 +11,6 @@ compile_commands.json
 gen_compile_commands.py
 **/__pycache__
 **/build-esc-program
-config-app/regex-help-file.txt
-config-app/user_defaults.json
-config-app/sessions/
 
 config-app-c/sessions/
+config-app-c/user_defaults.json
